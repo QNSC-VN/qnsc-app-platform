@@ -1,4 +1,6 @@
-# Lint · typecheck · test · build on every PR and push to main.
+# Lint · typecheck · test · secret-scan on every PR and push to main.
+# Job names are the status-check contexts required by the branch ruleset,
+# matching the QNSC-VN/rally convention.
 name: CI
 
 on:
@@ -15,8 +17,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: lint · typecheck · test · build
+  lint:
+    name: Lint & typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -34,18 +36,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test
       - run: pnpm build
 
-  commitlint:
-    name: commitlint (PR)
-    if: github.event_name == 'pull_request'
+  test:
+    name: Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -57,5 +55,38 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - name: Validate PR commit messages
-        run: pnpm commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
+      - run: pnpm test
+
+  pr-title:
+    name: PR title (conventional commits)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$PR_TITLE" | pnpm commitlint --verbose
+
+  secret-scan:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: QNSC-VN/qnsc-ci/actions/scan-secrets@v1
