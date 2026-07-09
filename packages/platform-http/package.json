@@ -1,7 +1,7 @@
 {
   "name": "@qnsc/platform-http",
   "version": "0.0.0",
-  "description": "Shared Fastify/NestJS HTTP bootstrap (CORS, cookies, error codes, OTel) for QNSC product backends.",
+  "description": "Shared NestJS/Fastify HTTP contract (error taxonomy, global exception filter, cursor pagination) for QNSC product backends.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -21,5 +21,21 @@
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@nestjs/common": ">=11",
+    "@nestjs/swagger": ">=11",
+    "fastify": ">=5",
+    "nestjs-zod": ">=5",
+    "zod": ">=4"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/swagger": "^11.4.5",
+    "fastify": "^5.9.0",
+    "nestjs-zod": "^5.4.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.4.3"
   }
 }
