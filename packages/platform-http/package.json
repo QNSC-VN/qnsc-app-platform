@@ -22,10 +22,14 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "@qnsc/platform-cache": "workspace:^"
+  },
   "peerDependencies": {
     "@nestjs/common": ">=11",
     "@nestjs/swagger": ">=11",
     "fastify": ">=5",
+    "ioredis": ">=5",
     "nestjs-zod": ">=5",
     "zod": ">=4"
   },
@@ -33,6 +37,8 @@
     "@nestjs/common": "^11.0.0",
     "@nestjs/swagger": "^11.4.5",
     "fastify": "^5.9.0",
+    "ioredis": "^5.4.1",
+    "ioredis-mock": "^8.9.0",
     "nestjs-zod": "^5.4.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
