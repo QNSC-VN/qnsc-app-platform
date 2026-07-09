@@ -1,0 +1,25 @@
+{
+  "name": "@qnsc/identity",
+  "version": "0.0.0",
+  "description": "Shared identity/auth for QNSC product backends: JWT, refresh rotation, CSRF, SSO/Entra, BFF session handlers.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QNSC-VN/qnsc-app-platform.git",
+    "directory": "packages/identity"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

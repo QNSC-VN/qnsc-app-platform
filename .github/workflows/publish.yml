@@ -1,0 +1,57 @@
+# Publishes a single package to GitHub Packages when release-please pushes a
+# "<component>-v<version>" tag (e.g. platform-cache-v1.0.0). The component maps
+# 1:1 to a directory under packages/.
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'identity-v*'
+      - 'platform-cache-v*'
+      - 'platform-http-v*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: publish to GitHub Packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+          scope: '@qnsc'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Build the whole workspace so inter-package type deps resolve in order.
+      - run: pnpm build
+
+      - name: Resolve package directory from tag
+        id: pkg
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          component="${tag%-v*}"
+          dir="packages/${component}"
+          if [ ! -d "$dir" ]; then
+            echo "::error::No package directory for tag '$tag' (expected $dir)"
+            exit 1
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        run: pnpm --filter "./${{ steps.pkg.outputs.dir }}" publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

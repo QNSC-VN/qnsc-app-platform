@@ -1,0 +1,25 @@
+{
+  "name": "@qnsc/platform-cache",
+  "version": "0.0.0",
+  "description": "Shared Valkey/Redis cache service (ioredis wrapper) for QNSC product backends.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QNSC-VN/qnsc-app-platform.git",
+    "directory": "packages/platform-cache"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

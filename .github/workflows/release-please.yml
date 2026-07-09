@@ -1,0 +1,21 @@
+# Auto-creates per-package "chore(release): <component> <version>" PRs on every
+# main push, then tags "<component>-v<version>" when merged. The tag triggers
+# publish.yml. Reuses the shared workflow from QNSC-VN/qnsc-ci.
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    uses: QNSC-VN/qnsc-ci/.github/workflows/release-please.yml@v1
+    with:
+      config_file: release-please-config.json
+      manifest_file: .release-please-manifest.json
+    secrets:
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
