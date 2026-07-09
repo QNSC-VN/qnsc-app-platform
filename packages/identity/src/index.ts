@@ -1,14 +1,17 @@
 /**
  * `@qnsc/identity`
  *
- * Shared identity/auth for QNSC product backends: JWT (ES256) strategy and
- * guards, single-use refresh-token rotation with family theft-detection, CSRF,
- * SSO/Entra token validation, and the BFF (Backend-For-Frontend) session
- * handlers that the products converge on.
- *
- * The concrete implementation is extracted from the product repos in **Phase 2**
- * of the Identity Platform Migration Plan, and the BFF handlers are added behind
- * a feature flag in later phases. This Phase 1 skeleton exists to establish the
- * publishable package and its release pipeline.
+ * Shared identity/auth primitives for QNSC product backends: the ES256 JWT
+ * Passport strategy, the JWT auth guard (with Valkey denylist checks), the
+ * wildcard-aware permission guard, and the auth decorators. Refresh rotation,
+ * SSO/Entra and the BFF session handlers follow in later phases.
  */
-export const PACKAGE_NAME = '@qnsc/identity';
+export * from './jwt-payload';
+export * from './jwt-options';
+export * from './jwt.strategy';
+export * from './auth-context';
+export * from './jwt.guard';
+export * from './permissions';
+export * from './permission.guard';
+export * from './metadata';
+export * from './decorators';
