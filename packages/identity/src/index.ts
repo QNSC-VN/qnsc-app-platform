@@ -24,3 +24,4 @@ export * from './service-ports';
 export * from './transaction-runner';
 export * from './auth-options';
 export * from './access-token';
+export * from './auth.service';
