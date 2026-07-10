@@ -5,9 +5,9 @@
  * via the ports/tokens in this package: repository ports, service ports, the
  * transaction runner, the Entra verifier, and {@link AuthServiceOptions}.
  *
- * This slice covers the **login** paths — SSO (Entra ID) and dev-login — plus
- * the just-in-time SSO provisioning they share. Refresh rotation, logout, and
- * workspace switching follow in later slices.
+ * This slice covers the **login** paths — SSO (Entra ID) and dev-login — the
+ * just-in-time SSO provisioning they share, and **refresh-token rotation** with
+ * single-use theft detection. Logout and workspace switching follow next.
  *
  * Note: rally's `@Span(...)` tracing decorators are intentionally omitted — they
  * are product observability infrastructure, not auth behaviour.
@@ -16,12 +16,13 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'node:crypto';
 import { uuidv7 } from 'uuidv7';
+import { ValkeyService } from '@qnsc/platform-cache';
 import { UnauthorizedException } from '@qnsc/platform-http';
 import { signAccessToken } from './access-token';
-import { generateRefreshToken, parseTtlSeconds } from './refresh-token';
+import { generateRefreshToken, hashToken, parseTtlSeconds } from './refresh-token';
 import { AUTH_SERVICE_OPTIONS, type AuthServiceOptions } from './auth-options';
 import { EntraTokenVerifier } from './entra-verifier';
-import type { User } from './domain-types';
+import type { AuthSession, User } from './domain-types';
 import {
   AUTH_SESSION_REPOSITORY,
   SSO_CONNECTION_REPOSITORY,
@@ -44,6 +45,23 @@ import { TRANSACTION_RUNNER, type ITransactionRunner } from './transaction-runne
 /** Fallback refresh-token lifetime when `jwtRefreshExpiry` is unparseable (30 days). */
 const REMEMBER_ME_TTL_SECONDS = 30 * 24 * 60 * 60;
 
+/**
+ * How long a successful refresh-token rotation result is cached (keyed by the
+ * consumed token's hash) so a benign concurrent/retried reuse — multiple tabs,
+ * a retried request after a lost response, React StrictMode — can replay the
+ * same successor tokens instead of tripping single-use theft detection. Kept
+ * short so a genuinely stolen, long-dormant token is still caught.
+ */
+const REFRESH_ROTATION_GRACE_SECONDS = 30;
+
+/**
+ * Internal signal used to roll back a rotation transaction when the atomic
+ * compare-and-swap revoke is lost to a concurrent refresh.
+ */
+class RotationLostError extends Error {}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 export interface LoginResult {
   accessToken: string;
   refreshToken: string;
@@ -52,6 +70,13 @@ export interface LoginResult {
   user: Pick<User, 'id' | 'email' | 'displayName' | 'avatarUrl' | 'locale' | 'timezone'>;
   /** All active workspace memberships, most-recently-active first. Drives the workspace switcher. */
   memberships: WorkspaceMembership[];
+}
+
+export interface RefreshResult {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  csrfToken: string;
 }
 
 @Injectable()
@@ -69,7 +94,214 @@ export class AuthService {
     @Inject(AUTH_SERVICE_OPTIONS) private readonly options: AuthServiceOptions,
     @Inject(JwtService) private readonly jwt: JwtService,
     @Inject(EntraTokenVerifier) private readonly entraVerifier: EntraTokenVerifier,
+    @Inject(ValkeyService) private readonly valkey: ValkeyService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // Refresh
+  // ---------------------------------------------------------------------------
+
+  async refresh(
+    rawRefreshToken: string,
+    csrfToken: string | null,
+    ipAddress?: string,
+  ): Promise<RefreshResult> {
+    const tokenHash = hashToken(rawRefreshToken);
+    const session = await this.sessionRepo.findByTokenHash(tokenHash);
+
+    if (!session) {
+      throw new UnauthorizedException('AUTH_TOKEN_INVALID', 'Refresh token not found');
+    }
+
+    // The token has already been rotated. This is not automatically theft —
+    // multiple tabs, a retried request after a lost response, or React
+    // StrictMode can all legitimately replay a single-use token. Replay the
+    // cached successor tokens when the reuse is benign; escalate to family
+    // revocation only when we are confident it is malicious.
+    if (session.isRevoked) {
+      return this.replayOrDetectTheft(tokenHash, session, csrfToken, { concurrentLoss: false });
+    }
+
+    if (session.expiresAt < new Date()) {
+      throw new UnauthorizedException('AUTH_TOKEN_EXPIRED', 'Refresh token has expired');
+    }
+
+    const user = await this.userRepo.findById(session.userId);
+    // Suspended/inactive accounts must not receive new access tokens.
+    if (!user || user.deletedAt || user.status === 'suspended' || user.status === 'inactive') {
+      throw new UnauthorizedException('USER_DEACTIVATED', 'User not found or deactivated');
+    }
+
+    // Enforce CSRF for sessions that carry a token (all sessions post-migration).
+    // Sessions without csrfToken are pre-migration; allow once, new session gets one.
+    if (session.csrfToken !== null) {
+      if (!csrfToken || csrfToken !== session.csrfToken) {
+        throw new UnauthorizedException('AUTH_TOKEN_INVALID', 'CSRF token mismatch');
+      }
+    }
+
+    // Revoke old session and issue new tokens (rotation).
+    const newSessionId = uuidv7();
+    // Preserve the auth method across rotations so the frontend knows which
+    // refresh path to use (MSAL silent re-auth for SSO vs Rally-only for password).
+    const authMethod: 'password' | 'sso' = session.ssoProvider ? 'sso' : 'password';
+    const { permissions } = await this.accessService.getUserRoleAndPermissions(
+      user.id,
+      session.workspaceId,
+    );
+    const { accessToken, expiresIn } = signAccessToken(
+      (payload) => this.jwt.sign(payload),
+      this.options.jwtAccessExpiry,
+      {
+        userId: user.id,
+        workspaceId: session.workspaceId,
+        sessionId: newSessionId,
+        permissions,
+        authMethod,
+      },
+    );
+    const { refreshToken: newRefreshToken, tokenHash: newHash } = generateRefreshToken();
+
+    const refreshExpiry = new Date();
+    refreshExpiry.setSeconds(refreshExpiry.getSeconds() + this.refreshTtlSeconds());
+
+    const newCsrfToken = randomBytes(32).toString('hex');
+
+    const result: RefreshResult = {
+      accessToken,
+      refreshToken: newRefreshToken,
+      expiresIn,
+      csrfToken: newCsrfToken,
+    };
+
+    // Atomic single-use rotation (compare-and-swap): only one concurrent request
+    // may flip is_revoked false→true for this session. The loser must NOT create
+    // a second live session (that would defeat single-use) — it replays the
+    // winner's cached result instead. Wrapped in a tx so the revoke and the
+    // new-session insert commit together or not at all.
+    let rotationWon = true;
+    try {
+      await this.txRunner.transaction(async (tx) => {
+        const won = await this.sessionRepo.revokeByIdIfActive(session.id, tx);
+        if (!won) {
+          rotationWon = false;
+          throw new RotationLostError();
+        }
+        await this.sessionRepo.create(
+          {
+            id: newSessionId,
+            workspaceId: session.workspaceId,
+            userId: user.id,
+            tokenHash: newHash,
+            familyId: session.familyId, // preserve family for revocation chain
+            ipAddress,
+            expiresAt: refreshExpiry,
+            ssoProvider: session.ssoProvider ?? undefined, // carry SSO provider forward
+            csrfToken: newCsrfToken,
+          },
+          tx,
+        );
+      });
+    } catch (err) {
+      if (!(err instanceof RotationLostError)) throw err;
+    }
+
+    if (!rotationWon) {
+      // A concurrent refresh rotated first — replay its result idempotently
+      // rather than issuing a competing session or flagging false theft.
+      return this.replayOrDetectTheft(tokenHash, session, csrfToken, { concurrentLoss: true });
+    }
+
+    // Cache the rotation result under the consumed token's hash so a benign
+    // concurrent/retried reuse replays these exact tokens. Best-effort: a cache
+    // write failure must not fail the refresh itself.
+    try {
+      await this.valkey.storeRotationGrace(
+        tokenHash,
+        JSON.stringify(result),
+        REFRESH_ROTATION_GRACE_SECONDS,
+      );
+    } catch (err) {
+      this.logger.warn({ err, sessionId: session.id }, 'Failed to cache rotation grace entry');
+    }
+
+    return result;
+  }
+
+  /**
+   * Handle a refresh whose token has already been rotated. Returns the cached
+   * successor tokens when the reuse is benign (within the grace window), or
+   * escalates to family revocation (theft) only when we are confident the reuse
+   * is malicious.
+   *
+   * @param concurrentLoss `true` when we lost the atomic rotation CAS (so a
+   *   sibling request definitely rotated first — never theft); `false` when the
+   *   token was already revoked when we read it (benign replay *or* theft).
+   */
+  private async replayOrDetectTheft(
+    tokenHash: string,
+    session: AuthSession,
+    csrfToken: string | null,
+    { concurrentLoss }: { concurrentLoss: boolean },
+  ): Promise<RefreshResult> {
+    // CSRF still applies to the replayed response (the revoked session carries
+    // the CSRF token the benign client is replaying with).
+    if (session.csrfToken !== null && (!csrfToken || csrfToken !== session.csrfToken)) {
+      throw new UnauthorizedException('AUTH_TOKEN_INVALID', 'CSRF token mismatch');
+    }
+
+    let cached: string | null;
+    try {
+      // A concurrent winner may not have written its grace entry yet, so poll
+      // briefly on the CAS-loss path. A sequential replay needs no polling — the
+      // entry, if any, is already present.
+      cached = await this.waitForGrace(tokenHash, concurrentLoss ? 6 : 1);
+    } catch (err) {
+      // Cache unavailable — we cannot prove theft, so fail safe WITHOUT nuking
+      // the family (a Valkey blip must never mass-logout every session).
+      this.logger.warn({ err, familyId: session.familyId }, 'Rotation grace lookup failed');
+      throw new UnauthorizedException('AUTH_TOKEN_INVALID', 'Session refresh unavailable, retry');
+    }
+
+    if (cached) {
+      return JSON.parse(cached) as RefreshResult;
+    }
+
+    if (concurrentLoss) {
+      // We KNOW a sibling request rotated this session (we lost the CAS), so this
+      // is not theft even though the grace entry is missing/expired. Ask the
+      // client to retry with the freshly-set cookie instead of revoking.
+      throw new UnauthorizedException('AUTH_TOKEN_INVALID', 'Refresh rotated concurrently, retry');
+    }
+
+    // Genuine reuse of a token rotated outside the grace window → treat as
+    // session theft and revoke the entire family (session hijacking prevention).
+    await this.sessionRepo.revokeFamily(session.familyId);
+    this.logger.warn(
+      { sessionId: session.id, familyId: session.familyId },
+      'Refresh token reuse detected — revoking entire family',
+    );
+    // Audit trail for security incident detection (SOC 2 CC6.8).
+    void this.audit.record({
+      workspaceId: session.workspaceId,
+      actorId: session.userId,
+      action: 'auth.token_theft_detected',
+      resourceType: 'session',
+      resourceId: session.familyId,
+      metadata: { familyId: session.familyId },
+    });
+    throw new UnauthorizedException('AUTH_REFRESH_TOKEN_REUSE', 'Refresh token has been revoked');
+  }
+
+  /** Poll the rotation grace cache up to `tries` times (25ms apart). */
+  private async waitForGrace(tokenHash: string, tries: number): Promise<string | null> {
+    for (let attempt = 0; attempt < tries; attempt++) {
+      const value = await this.valkey.getRotationGrace(tokenHash);
+      if (value) return value;
+      if (attempt < tries - 1) await sleep(25);
+    }
+    return null;
+  }
 
   // ---------------------------------------------------------------------------
   // SSO login — Microsoft Entra ID (OIDC)

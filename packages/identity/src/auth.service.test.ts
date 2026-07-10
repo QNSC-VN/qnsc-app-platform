@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { UnauthorizedException } from '@qnsc/platform-http';
 import { AuthService, type LoginResult } from './auth.service';
 import type { AuthServiceOptions } from './auth-options';
-import type { User } from './domain-types';
+import type { AuthSession, User } from './domain-types';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +34,22 @@ const baseOptions: AuthServiceOptions = {
   nodeEnv: 'test',
 };
 
+function makeSession(overrides: Partial<AuthSession> = {}): AuthSession {
+  return {
+    id: 'sess-1',
+    workspaceId: 'ws-1',
+    userId: 'user-1',
+    tokenHash: 'hash',
+    familyId: 'fam-1',
+    isRevoked: false,
+    expiresAt: new Date('2999-01-01T00:00:00Z'),
+    createdAt: now,
+    ssoProvider: null,
+    csrfToken: 'csrf-1',
+    ...overrides,
+  };
+}
+
 function buildService(opts?: {
   options?: Partial<AuthServiceOptions>;
   claims?: { oid: string; email: string; displayName: string; externalTenantId: string | null };
@@ -47,6 +63,13 @@ function buildService(opts?: {
     jitEnabled: boolean;
     defaultRoleSlug?: string;
   } | null;
+  session?: Partial<AuthSession> | null;
+  /** Result of the atomic compare-and-swap revoke (rotation winner = true). */
+  revokeWon?: boolean;
+  /** Cached rotation-grace payload returned by Valkey (null = miss). */
+  graceValue?: string | null;
+  /** When set, `getRotationGrace` rejects to simulate a cache outage. */
+  graceThrows?: boolean;
 }) {
   const userRepo = {
     findByEmail: vi.fn(async () => opts?.user ?? null),
@@ -55,7 +78,14 @@ function buildService(opts?: {
     upsertBySsoIdentity: vi.fn(async () => opts?.user ?? makeUser()),
     updateLastLogin: vi.fn(async () => {}),
   };
-  const sessionRepo = { create: vi.fn(async () => {}) };
+  const sessionRepo = {
+    create: vi.fn(async () => {}),
+    findByTokenHash: vi.fn(async () => (opts?.session === undefined ? null : opts.session)),
+    revokeByIdIfActive: vi.fn(async () => opts?.revokeWon ?? true),
+    revokeById: vi.fn(async () => {}),
+    revokeFamily: vi.fn(async () => {}),
+    revokeAllForUser: vi.fn(async () => {}),
+  };
   const ssoConnectionRepo = {
     findByExternalTenantId: vi.fn(async () => opts?.connection ?? null),
   };
@@ -73,6 +103,14 @@ function buildService(opts?: {
   };
   const audit = { record: vi.fn(async () => {}) };
   const jwt = { sign: vi.fn(() => 'signed.jwt') };
+  const valkey = {
+    denylistToken: vi.fn(async () => {}),
+    storeRotationGrace: vi.fn(async () => {}),
+    getRotationGrace: vi.fn(async () => {
+      if (opts?.graceThrows) throw new Error('valkey down');
+      return opts?.graceValue ?? null;
+    }),
+  };
   const entraVerifier = {
     verify: vi.fn(
       async () =>
@@ -96,6 +134,7 @@ function buildService(opts?: {
     { ...baseOptions, ...opts?.options },
     jwt as never,
     entraVerifier as never,
+    valkey as never,
   );
 
   return {
@@ -109,6 +148,7 @@ function buildService(opts?: {
     audit,
     jwt,
     entraVerifier,
+    valkey,
   };
 }
 
@@ -286,5 +326,128 @@ describe('AuthService.devLogin', () => {
     await expect(h.service.devLogin('alice@acme.test')).rejects.toMatchObject({
       code: 'ACCOUNT_DEACTIVATED',
     });
+  });
+});
+
+describe('AuthService.refresh', () => {
+  it('rejects an unknown refresh token', async () => {
+    const h = buildService({ session: undefined });
+    await expect(h.service.refresh('raw', 'csrf-1')).rejects.toMatchObject({
+      code: 'AUTH_TOKEN_INVALID',
+    });
+  });
+
+  it('rejects an expired session', async () => {
+    const h = buildService({
+      session: makeSession({ expiresAt: new Date('2000-01-01T00:00:00Z') }),
+      user: makeUser(),
+    });
+    await expect(h.service.refresh('raw', 'csrf-1')).rejects.toMatchObject({
+      code: 'AUTH_TOKEN_EXPIRED',
+    });
+  });
+
+  it('rejects a deactivated user', async () => {
+    const h = buildService({ session: makeSession(), user: makeUser({ status: 'inactive' }) });
+    await expect(h.service.refresh('raw', 'csrf-1')).rejects.toMatchObject({
+      code: 'USER_DEACTIVATED',
+    });
+  });
+
+  it('rejects a CSRF token mismatch', async () => {
+    const h = buildService({ session: makeSession({ csrfToken: 'expected' }), user: makeUser() });
+    await expect(h.service.refresh('raw', 'wrong')).rejects.toMatchObject({
+      code: 'AUTH_TOKEN_INVALID',
+    });
+  });
+
+  it('rotates the session on a valid refresh and caches the grace entry', async () => {
+    const h = buildService({ session: makeSession(), user: makeUser(), revokeWon: true });
+    const result = await h.service.refresh('raw', 'csrf-1');
+
+    expect(result.accessToken).toBe('signed.jwt');
+    expect(result.refreshToken).toEqual(expect.any(String));
+    expect(result.csrfToken).toEqual(expect.any(String));
+    // CAS revoke + new session insert both ran inside the rotation transaction.
+    expect(h.sessionRepo.revokeByIdIfActive).toHaveBeenCalledWith('sess-1', expect.anything());
+    expect(h.sessionRepo.create).toHaveBeenCalledTimes(1);
+    const createdSession = h.sessionRepo.create.mock.calls[0][0] as { familyId: string };
+    expect(createdSession.familyId).toBe('fam-1'); // family preserved for revocation chain
+    expect(h.valkey.storeRotationGrace).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the SSO auth method across rotation', async () => {
+    const h = buildService({
+      session: makeSession({ ssoProvider: 'entra' }),
+      user: makeUser(),
+      revokeWon: true,
+    });
+    await h.service.refresh('raw', 'csrf-1');
+    const signedPayload = h.jwt.sign.mock.calls[0][0] as { authMethod: string };
+    expect(signedPayload.authMethod).toBe('sso');
+  });
+
+  it('replays the cached successor tokens on a benign revoked-token reuse', async () => {
+    const cached = JSON.stringify({
+      accessToken: 'cached.jwt',
+      refreshToken: 'cached.refresh',
+      expiresIn: 900,
+      csrfToken: 'cached.csrf',
+    });
+    const h = buildService({
+      session: makeSession({ isRevoked: true }),
+      user: makeUser(),
+      graceValue: cached,
+    });
+    const result = await h.service.refresh('raw', 'csrf-1');
+    expect(result.accessToken).toBe('cached.jwt');
+    expect(h.sessionRepo.revokeFamily).not.toHaveBeenCalled();
+  });
+
+  it('revokes the whole family on a revoked-token reuse outside the grace window', async () => {
+    const h = buildService({
+      session: makeSession({ isRevoked: true }),
+      user: makeUser(),
+      graceValue: null,
+    });
+    await expect(h.service.refresh('raw', 'csrf-1')).rejects.toMatchObject({
+      code: 'AUTH_REFRESH_TOKEN_REUSE',
+    });
+    expect(h.sessionRepo.revokeFamily).toHaveBeenCalledWith('fam-1');
+    expect(h.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'auth.token_theft_detected' }),
+    );
+  });
+
+  it('fails safe without revoking the family when the grace cache is unavailable', async () => {
+    const h = buildService({
+      session: makeSession({ isRevoked: true }),
+      user: makeUser(),
+      graceThrows: true,
+    });
+    await expect(h.service.refresh('raw', 'csrf-1')).rejects.toMatchObject({
+      code: 'AUTH_TOKEN_INVALID',
+    });
+    expect(h.sessionRepo.revokeFamily).not.toHaveBeenCalled();
+  });
+
+  it('replays instead of competing when it loses the rotation CAS', async () => {
+    const cached = JSON.stringify({
+      accessToken: 'winner.jwt',
+      refreshToken: 'winner.refresh',
+      expiresIn: 900,
+      csrfToken: 'winner.csrf',
+    });
+    const h = buildService({
+      session: makeSession(),
+      user: makeUser(),
+      revokeWon: false,
+      graceValue: cached,
+    });
+    const result = await h.service.refresh('raw', 'csrf-1');
+    expect(result.accessToken).toBe('winner.jwt');
+    // The CAS loser must not persist a second competing session.
+    expect(h.sessionRepo.create).not.toHaveBeenCalled();
+    expect(h.sessionRepo.revokeFamily).not.toHaveBeenCalled();
   });
 });
