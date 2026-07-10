@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v3.0.0...identity-v4.0.0) (2026-07-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** consumers must install @qnsc-vn/platform-http (>=2.0.0) and @qnsc-vn/platform-cache (>=1.0.0) directly.
+
+### ✨ Features
+
+* **identity:** make platform-http and platform-cache peer dependencies ([1741221](https://github.com/QNSC-VN/qnsc-app-platform/commit/1741221417e6d9ef49af892717e20bc2c84188e9))
+
 ## [3.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v2.0.0...identity-v3.0.0) (2026-07-10)
 
 
