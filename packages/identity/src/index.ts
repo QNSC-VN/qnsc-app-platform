@@ -4,8 +4,9 @@
  * Shared identity/auth primitives for QNSC product backends: the ES256 JWT
  * Passport strategy, the JWT auth guard (with Valkey denylist checks), the
  * wildcard-aware permission guard, the auth decorators, Entra/SSO token
- * verification, and refresh-token crypto. The full refresh-rotation auth
- * service and the BFF session handlers follow in later phases.
+ * verification, and refresh-token crypto, the refresh-rotation auth service,
+ * and the cookie-based auth HTTP controller. The BFF session handlers follow
+ * in later phases.
  */
 export * from './jwt-payload';
 export * from './jwt-options';
@@ -25,3 +26,5 @@ export * from './transaction-runner';
 export * from './auth-options';
 export * from './access-token';
 export * from './auth.service';
+export * from './auth.dto';
+export * from './auth.controller';
