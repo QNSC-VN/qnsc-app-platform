@@ -42,13 +42,14 @@ export class PermissionGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
     const user = request.user;
 
-    if (!user?.permissions?.length) {
+    const permissions = user?.claims?.permissions;
+    if (!Array.isArray(permissions) || permissions.length === 0) {
       this.logger.warn({ requiredPermission }, 'PermissionGuard: no permissions in JWT');
       throw new ForbiddenException('Insufficient permissions');
     }
 
-    if (!this.checker(user.permissions, requiredPermission)) {
-      this.logger.warn({ userId: user.sub, requiredPermission }, 'PermissionGuard: access denied');
+    if (!this.checker(permissions as string[], requiredPermission)) {
+      this.logger.warn({ userId: user?.sub, requiredPermission }, 'PermissionGuard: access denied');
       throw new ForbiddenException('Insufficient permissions');
     }
 

@@ -24,7 +24,8 @@ import { PermissionGuard } from './permission.guard';
  * - The persistence port bindings — `USER_REPOSITORY`, `AUTH_SESSION_REPOSITORY`,
  *   `SSO_CONNECTION_REPOSITORY`, `TRANSACTION_RUNNER`.
  * - The collaborator services — `ACCESS_SERVICE`, `WORKSPACE_SERVICE`,
- *   `AUDIT_SERVICE`, and the `AUTH_CONTEXT` adapter.
+ *   `AUDIT_SERVICE`, the `CLAIMS_PROVIDER` (the product's authorization-claims
+ *   adapter), and the `AUTH_CONTEXT` adapter.
  * - The option tokens — `AUTH_SERVICE_OPTIONS`, `JWT_STRATEGY_OPTIONS`,
  *   `ENTRA_VERIFIER_OPTIONS`.
  * - `JwtService` (via `JwtModule`) and `ValkeyService` (via `CacheModule`).

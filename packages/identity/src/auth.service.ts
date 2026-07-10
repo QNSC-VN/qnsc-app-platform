@@ -21,6 +21,7 @@ import { uuidv7 } from 'uuidv7';
 import { ValkeyService } from '@qnsc-vn/platform-cache';
 import { NotFoundException, UnauthorizedException } from '@qnsc-vn/platform-http';
 import { signAccessToken } from './access-token';
+import { CLAIMS_PROVIDER, type IClaimsProvider, type ProductClaims } from './claims-provider';
 import { generateRefreshToken, hashToken, parseTtlSeconds } from './refresh-token';
 import { AUTH_SERVICE_OPTIONS, type AuthServiceOptions } from './auth-options';
 import { EntraTokenVerifier } from './entra-verifier';
@@ -100,6 +101,7 @@ export class AuthService {
     @Inject(SSO_CONNECTION_REPOSITORY) private readonly ssoConnectionRepo: ISsoConnectionRepository,
     @Inject(TRANSACTION_RUNNER) private readonly txRunner: ITransactionRunner,
     @Inject(ACCESS_SERVICE) private readonly accessService: IAccessService,
+    @Inject(CLAIMS_PROVIDER) private readonly claimsProvider: IClaimsProvider,
     @Inject(WORKSPACE_SERVICE) private readonly workspaceService: IWorkspaceService,
     @Inject(AUDIT_SERVICE) private readonly audit: IAuditService,
     @Inject(AUTH_SERVICE_OPTIONS) private readonly options: AuthServiceOptions,
@@ -156,10 +158,7 @@ export class AuthService {
     // Preserve the auth method across rotations so the frontend knows which
     // refresh path to use (MSAL silent re-auth for SSO vs Rally-only for password).
     const authMethod: 'password' | 'sso' = session.ssoProvider ? 'sso' : 'password';
-    const { permissions } = await this.accessService.getUserRoleAndPermissions(
-      user.id,
-      session.workspaceId,
-    );
+    const claims = await this.claimsProvider.getClaims(user.id, session.workspaceId);
     const { accessToken, expiresIn } = signAccessToken(
       (payload) => this.jwt.sign(payload),
       this.options.jwtAccessExpiry,
@@ -167,7 +166,7 @@ export class AuthService {
         userId: user.id,
         workspaceId: session.workspaceId,
         sessionId: newSessionId,
-        permissions,
+        claims,
         authMethod,
       },
     );
@@ -395,10 +394,7 @@ export class AuthService {
       throw new UnauthorizedException('USER_DEACTIVATED', 'User not found or deactivated');
     }
 
-    const { permissions } = await this.accessService.getUserRoleAndPermissions(
-      user.id,
-      targetWorkspaceId,
-    );
+    const claims = await this.claimsProvider.getClaims(user.id, targetWorkspaceId);
 
     const newSessionId = uuidv7();
     // Preserve the auth method across workspace switches so the frontend keeps
@@ -411,7 +407,7 @@ export class AuthService {
         userId: user.id,
         workspaceId: targetWorkspaceId,
         sessionId: newSessionId,
-        permissions,
+        claims,
         authMethod: switchAuthMethod,
       },
     );
@@ -539,15 +535,12 @@ export class AuthService {
       }
     }
 
-    const { permissions } = await this.accessService.getUserRoleAndPermissions(
-      user.id,
-      ssoWorkspaceId,
-    );
+    const claims = await this.claimsProvider.getClaims(user.id, ssoWorkspaceId);
     const session = await this.createSession({
       user,
       workspaceId: ssoWorkspaceId,
       authMethod: 'sso',
-      permissions,
+      claims,
       ipAddress,
       ssoProvider: 'entra',
     });
@@ -609,17 +602,14 @@ export class AuthService {
       );
     }
 
-    const { permissions } = await this.accessService.getUserRoleAndPermissions(
-      user.id,
-      workspaceId,
-    );
+    const claims = await this.claimsProvider.getClaims(user.id, workspaceId);
     // authMethod 'password' (not SSO) so the SPA uses plain cookie-based refresh
     // instead of an MSAL silent re-auth for these local sessions.
     const session = await this.createSession({
       user,
       workspaceId,
       authMethod: 'password',
-      permissions,
+      claims,
       ipAddress,
     });
 
@@ -768,7 +758,7 @@ export class AuthService {
     user: User;
     workspaceId: string;
     authMethod: 'password' | 'sso';
-    permissions: string[];
+    claims: ProductClaims;
     ipAddress?: string;
     ssoProvider?: string;
   }): Promise<{
@@ -787,7 +777,7 @@ export class AuthService {
         userId: params.user.id,
         workspaceId: params.workspaceId,
         sessionId,
-        permissions: params.permissions,
+        claims: params.claims,
         authMethod: params.authMethod,
       },
     );

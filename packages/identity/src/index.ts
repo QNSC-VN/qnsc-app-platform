@@ -22,6 +22,7 @@ export * from './refresh-token';
 export * from './domain-types';
 export * from './repository-ports';
 export * from './service-ports';
+export * from './claims-provider';
 export * from './transaction-runner';
 export * from './auth-options';
 export * from './access-token';

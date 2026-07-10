@@ -30,7 +30,7 @@ describe('signAccessToken', () => {
       userId: 'u1',
       workspaceId: 'w1',
       sessionId: 's1',
-      permissions: ['project:read'],
+      claims: { permissions: ['project:read'] },
       authMethod: 'sso',
     });
 
@@ -45,7 +45,7 @@ describe('signAccessToken', () => {
       workspaceId: 'w1',
       sessionId: 's1',
       jti: result.jti,
-      permissions: ['project:read'],
+      claims: { permissions: ['project:read'] },
       authMethod: 'sso',
     });
   });
@@ -56,14 +56,14 @@ describe('signAccessToken', () => {
       userId: 'u',
       workspaceId: 'w',
       sessionId: 's',
-      permissions: [],
+      claims: {},
       authMethod: 'password',
     });
     const b = signAccessToken(sign, '900', {
       userId: 'u',
       workspaceId: 'w',
       sessionId: 's',
-      permissions: [],
+      claims: {},
       authMethod: 'password',
     });
     expect(a.jti).not.toBe(b.jti);

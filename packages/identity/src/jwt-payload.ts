@@ -1,3 +1,5 @@
+import type { ProductClaims } from './claims-provider';
+
 /**
  * Decoded access-token claims attached to `request.user` after JWT verification.
  */
@@ -12,11 +14,12 @@ export interface JwtPayload {
   iat: number;
   exp: number;
   /**
-   * Effective permission codes for this user, embedded at token-mint time.
-   * Refreshed on every token rotation so stale permissions are bounded by
-   * the access-token TTL (default 15 min).
+   * Product-defined authorization claims embedded at token-mint time, sourced
+   * from the product's {@link IClaimsProvider} (rally: `{ permissions }`,
+   * opshub: `{ roles }`). Refreshed on every token rotation so stale claims are
+   * bounded by the access-token TTL (default 15 min).
    */
-  permissions: string[];
+  claims: ProductClaims;
   /**
    * How the session was originally established.
    * 'sso': via Entra ID — frontend must re-validate with MSAL on each refresh cycle.
