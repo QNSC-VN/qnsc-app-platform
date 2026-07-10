@@ -27,7 +27,12 @@ export interface User {
 
 export interface AuthSession {
   id: string;
-  workspaceId: string;
+  /**
+   * Authorization context scope for the session. Multi-tenant products (rally)
+   * store the active workspace id here; single-tenant products (opshub) use
+   * `null`. Opaque to the core.
+   */
+  contextId: string | null;
   userId: string;
   tokenHash: string;
   familyId: string;
@@ -42,7 +47,8 @@ export interface AuthSession {
 
 export interface CreateSessionInput {
   id: string;
-  workspaceId: string;
+  /** Authorization context scope; workspace id for multi-tenant products, `null` otherwise. */
+  contextId: string | null;
   userId: string;
   tokenHash: string;
   familyId: string;

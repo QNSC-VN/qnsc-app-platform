@@ -53,7 +53,7 @@ describe('domain type shapes', () => {
   it('AuthSession and SsoConnection carry the expected discriminating fields', () => {
     const session: AuthSession = {
       id: 's1',
-      workspaceId: 'w1',
+      contextId: 'w1',
       userId: 'u1',
       tokenHash: 'h',
       familyId: 'f1',

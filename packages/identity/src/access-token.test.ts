@@ -28,7 +28,7 @@ describe('signAccessToken', () => {
 
     const result = signAccessToken(sign, '15m', {
       userId: 'u1',
-      workspaceId: 'w1',
+      contextId: 'w1',
       sessionId: 's1',
       claims: { permissions: ['project:read'] },
       authMethod: 'sso',
@@ -42,7 +42,7 @@ describe('signAccessToken', () => {
     const payload = sign.mock.calls[0][0];
     expect(payload).toEqual({
       sub: 'u1',
-      workspaceId: 'w1',
+      contextId: 'w1',
       sessionId: 's1',
       jti: result.jti,
       claims: { permissions: ['project:read'] },
@@ -54,14 +54,14 @@ describe('signAccessToken', () => {
     const sign = vi.fn(() => 't');
     const a = signAccessToken(sign, '900', {
       userId: 'u',
-      workspaceId: 'w',
+      contextId: 'w',
       sessionId: 's',
       claims: {},
       authMethod: 'password',
     });
     const b = signAccessToken(sign, '900', {
       userId: 'u',
-      workspaceId: 'w',
+      contextId: 'w',
       sessionId: 's',
       claims: {},
       authMethod: 'password',

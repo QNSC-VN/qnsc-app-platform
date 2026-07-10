@@ -4,7 +4,7 @@
  * provides an adapter; {@link JwtAuthGuard} calls it after a token verifies.
  */
 export interface AuthContextSetter {
-  setAuthContext(workspaceId: string, userId: string, sessionId: string): void;
+  setAuthContext(contextId: string | null, userId: string, sessionId: string): void;
 }
 
 /** DI token for the {@link AuthContextSetter}. */

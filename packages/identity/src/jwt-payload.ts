@@ -6,7 +6,12 @@ import type { ProductClaims } from './claims-provider';
 export interface JwtPayload {
   /** Subject = userId */
   sub: string;
-  workspaceId: string;
+  /**
+   * Authorization context scope carried in the token. For a multi-tenant product
+   * (rally) this is the active workspace id; for a single-tenant product (opshub)
+   * it is `null`. The core treats it as an opaque scope — products interpret it.
+   */
+  contextId: string | null;
   sessionId: string;
   jti: string;
   iss: string;

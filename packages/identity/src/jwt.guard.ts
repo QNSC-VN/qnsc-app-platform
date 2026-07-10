@@ -12,7 +12,7 @@ import { AUTH_CONTEXT, type AuthContextSetter } from './auth-context';
 /**
  * JWT auth guard.
  * Verifies the Bearer access token, then populates request context with
- * workspaceId / userId / sessionId so downstream scoping works correctly.
+ * contextId / userId / sessionId so downstream scoping works correctly.
  * Also checks the access-token denylist in Valkey (set on logout).
  *
  * Pair with @Public() decorator to opt-out individual routes.
@@ -62,7 +62,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     return true;
   }
 
-  handleRequest<TUser extends { sub: string; workspaceId: string; sessionId: string }>(
+  handleRequest<TUser extends { sub: string; contextId: string | null; sessionId: string }>(
     err: Error | null,
     user: TUser | false,
   ): TUser {
@@ -78,7 +78,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     }
 
     // Populate request context after successful token verification
-    this.ctx.setAuthContext(user.workspaceId, user.sub, user.sessionId);
+    this.ctx.setAuthContext(user.contextId, user.sub, user.sessionId);
 
     return user;
   }
