@@ -27,6 +27,7 @@
   },
   "peerDependencies": {
     "@nestjs/common": ">=11",
+    "@nestjs/core": ">=11",
     "@nestjs/swagger": ">=11",
     "fastify": ">=5",
     "ioredis": ">=5",
@@ -35,6 +36,7 @@
   },
   "devDependencies": {
     "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
     "@nestjs/swagger": "^11.4.5",
     "fastify": "^5.9.0",
     "ioredis": "^5.4.1",
