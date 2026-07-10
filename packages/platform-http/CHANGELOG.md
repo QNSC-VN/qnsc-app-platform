@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v1.0.1...platform-http-v2.0.0) (2026-07-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **platform-http:** root-level flat pagination exports (buildPageResult, encodeCursor, PageQuerySchema, ...) are relocated under the cursorPagination namespace; import them via cursorPagination.*.
+
+### ✨ Features
+
+* **platform-http:** expose cursor and offset pagination as namespaces ([8cf96dc](https://github.com/QNSC-VN/qnsc-app-platform/commit/8cf96dcee6ca0189a5674e9c05f28a5f21d07122))
+
 ## [1.0.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v1.0.0...platform-http-v1.0.1) (2026-07-10)
 
 
