@@ -6,8 +6,9 @@
  * transaction runner, the Entra verifier, and {@link AuthServiceOptions}.
  *
  * This slice covers the **login** paths — SSO (Entra ID) and dev-login — the
- * just-in-time SSO provisioning they share, and **refresh-token rotation** with
- * single-use theft detection. Logout and workspace switching follow next.
+ * just-in-time SSO provisioning they share, **refresh-token rotation** with
+ * single-use theft detection, and session teardown: **logout**, **logout-all**,
+ * and **workspace switching**.
  *
  * Note: rally's `@Span(...)` tracing decorators are intentionally omitted — they
  * are product observability infrastructure, not auth behaviour.
@@ -23,6 +24,7 @@ import { generateRefreshToken, hashToken, parseTtlSeconds } from './refresh-toke
 import { AUTH_SERVICE_OPTIONS, type AuthServiceOptions } from './auth-options';
 import { EntraTokenVerifier } from './entra-verifier';
 import type { AuthSession, User } from './domain-types';
+import type { JwtPayload } from './jwt-payload';
 import {
   AUTH_SESSION_REPOSITORY,
   SSO_CONNECTION_REPOSITORY,
@@ -301,6 +303,159 @@ export class AuthService {
       if (attempt < tries - 1) await sleep(25);
     }
     return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Logout
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Log out of the current session: denylist the access token until its natural
+   * expiry (so a stolen-but-unexpired token is rejected) and revoke the refresh
+   * session in the DB.
+   */
+  async logout(payload: JwtPayload): Promise<void> {
+    const now = Math.floor(Date.now() / 1000);
+    const ttl = Math.max(payload.exp - now, 0);
+
+    await Promise.all([
+      // Denylist the access token until it would have expired anyway.
+      ttl > 0 ? this.valkey.denylistToken(payload.jti, ttl) : Promise.resolve(),
+      // Revoke the refresh session in the DB.
+      this.sessionRepo.revokeById(payload.sessionId),
+    ]);
+
+    this.logger.log({ userId: payload.sub, jti: payload.jti }, 'User logged out');
+
+    void this.audit.record({
+      workspaceId: payload.workspaceId,
+      actorId: payload.sub,
+      action: 'auth.logout',
+      resourceType: 'session',
+      resourceId: payload.sessionId,
+      metadata: { jti: payload.jti },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Logout all devices
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Log out of every session for the user: denylist the current access token and
+   * revoke all of the user's refresh sessions across devices.
+   */
+  async logoutAll(payload: JwtPayload): Promise<void> {
+    const now = Math.floor(Date.now() / 1000);
+    const ttl = Math.max(payload.exp - now, 0);
+
+    await Promise.all([
+      ttl > 0 ? this.valkey.denylistToken(payload.jti, ttl) : Promise.resolve(),
+      this.sessionRepo.revokeAllForUser(payload.sub),
+    ]);
+
+    this.logger.log({ userId: payload.sub }, 'User logged out from all devices');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Switch workspace
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Issue a fresh token pair scoped to `targetWorkspaceId`, provided the caller
+   * has an active membership there. The old access token is denylisted and the
+   * old session revoked, and a new session is created — all atomically — so a
+   * workspace switch cannot leave two live sessions or a usable stale token.
+   */
+  async switchWorkspace(
+    payload: JwtPayload,
+    targetWorkspaceId: string,
+    ipAddress?: string,
+  ): Promise<RefreshResult> {
+    // The caller must be an active member of the target workspace.
+    const keycard = await this.workspaceService.getMembership(payload.sub, targetWorkspaceId);
+    if (!keycard || keycard.status !== 'active') {
+      throw new UnauthorizedException(
+        'WORKSPACE_ACCESS_DENIED',
+        'You are not a member of this workspace',
+      );
+    }
+
+    const user = await this.userRepo.findById(payload.sub);
+    if (!user || user.deletedAt || user.status === 'suspended' || user.status === 'inactive') {
+      throw new UnauthorizedException('USER_DEACTIVATED', 'User not found or deactivated');
+    }
+
+    const { permissions } = await this.accessService.getUserRoleAndPermissions(
+      user.id,
+      targetWorkspaceId,
+    );
+
+    const newSessionId = uuidv7();
+    // Preserve the auth method across workspace switches so the frontend keeps
+    // using the correct refresh path (MSAL silent re-auth for SSO).
+    const switchAuthMethod: 'password' | 'sso' = payload.authMethod ?? 'password';
+    const { accessToken, jti, expiresIn } = signAccessToken(
+      (p) => this.jwt.sign(p),
+      this.options.jwtAccessExpiry,
+      {
+        userId: user.id,
+        workspaceId: targetWorkspaceId,
+        sessionId: newSessionId,
+        permissions,
+        authMethod: switchAuthMethod,
+      },
+    );
+    const { refreshToken, tokenHash, familyId } = generateRefreshToken();
+
+    const refreshExpiry = new Date();
+    refreshExpiry.setSeconds(refreshExpiry.getSeconds() + this.refreshTtlSeconds());
+
+    const csrfToken = randomBytes(32).toString('hex');
+
+    // Denylist the old access token + revoke the old session + create the new
+    // session atomically.
+    const now = Math.floor(Date.now() / 1000);
+    const ttl = Math.max(payload.exp - now, 0);
+
+    await Promise.all([
+      ttl > 0 ? this.valkey.denylistToken(payload.jti, ttl) : Promise.resolve(),
+      this.txRunner.transaction(async (tx) => {
+        await this.sessionRepo.revokeById(payload.sessionId, tx);
+        await this.sessionRepo.create(
+          {
+            id: newSessionId,
+            workspaceId: targetWorkspaceId,
+            userId: user.id,
+            tokenHash,
+            familyId,
+            ipAddress,
+            expiresAt: refreshExpiry,
+            csrfToken,
+          },
+          tx,
+        );
+      }),
+    ]);
+
+    this.logger.log(
+      { userId: user.id, jti, sessionId: newSessionId, targetWorkspaceId },
+      'Workspace switched',
+    );
+
+    void this.workspaceService.touchMembership(user.id, targetWorkspaceId);
+    void this.audit.record({
+      workspaceId: targetWorkspaceId,
+      actorId: user.id,
+      actorEmail: user.email,
+      action: 'auth.switch_workspace',
+      resourceType: 'session',
+      resourceId: newSessionId,
+      ipAddress,
+      metadata: { fromWorkspaceId: payload.workspaceId, toWorkspaceId: targetWorkspaceId },
+    });
+
+    return { accessToken, refreshToken, expiresIn, csrfToken };
   }
 
   // ---------------------------------------------------------------------------
