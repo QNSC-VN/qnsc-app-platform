@@ -24,12 +24,14 @@
   },
   "dependencies": {
     "@qnsc/platform-cache": "workspace:^",
+    "@qnsc/platform-http": "workspace:^",
     "jose": "^6.2.3",
     "uuidv7": "^1.2.1"
   },
   "peerDependencies": {
     "@nestjs/common": ">=11",
     "@nestjs/core": ">=11",
+    "@nestjs/jwt": ">=11",
     "@nestjs/passport": ">=11",
     "@nestjs/swagger": ">=11",
     "passport": ">=0.7",
@@ -38,6 +40,7 @@
   "devDependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
+    "@nestjs/jwt": "^11.0.0",
     "@nestjs/passport": "^11.0.0",
     "@nestjs/swagger": "^11.4.5",
     "@types/jsonwebtoken": "^9.0.10",
