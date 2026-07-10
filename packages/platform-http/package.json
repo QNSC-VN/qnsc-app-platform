@@ -1,6 +1,6 @@
 {
   "name": "@qnsc/platform-http",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Shared NestJS/Fastify HTTP contract (error taxonomy, global exception filter, cursor pagination) for QNSC product backends.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
