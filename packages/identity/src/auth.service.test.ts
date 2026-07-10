@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { UnauthorizedException } from '@qnsc/platform-http';
+import { NotFoundException, UnauthorizedException } from '@qnsc/platform-http';
 import { AuthService, type LoginResult } from './auth.service';
 import type { AuthServiceOptions } from './auth-options';
 import type { AuthSession, User } from './domain-types';
@@ -95,6 +95,10 @@ function buildService(opts?: {
     findSsoIdentity: vi.fn(async () => opts?.existingIdentity ?? null),
     upsertBySsoIdentity: vi.fn(async () => opts?.user ?? makeUser()),
     updateLastLogin: vi.fn(async () => {}),
+    updateProfile: vi.fn(async (_id: string, input: Partial<User>) => ({
+      ...(opts?.user ?? makeUser()),
+      ...input,
+    })),
   };
   const sessionRepo = {
     create: vi.fn(async () => {}),
@@ -552,5 +556,39 @@ describe('AuthService.switchWorkspace', () => {
     await h.service.switchWorkspace(makePayload({ authMethod: 'sso' }), 'ws-2');
     const signedPayload = h.jwt.sign.mock.calls[0][0] as { authMethod: string };
     expect(signedPayload.authMethod).toBe('sso');
+  });
+});
+
+describe('AuthService.getMe', () => {
+  it('returns the authenticated user profile', async () => {
+    const user = makeUser();
+    const h = buildService({ user });
+    await expect(h.service.getMe('user-1')).resolves.toMatchObject({ id: 'user-1' });
+  });
+
+  it('throws NotFoundException for a missing user', async () => {
+    const h = buildService({ user: null });
+    await expect(h.service.getMe('ghost')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('throws NotFoundException for a soft-deleted user', async () => {
+    const h = buildService({ user: makeUser({ deletedAt: now }) });
+    await expect(h.service.getMe('user-1')).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
+  });
+});
+
+describe('AuthService.updateProfile', () => {
+  it('updates and returns the profile', async () => {
+    const h = buildService({ user: makeUser() });
+    const result = await h.service.updateProfile('user-1', { displayName: 'Alice B.' });
+    expect(h.userRepo.updateProfile).toHaveBeenCalledWith('user-1', { displayName: 'Alice B.' });
+    expect(result.displayName).toBe('Alice B.');
+  });
+
+  it('throws NotFoundException when the user does not exist', async () => {
+    const h = buildService({ user: null });
+    await expect(h.service.updateProfile('ghost', { locale: 'fr' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

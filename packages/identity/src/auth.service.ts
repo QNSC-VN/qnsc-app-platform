@@ -7,8 +7,9 @@
  *
  * This slice covers the **login** paths — SSO (Entra ID) and dev-login — the
  * just-in-time SSO provisioning they share, **refresh-token rotation** with
- * single-use theft detection, and session teardown: **logout**, **logout-all**,
- * and **workspace switching**.
+ * single-use theft detection, session teardown (**logout**, **logout-all**,
+ * **workspace switching**), and the authenticated user's own **profile**
+ * (get/update).
  *
  * Note: rally's `@Span(...)` tracing decorators are intentionally omitted — they
  * are product observability infrastructure, not auth behaviour.
@@ -18,7 +19,7 @@ import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'node:crypto';
 import { uuidv7 } from 'uuidv7';
 import { ValkeyService } from '@qnsc/platform-cache';
-import { UnauthorizedException } from '@qnsc/platform-http';
+import { NotFoundException, UnauthorizedException } from '@qnsc/platform-http';
 import { signAccessToken } from './access-token';
 import { generateRefreshToken, hashToken, parseTtlSeconds } from './refresh-token';
 import { AUTH_SERVICE_OPTIONS, type AuthServiceOptions } from './auth-options';
@@ -79,6 +80,14 @@ export interface RefreshResult {
   refreshToken: string;
   expiresIn: number;
   csrfToken: string;
+}
+
+/** Mutable profile fields a user may edit via `PATCH /auth/me`. */
+export interface UpdateProfileInput {
+  displayName?: string;
+  avatarUrl?: string | null;
+  locale?: string;
+  timezone?: string;
 }
 
 @Injectable()
@@ -718,6 +727,28 @@ export class AuthService {
     if (!allowedDomains || allowedDomains.length === 0) return true;
     const domain = email.slice(email.lastIndexOf('@') + 1).toLowerCase();
     return allowedDomains.some((d) => d.toLowerCase().trim() === domain);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Profile
+  // ---------------------------------------------------------------------------
+
+  /** Fetch the authenticated user's own profile. */
+  async getMe(userId: string): Promise<User> {
+    const user = await this.userRepo.findById(userId);
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('USER_NOT_FOUND', 'User not found');
+    }
+    return user;
+  }
+
+  /** Update the authenticated user's own editable profile fields. */
+  async updateProfile(userId: string, input: UpdateProfileInput): Promise<User> {
+    const user = await this.userRepo.findById(userId);
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('USER_NOT_FOUND', 'User not found');
+    }
+    return this.userRepo.updateProfile(userId, input);
   }
 
   // ---------------------------------------------------------------------------
