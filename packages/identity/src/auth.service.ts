@@ -158,13 +158,13 @@ export class AuthService {
     // Preserve the auth method across rotations so the frontend knows which
     // refresh path to use (MSAL silent re-auth for SSO vs Rally-only for password).
     const authMethod: 'password' | 'sso' = session.ssoProvider ? 'sso' : 'password';
-    const claims = await this.claimsProvider.getClaims(user.id, session.workspaceId);
+    const claims = await this.claimsProvider.getClaims(user.id, session.contextId);
     const { accessToken, expiresIn } = signAccessToken(
       (payload) => this.jwt.sign(payload),
       this.options.jwtAccessExpiry,
       {
         userId: user.id,
-        workspaceId: session.workspaceId,
+        contextId: session.contextId,
         sessionId: newSessionId,
         claims,
         authMethod,
@@ -200,7 +200,7 @@ export class AuthService {
         await this.sessionRepo.create(
           {
             id: newSessionId,
-            workspaceId: session.workspaceId,
+            contextId: session.contextId,
             userId: user.id,
             tokenHash: newHash,
             familyId: session.familyId, // preserve family for revocation chain
@@ -293,7 +293,7 @@ export class AuthService {
     );
     // Audit trail for security incident detection (SOC 2 CC6.8).
     void this.audit.record({
-      workspaceId: session.workspaceId,
+      workspaceId: session.contextId ?? '',
       actorId: session.userId,
       action: 'auth.token_theft_detected',
       resourceType: 'session',
@@ -336,7 +336,7 @@ export class AuthService {
     this.logger.log({ userId: payload.sub, jti: payload.jti }, 'User logged out');
 
     void this.audit.record({
-      workspaceId: payload.workspaceId,
+      workspaceId: payload.contextId ?? '',
       actorId: payload.sub,
       action: 'auth.logout',
       resourceType: 'session',
@@ -405,7 +405,7 @@ export class AuthService {
       this.options.jwtAccessExpiry,
       {
         userId: user.id,
-        workspaceId: targetWorkspaceId,
+        contextId: targetWorkspaceId,
         sessionId: newSessionId,
         claims,
         authMethod: switchAuthMethod,
@@ -430,7 +430,7 @@ export class AuthService {
         await this.sessionRepo.create(
           {
             id: newSessionId,
-            workspaceId: targetWorkspaceId,
+            contextId: targetWorkspaceId,
             userId: user.id,
             tokenHash,
             familyId,
@@ -457,7 +457,7 @@ export class AuthService {
       resourceType: 'session',
       resourceId: newSessionId,
       ipAddress,
-      metadata: { fromWorkspaceId: payload.workspaceId, toWorkspaceId: targetWorkspaceId },
+      metadata: { fromWorkspaceId: payload.contextId, toWorkspaceId: targetWorkspaceId },
     });
 
     return { accessToken, refreshToken, expiresIn, csrfToken };
@@ -538,7 +538,7 @@ export class AuthService {
     const claims = await this.claimsProvider.getClaims(user.id, ssoWorkspaceId);
     const session = await this.createSession({
       user,
-      workspaceId: ssoWorkspaceId,
+      contextId: ssoWorkspaceId,
       authMethod: 'sso',
       claims,
       ipAddress,
@@ -607,7 +607,7 @@ export class AuthService {
     // instead of an MSAL silent re-auth for these local sessions.
     const session = await this.createSession({
       user,
-      workspaceId,
+      contextId: workspaceId,
       authMethod: 'password',
       claims,
       ipAddress,
@@ -756,7 +756,7 @@ export class AuthService {
    */
   private async createSession(params: {
     user: User;
-    workspaceId: string;
+    contextId: string | null;
     authMethod: 'password' | 'sso';
     claims: ProductClaims;
     ipAddress?: string;
@@ -775,7 +775,7 @@ export class AuthService {
       this.options.jwtAccessExpiry,
       {
         userId: params.user.id,
-        workspaceId: params.workspaceId,
+        contextId: params.contextId,
         sessionId,
         claims: params.claims,
         authMethod: params.authMethod,
@@ -792,7 +792,7 @@ export class AuthService {
       await this.sessionRepo.create(
         {
           id: sessionId,
-          workspaceId: params.workspaceId,
+          contextId: params.contextId,
           userId: params.user.id,
           tokenHash,
           familyId,

@@ -38,7 +38,7 @@ const baseOptions: AuthServiceOptions = {
 function makeSession(overrides: Partial<AuthSession> = {}): AuthSession {
   return {
     id: 'sess-1',
-    workspaceId: 'ws-1',
+    contextId: 'ws-1',
     userId: 'user-1',
     tokenHash: 'hash',
     familyId: 'fam-1',
@@ -54,7 +54,7 @@ function makeSession(overrides: Partial<AuthSession> = {}): AuthSession {
 function makePayload(overrides: Partial<JwtPayload> = {}): JwtPayload {
   return {
     sub: 'user-1',
-    workspaceId: 'ws-1',
+    contextId: 'ws-1',
     sessionId: 'sess-1',
     jti: 'jti-1',
     iss: 'rally',
@@ -538,7 +538,7 @@ describe('AuthService.switchWorkspace', () => {
   it('issues a new token pair, revokes the old session, and denylists the old token', async () => {
     const h = buildService({ membership: { status: 'active' }, user: makeUser() });
     const result = await h.service.switchWorkspace(
-      makePayload({ jti: 'old-jti', sessionId: 'old-sess', workspaceId: 'ws-1' }),
+      makePayload({ jti: 'old-jti', sessionId: 'old-sess', contextId: 'ws-1' }),
       'ws-2',
       '10.0.0.1',
     );
@@ -548,8 +548,8 @@ describe('AuthService.switchWorkspace', () => {
     expect(result.csrfToken).toEqual(expect.any(String));
     expect(h.valkey.denylistToken).toHaveBeenCalledWith('old-jti', expect.any(Number));
     expect(h.sessionRepo.revokeById).toHaveBeenCalledWith('old-sess', expect.anything());
-    const createdSession = h.sessionRepo.create.mock.calls[0][0] as { workspaceId: string };
-    expect(createdSession.workspaceId).toBe('ws-2');
+    const createdSession = h.sessionRepo.create.mock.calls[0][0] as { contextId: string };
+    expect(createdSession.contextId).toBe('ws-2');
     expect(h.workspaceService.touchMembership).toHaveBeenCalledWith('user-1', 'ws-2');
     expect(h.audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'auth.switch_workspace' }),

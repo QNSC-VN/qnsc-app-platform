@@ -279,7 +279,7 @@ export class AuthController {
   async getMe(@CurrentUser() user: JwtPayload): Promise<UserProfileResponseDto> {
     const [profile, { role, permissions }, memberships] = await Promise.all([
       this.authService.getMe(user.sub),
-      this.accessService.getUserRoleAndPermissions(user.sub, user.workspaceId),
+      this.accessService.getUserRoleAndPermissions(user.sub, user.contextId ?? ''),
       this.workspaceService.getMemberships(user.sub),
     ]);
     return {
@@ -312,7 +312,7 @@ export class AuthController {
   ): Promise<UserProfileResponseDto> {
     const [profile, { role, permissions }, memberships] = await Promise.all([
       this.authService.updateProfile(user.sub, dto),
-      this.accessService.getUserRoleAndPermissions(user.sub, user.workspaceId),
+      this.accessService.getUserRoleAndPermissions(user.sub, user.contextId ?? ''),
       this.workspaceService.getMemberships(user.sub),
     ]);
     return {

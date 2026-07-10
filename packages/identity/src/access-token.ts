@@ -39,7 +39,7 @@ export type AccessTokenClaims = Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>;
 
 export interface SignAccessTokenParams {
   userId: string;
-  workspaceId: string;
+  contextId: string | null;
   sessionId: string;
   claims: ProductClaims;
   authMethod: 'password' | 'sso';
@@ -70,7 +70,7 @@ export function signAccessToken(
   const expiresIn = parseDurationToSeconds(accessExpiry);
   const payload: AccessTokenClaims = {
     sub: params.userId,
-    workspaceId: params.workspaceId,
+    contextId: params.contextId,
     sessionId: params.sessionId,
     jti,
     claims: params.claims,

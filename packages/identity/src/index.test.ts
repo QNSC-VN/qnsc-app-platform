@@ -88,7 +88,7 @@ describe('JwtAuthGuard.handleRequest', () => {
 
   it('returns the user and populates auth context', () => {
     const { guard, setAuthContext } = makeGuard();
-    const user = { sub: 'u1', workspaceId: 'w1', sessionId: 's1' };
+    const user = { sub: 'u1', contextId: 'w1', sessionId: 's1' };
     expect(guard.handleRequest(null, user)).toBe(user);
     expect(setAuthContext).toHaveBeenCalledWith('w1', 'u1', 's1');
   });

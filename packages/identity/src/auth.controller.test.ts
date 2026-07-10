@@ -40,7 +40,7 @@ function makeRefreshResult(overrides: Partial<RefreshResult> = {}): RefreshResul
 function makePayload(overrides: Partial<JwtPayload> = {}): JwtPayload {
   return {
     sub: 'user-1',
-    workspaceId: 'ws-1',
+    contextId: 'ws-1',
     sessionId: 'sess-1',
     jti: 'jti-1',
     iss: 'rally',
