@@ -3,6 +3,7 @@ import { UnauthorizedException } from '@qnsc/platform-http';
 import { AuthService, type LoginResult } from './auth.service';
 import type { AuthServiceOptions } from './auth-options';
 import type { AuthSession, User } from './domain-types';
+import type { JwtPayload } from './jwt-payload';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -50,12 +51,29 @@ function makeSession(overrides: Partial<AuthSession> = {}): AuthSession {
   };
 }
 
+function makePayload(overrides: Partial<JwtPayload> = {}): JwtPayload {
+  return {
+    sub: 'user-1',
+    workspaceId: 'ws-1',
+    sessionId: 'sess-1',
+    jti: 'jti-1',
+    iss: 'rally',
+    aud: 'rally',
+    iat: 1_700_000_000,
+    exp: 4_100_000_000, // far future so the denylist TTL is positive
+    permissions: ['p:read'],
+    authMethod: 'password',
+    ...overrides,
+  };
+}
+
 function buildService(opts?: {
   options?: Partial<AuthServiceOptions>;
   claims?: { oid: string; email: string; displayName: string; externalTenantId: string | null };
   user?: User | null;
   existingIdentity?: { userId: string } | null;
   memberships?: Array<{ workspaceId: string }>;
+  membership?: { status: string } | null;
   connection?: {
     workspaceId: string;
     status: string;
@@ -97,7 +115,7 @@ function buildService(opts?: {
   };
   const workspaceService = {
     getMemberships: vi.fn(async () => opts?.memberships ?? [{ workspaceId: 'ws-1' }]),
-    getMembership: vi.fn(async () => null),
+    getMembership: vi.fn(async () => opts?.membership ?? null),
     touchMembership: vi.fn(async () => {}),
     enrollMember: vi.fn(async () => {}),
   };
@@ -449,5 +467,90 @@ describe('AuthService.refresh', () => {
     // The CAS loser must not persist a second competing session.
     expect(h.sessionRepo.create).not.toHaveBeenCalled();
     expect(h.sessionRepo.revokeFamily).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.logout', () => {
+  it('denylists the access token and revokes the session', async () => {
+    const h = buildService();
+    await h.service.logout(makePayload({ jti: 'jti-x', sessionId: 'sess-x' }));
+
+    expect(h.valkey.denylistToken).toHaveBeenCalledWith('jti-x', expect.any(Number));
+    expect(h.sessionRepo.revokeById).toHaveBeenCalledWith('sess-x');
+    expect(h.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'auth.logout', resourceId: 'sess-x' }),
+    );
+  });
+
+  it('skips the denylist when the token has already expired', async () => {
+    const h = buildService();
+    await h.service.logout(makePayload({ exp: 1 })); // long past
+
+    expect(h.valkey.denylistToken).not.toHaveBeenCalled();
+    expect(h.sessionRepo.revokeById).toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.logoutAll', () => {
+  it('denylists the access token and revokes every session for the user', async () => {
+    const h = buildService();
+    await h.service.logoutAll(makePayload({ jti: 'jti-y', sub: 'user-9' }));
+
+    expect(h.valkey.denylistToken).toHaveBeenCalledWith('jti-y', expect.any(Number));
+    expect(h.sessionRepo.revokeAllForUser).toHaveBeenCalledWith('user-9');
+  });
+});
+
+describe('AuthService.switchWorkspace', () => {
+  it('rejects when the caller is not an active member of the target workspace', async () => {
+    const h = buildService({ membership: null });
+    await expect(h.service.switchWorkspace(makePayload(), 'ws-2')).rejects.toMatchObject({
+      code: 'WORKSPACE_ACCESS_DENIED',
+    });
+  });
+
+  it('rejects a suspended membership on the target workspace', async () => {
+    const h = buildService({ membership: { status: 'suspended' } });
+    await expect(h.service.switchWorkspace(makePayload(), 'ws-2')).rejects.toMatchObject({
+      code: 'WORKSPACE_ACCESS_DENIED',
+    });
+  });
+
+  it('rejects a deactivated user', async () => {
+    const h = buildService({
+      membership: { status: 'active' },
+      user: makeUser({ status: 'inactive' }),
+    });
+    await expect(h.service.switchWorkspace(makePayload(), 'ws-2')).rejects.toMatchObject({
+      code: 'USER_DEACTIVATED',
+    });
+  });
+
+  it('issues a new token pair, revokes the old session, and denylists the old token', async () => {
+    const h = buildService({ membership: { status: 'active' }, user: makeUser() });
+    const result = await h.service.switchWorkspace(
+      makePayload({ jti: 'old-jti', sessionId: 'old-sess', workspaceId: 'ws-1' }),
+      'ws-2',
+      '10.0.0.1',
+    );
+
+    expect(result.accessToken).toBe('signed.jwt');
+    expect(result.refreshToken).toEqual(expect.any(String));
+    expect(result.csrfToken).toEqual(expect.any(String));
+    expect(h.valkey.denylistToken).toHaveBeenCalledWith('old-jti', expect.any(Number));
+    expect(h.sessionRepo.revokeById).toHaveBeenCalledWith('old-sess', expect.anything());
+    const createdSession = h.sessionRepo.create.mock.calls[0][0] as { workspaceId: string };
+    expect(createdSession.workspaceId).toBe('ws-2');
+    expect(h.workspaceService.touchMembership).toHaveBeenCalledWith('user-1', 'ws-2');
+    expect(h.audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'auth.switch_workspace' }),
+    );
+  });
+
+  it('preserves the SSO auth method across the switch', async () => {
+    const h = buildService({ membership: { status: 'active' }, user: makeUser() });
+    await h.service.switchWorkspace(makePayload({ authMethod: 'sso' }), 'ws-2');
+    const signedPayload = h.jwt.sign.mock.calls[0][0] as { authMethod: string };
+    expect(signedPayload.authMethod).toBe('sso');
   });
 });
