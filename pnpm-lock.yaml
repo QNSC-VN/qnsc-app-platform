@@ -41,12 +41,6 @@ importers:
 
   packages/identity:
     dependencies:
-      '@qnsc-vn/platform-cache':
-        specifier: workspace:^
-        version: link:../platform-cache
-      '@qnsc-vn/platform-http':
-        specifier: workspace:^
-        version: link:../platform-http
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -72,6 +66,12 @@ importers:
       '@nestjs/swagger':
         specifier: ^11.4.5
         version: 11.4.5(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.27(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)
+      '@qnsc-vn/platform-cache':
+        specifier: workspace:^
+        version: link:../platform-cache
+      '@qnsc-vn/platform-http':
+        specifier: workspace:^
+        version: link:../platform-http
       '@types/jsonwebtoken':
         specifier: ^9.0.10
         version: 9.0.10
