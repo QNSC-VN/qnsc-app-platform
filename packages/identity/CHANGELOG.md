@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v1.0.1...identity-v2.0.0) (2026-07-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** JwtPayload.workspaceId, SignAccessTokenParams.workspaceId, AuthSession.workspaceId, CreateSessionInput.workspaceId and AuthContextSetter.setAuthContext's first parameter are renamed to contextId and typed `string | null`. Consumers must rename these fields and handle null.
+* **identity:** JwtPayload.permissions is replaced by JwtPayload.claims; AuthService now requires a CLAIMS_PROVIDER binding; PermissionGuard reads claims.permissions.
+
+### ✨ Features
+
+* **identity:** add IClaimsProvider port for product-defined authz claims ([#26](https://github.com/QNSC-VN/qnsc-app-platform/issues/26)) ([c7cf7d3](https://github.com/QNSC-VN/qnsc-app-platform/commit/c7cf7d3be97957ed5dbb1a78d95cd03db9bf2f81))
+
+
+### ♻️ Refactors
+
+* **identity:** rename session/token workspaceId to nullable contextId ([#28](https://github.com/QNSC-VN/qnsc-app-platform/issues/28)) ([0efbbb3](https://github.com/QNSC-VN/qnsc-app-platform/commit/0efbbb32e7ce552bd0ba003f4000e503ec1253ae))
+
 ## [1.0.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v1.0.0...identity-v1.0.1) (2026-07-10)
 
 
