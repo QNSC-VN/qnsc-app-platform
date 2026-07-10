@@ -20,3 +20,5 @@ export * from './entra-verifier';
 export * from './refresh-token';
 export * from './domain-types';
 export * from './repository-ports';
+export * from './service-ports';
+export * from './transaction-runner';
