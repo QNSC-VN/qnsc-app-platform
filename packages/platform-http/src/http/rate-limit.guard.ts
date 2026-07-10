@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { ValkeyService } from '@qnsc/platform-cache';
+import { ValkeyService } from '@qnsc-vn/platform-cache';
 import { RateLimitedException } from '../errors';
 import {
   RATE_LIMIT_METADATA_KEY,

@@ -1,5 +1,5 @@
 /**
- * `@qnsc/platform-http`
+ * `@qnsc-vn/platform-http`
  *
  * Shared NestJS/Fastify HTTP contract for QNSC product backends: the error
  * taxonomy (DomainException + categories), the global exception filter that

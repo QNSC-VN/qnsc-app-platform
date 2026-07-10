@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
-import { UnauthorizedException } from '@qnsc/platform-http';
+import { UnauthorizedException } from '@qnsc-vn/platform-http';
 import { AuthController } from './auth.controller';
 import type { AuthService, LoginResult, RefreshResult } from './auth.service';
 import type { IAccessService, IWorkspaceService } from './service-ports';

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Inject, Patch, Post, Req, Res } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { RateLimit, UnauthorizedException } from '@qnsc/platform-http';
+import { RateLimit, UnauthorizedException } from '@qnsc-vn/platform-http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import '@fastify/cookie';
 import { AuthService } from './auth.service';

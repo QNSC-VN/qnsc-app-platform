@@ -13,22 +13,22 @@ product's `libs/`.
 
 ## Packages
 
-| Package                                           | Purpose                                                                                                | Tag prefix          |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------- |
-| [`@qnsc/identity`](packages/identity)             | Auth service, refresh rotation, CSRF, JWT strategy, guards, SSO/Entra validation, BFF session handlers | `identity-v*`       |
-| [`@qnsc/platform-cache`](packages/platform-cache) | Valkey/Redis cache service (ioredis wrapper, key-prefix, fail-open)                                    | `platform-cache-v*` |
-| [`@qnsc/platform-http`](packages/platform-http)   | Fastify bootstrap, CORS, cookie config, error codes, OTel wiring                                       | `platform-http-v*`  |
+| Package                                              | Purpose                                                                                                | Tag prefix          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------- |
+| [`@qnsc-vn/identity`](packages/identity)             | Auth service, refresh rotation, CSRF, JWT strategy, guards, SSO/Entra validation, BFF session handlers | `identity-v*`       |
+| [`@qnsc-vn/platform-cache`](packages/platform-cache) | Valkey/Redis cache service (ioredis wrapper, key-prefix, fail-open)                                    | `platform-cache-v*` |
+| [`@qnsc-vn/platform-http`](packages/platform-http)   | Fastify bootstrap, CORS, cookie config, error codes, OTel wiring                                       | `platform-http-v*`  |
 
 Each package is versioned and released **independently** via release-please
 (Conventional Commits), mirroring the per-module tag model of `qnsc-tf-modules`.
 
 ## Consuming these packages
 
-Packages are published to **GitHub Packages** under the `@qnsc` scope. In a
+Packages are published to **GitHub Packages** under the `@qnsc-vn` scope. In a
 consumer repo (`rally`, `opshub`), add an `.npmrc`:
 
 ```ini
-@qnsc:registry=https://npm.pkg.github.com
+@qnsc-vn:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
 ```
 
@@ -37,7 +37,7 @@ Then pin the package in `package.json`:
 ```jsonc
 {
   "dependencies": {
-    "@qnsc/identity": "1.0.0",
+    "@qnsc-vn/identity": "1.0.0",
   },
 }
 ```
@@ -66,9 +66,9 @@ pnpm lint
 
 ```
 packages/
-  identity/         @qnsc/identity
-  platform-cache/   @qnsc/platform-cache
-  platform-http/    @qnsc/platform-http
+  identity/         @qnsc-vn/identity
+  platform-cache/   @qnsc-vn/platform-cache
+  platform-http/    @qnsc-vn/platform-http
 .github/workflows/
   ci.yml            lint · typecheck · test · build (PRs + main)
   release-please.yml  per-package release PRs (calls qnsc-ci reusable)

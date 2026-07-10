@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Each package under `@qnsc/*` is versioned independently. Only the latest
+Each package under `@qnsc-vn/*` is versioned independently. Only the latest
 published minor of each package is supported; older releases should be upgraded.
 
 ## Reporting a Vulnerability
@@ -33,10 +33,10 @@ within **7 days**.
 This repository publishes shared **application-layer** packages (identity/auth,
 cache, HTTP bootstrap) consumed by QNSC product backends. In scope:
 
-- Authentication / session / token-handling flaws in `@qnsc/identity`
+- Authentication / session / token-handling flaws in `@qnsc-vn/identity`
 - CSRF, cookie, or same-origin regressions
-- Insecure defaults in `@qnsc/platform-http` (CORS, headers, cookies)
-- Cache poisoning / denylist bypass in `@qnsc/platform-cache`
+- Insecure defaults in `@qnsc-vn/platform-http` (CORS, headers, cookies)
+- Cache poisoning / denylist bypass in `@qnsc-vn/platform-cache`
 - Supply-chain risks (unpinned dependencies, publish-pipeline compromise)
 
 Out of scope:
