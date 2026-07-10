@@ -61,7 +61,7 @@ function makePayload(overrides: Partial<JwtPayload> = {}): JwtPayload {
     aud: 'rally',
     iat: 1_700_000_000,
     exp: 4_100_000_000, // far future so the denylist TTL is positive
-    permissions: ['p:read'],
+    claims: { permissions: ['p:read'] },
     authMethod: 'password',
     ...overrides,
   };
@@ -117,6 +117,9 @@ function buildService(opts?: {
     elevateToWorkspaceAdmin: vi.fn(async () => true),
     ensureDefaultRole: vi.fn(async () => {}),
   };
+  const claimsProvider = {
+    getClaims: vi.fn(async () => ({ permissions: ['p:read'] })),
+  };
   const workspaceService = {
     getMemberships: vi.fn(async () => opts?.memberships ?? [{ workspaceId: 'ws-1' }]),
     getMembership: vi.fn(async () => opts?.membership ?? null),
@@ -151,6 +154,7 @@ function buildService(opts?: {
     ssoConnectionRepo as never,
     txRunner as never,
     accessService as never,
+    claimsProvider as never,
     workspaceService as never,
     audit as never,
     { ...baseOptions, ...opts?.options },
@@ -166,6 +170,7 @@ function buildService(opts?: {
     ssoConnectionRepo,
     txRunner,
     accessService,
+    claimsProvider,
     workspaceService,
     audit,
     jwt,

@@ -50,20 +50,22 @@ describe('PermissionGuard', () => {
 
   it('allows a caller holding the permission', () => {
     const guard = guardRequiring('project:update');
-    const ctx = contextWith({ sub: 'u1', permissions: ['project:update'] });
+    const ctx = contextWith({ sub: 'u1', claims: { permissions: ['project:update'] } });
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
   it('forbids a caller missing the permission', () => {
     const guard = guardRequiring('project:update');
-    const ctx = contextWith({ sub: 'u1', permissions: ['workitem:read'] });
+    const ctx = contextWith({ sub: 'u1', claims: { permissions: ['workitem:read'] } });
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
   it('honors an injected custom checker', () => {
     const reflector = { getAllAndOverride: () => 'x:y' } as unknown as Reflector;
     const guard = new PermissionGuard(reflector, () => true);
-    expect(guard.canActivate(contextWith({ sub: 'u1', permissions: ['unrelated'] }))).toBe(true);
+    expect(
+      guard.canActivate(contextWith({ sub: 'u1', claims: { permissions: ['unrelated'] } })),
+    ).toBe(true);
   });
 });
 

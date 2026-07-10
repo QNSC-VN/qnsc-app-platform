@@ -7,6 +7,7 @@
  * passes its configured `JwtService.sign` (ES256 key + issuer/audience).
  */
 import { uuidv7 } from 'uuidv7';
+import type { ProductClaims } from './claims-provider';
 import type { JwtPayload } from './jwt-payload';
 
 /**
@@ -40,7 +41,7 @@ export interface SignAccessTokenParams {
   userId: string;
   workspaceId: string;
   sessionId: string;
-  permissions: string[];
+  claims: ProductClaims;
   authMethod: 'password' | 'sso';
 }
 
@@ -72,7 +73,7 @@ export function signAccessToken(
     workspaceId: params.workspaceId,
     sessionId: params.sessionId,
     jti,
-    permissions: params.permissions,
+    claims: params.claims,
     authMethod: params.authMethod,
   };
   const accessToken = sign(payload);
