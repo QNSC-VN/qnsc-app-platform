@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v2.0.0...identity-v3.0.0) (2026-07-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** WORKSPACE_SERVICE, ACCESS_SERVICE and SSO_CONNECTION_REPOSITORY are now @Optional(). When unbound, ssoLogin/devLogin mint a null-context session with no membership list, enabling single-tenant products (opshub) to adopt the shared AuthService. Adds ISsoProvisioningHook seam (SSO_PROVISIONING_HOOK) called after user resolution so products can reconcile Entra App Roles onto their RBAC, and exposes roles[] on EntraClaims. LoginResult.memberships is now optional.
+
+### ✨ Features
+
+* **identity:** make workspace/access services optional for single-tenant products ([c5eb996](https://github.com/QNSC-VN/qnsc-app-platform/commit/c5eb996591b33959efc68033f43d0b355f5537e5))
+
 ## [2.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v1.0.1...identity-v2.0.0) (2026-07-10)
 
 
