@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v1.0.0...identity-v1.0.1) (2026-07-10)
+
+
+### 🐛 Bug Fixes
+
+* **release:** rename npm scope [@qnsc](https://github.com/qnsc) to [@qnsc-vn](https://github.com/qnsc-vn) to match GitHub Packages org ([#20](https://github.com/QNSC-VN/qnsc-app-platform/issues/20)) ([7c82f2c](https://github.com/QNSC-VN/qnsc-app-platform/commit/7c82f2c94f26efd02f232d5a3c7784b88fab154c))
+
 ## 1.0.0 (2026-07-10)
 
 ### ✨ Features
