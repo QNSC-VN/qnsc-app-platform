@@ -3,7 +3,6 @@ export * from './request-context.service';
 export * from './global-exception.filter';
 export * from './http-logging.interceptor';
 export * from './idempotency.interceptor';
-export * from './pagination';
 export * from './rate-limit.constants';
 export * from './rate-limit.decorator';
 export * from './rate-limit.guard';
