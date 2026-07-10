@@ -23,17 +23,17 @@
   ],
   "packages": {
     "packages/identity": {
-      "package-name": "@qnsc/identity",
+      "package-name": "@qnsc-vn/identity",
       "component": "identity",
       "changelog-path": "CHANGELOG.md"
     },
     "packages/platform-cache": {
-      "package-name": "@qnsc/platform-cache",
+      "package-name": "@qnsc-vn/platform-cache",
       "component": "platform-cache",
       "changelog-path": "CHANGELOG.md"
     },
     "packages/platform-http": {
-      "package-name": "@qnsc/platform-http",
+      "package-name": "@qnsc-vn/platform-http",
       "component": "platform-http",
       "changelog-path": "CHANGELOG.md"
     }

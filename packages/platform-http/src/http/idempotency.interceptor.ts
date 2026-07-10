@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { type Observable, from, of } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
-import { ValkeyService } from '@qnsc/platform-cache';
+import { ValkeyService } from '@qnsc-vn/platform-cache';
 
 /** TTL for cached idempotent responses (24 hours). */
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;

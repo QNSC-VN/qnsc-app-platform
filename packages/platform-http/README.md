@@ -1,4 +1,4 @@
-# @qnsc/platform-http
+# @qnsc-vn/platform-http
 
 Shared Fastify/NestJS HTTP bootstrap for QNSC product backends: CORS policy,
 cookie configuration, security headers, standard error codes, and OpenTelemetry
@@ -15,5 +15,5 @@ wiring.
 ```
 
 ```bash
-pnpm add @qnsc/platform-http
+pnpm add @qnsc-vn/platform-http
 ```

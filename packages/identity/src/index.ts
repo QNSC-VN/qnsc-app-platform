@@ -1,5 +1,5 @@
 /**
- * `@qnsc/identity`
+ * `@qnsc-vn/identity`
  *
  * Shared identity/auth primitives for QNSC product backends: the ES256 JWT
  * Passport strategy, the JWT auth guard (with Valkey denylist checks), the

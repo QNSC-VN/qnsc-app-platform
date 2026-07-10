@@ -36,7 +36,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       # Build before typecheck: packages resolve each other via their built
-      # dist types (e.g. @qnsc/identity depends on @qnsc/platform-cache).
+      # dist types (e.g. @qnsc-vn/identity depends on @qnsc-vn/platform-cache).
       - run: pnpm build
       - run: pnpm typecheck
 

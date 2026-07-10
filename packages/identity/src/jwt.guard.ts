@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { ValkeyService } from '@qnsc/platform-cache';
+import { ValkeyService } from '@qnsc-vn/platform-cache';
 import { AUTH_CONTEXT, type AuthContextSetter } from './auth-context';
 
 /**

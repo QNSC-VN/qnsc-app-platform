@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import type { ValkeyService } from '@qnsc/platform-cache';
+import type { ValkeyService } from '@qnsc-vn/platform-cache';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { lastValueFrom, of } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';

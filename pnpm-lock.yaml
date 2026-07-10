@@ -41,10 +41,10 @@ importers:
 
   packages/identity:
     dependencies:
-      '@qnsc/platform-cache':
+      '@qnsc-vn/platform-cache':
         specifier: workspace:^
         version: link:../platform-cache
-      '@qnsc/platform-http':
+      '@qnsc-vn/platform-http':
         specifier: workspace:^
         version: link:../platform-http
       jose:
@@ -120,7 +120,7 @@ importers:
 
   packages/platform-http:
     dependencies:
-      '@qnsc/platform-cache':
+      '@qnsc-vn/platform-cache':
         specifier: workspace:^
         version: link:../platform-cache
     devDependencies:

@@ -1,5 +1,5 @@
 {
-  "name": "@qnsc/identity",
+  "name": "@qnsc-vn/identity",
   "version": "1.0.0",
   "description": "Shared identity/auth primitives for QNSC product backends: ES256 JWT strategy, JWT auth guard, permission guard, and auth decorators.",
   "license": "UNLICENSED",
@@ -23,8 +23,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@qnsc/platform-cache": "workspace:^",
-    "@qnsc/platform-http": "workspace:^",
+    "@qnsc-vn/platform-cache": "workspace:^",
+    "@qnsc-vn/platform-http": "workspace:^",
     "jose": "^6.2.3",
     "uuidv7": "^1.2.1"
   },

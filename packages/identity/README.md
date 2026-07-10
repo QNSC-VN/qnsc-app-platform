@@ -1,4 +1,4 @@
-# @qnsc/identity
+# @qnsc-vn/identity
 
 Shared identity/auth for QNSC product backends. Single source of truth for:
 
@@ -12,16 +12,16 @@ Shared identity/auth for QNSC product backends. Single source of truth for:
 > repos in Phase 2 of the Identity Platform Migration Plan; BFF handlers land in
 > later phases behind a feature flag.
 
-Depends on [`@qnsc/platform-cache`](../platform-cache) and
-[`@qnsc/platform-http`](../platform-http).
+Depends on [`@qnsc-vn/platform-cache`](../platform-cache) and
+[`@qnsc-vn/platform-http`](../platform-http).
 
 ## Install
 
 ```ini
 # .npmrc
-@qnsc:registry=https://npm.pkg.github.com
+@qnsc-vn:registry=https://npm.pkg.github.com
 ```
 
 ```bash
-pnpm add @qnsc/identity
+pnpm add @qnsc-vn/identity
 ```
