@@ -55,6 +55,13 @@ export interface EntraClaims {
   displayName: string;
   /** Entra `tid` — the external directory id, used to route to a workspace. */
   externalTenantId: string | null;
+  /**
+   * Entra **App Roles** (`roles`) claim — the app-role values assigned to the
+   * user in the app registration. Empty when the token carries no `roles`
+   * claim. Products that map IdP roles onto their own authorization model read
+   * these via {@link ISsoProvisioningHook} at login.
+   */
+  roles: string[];
 }
 
 /**
@@ -107,6 +114,9 @@ export class EntraTokenVerifier {
             : null;
     const displayName = typeof claims.name === 'string' ? claims.name : (email ?? 'Unknown');
     const externalTenantId = typeof claims.tid === 'string' ? claims.tid : null;
+    const roles = Array.isArray(claims.roles)
+      ? claims.roles.filter((r): r is string => typeof r === 'string')
+      : [];
 
     if (!oid || !email) {
       throw new SsoVerificationError(
@@ -115,6 +125,6 @@ export class EntraTokenVerifier {
       );
     }
 
-    return { oid, email: email.toLowerCase().trim(), displayName, externalTenantId };
+    return { oid, email: email.toLowerCase().trim(), displayName, externalTenantId, roles };
   }
 }

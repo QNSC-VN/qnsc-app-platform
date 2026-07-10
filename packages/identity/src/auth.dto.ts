@@ -59,8 +59,11 @@ export const AuthTokenResponseSchema = z.object({
   accessToken: z.string(),
   expiresIn: z.number().describe('Seconds until access token expires'),
   user: UserProfileSchema,
-  /** All active workspace memberships, most-recently-active first. Drives the workspace switcher. */
-  memberships: z.array(WorkspaceMembershipSchema),
+  /**
+   * All active workspace memberships, most-recently-active first. Drives the
+   * workspace switcher. Omitted by single-tenant products (no workspaces).
+   */
+  memberships: z.array(WorkspaceMembershipSchema).optional(),
 });
 
 export class AuthTokenResponseDto extends createZodDto(AuthTokenResponseSchema) {}

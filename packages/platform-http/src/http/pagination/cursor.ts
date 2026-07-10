@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { createZodDto } from 'nestjs-zod';
 import { applyDecorators, type Type } from '@nestjs/common';
 import { ApiExtraModels, ApiOkResponse, getSchemaPath } from '@nestjs/swagger';
-import { HttpErrorCodes } from '../errors/error-codes';
-import { PreconditionFailedException } from '../errors/exceptions';
+import { HttpErrorCodes } from '../../errors/error-codes';
+import { PreconditionFailedException } from '../../errors/exceptions';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;

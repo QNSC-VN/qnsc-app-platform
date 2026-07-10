@@ -85,6 +85,7 @@ describe('EntraTokenVerifier', () => {
       email: 'user@example.com',
       displayName: 'User One',
       externalTenantId: 'ext-9',
+      roles: [],
     });
     expect(createRemoteJWKSetMock).toHaveBeenCalledWith(
       new URL('https://login.microsoftonline.com/tenant-1/discovery/v2.0/keys'),
@@ -105,6 +106,19 @@ describe('EntraTokenVerifier', () => {
     const claims = await makeVerifier().verify('t');
     expect(claims.email).toBe('pref@example.com');
     expect(claims.displayName).toBe('pref@example.com');
+  });
+
+  it('parses App Role values from the token roles claim, ignoring non-strings', async () => {
+    jwtVerifyMock.mockResolvedValue({
+      payload: {
+        oid: 'oid-3',
+        email: 'r@example.com',
+        tid: 'ext-2',
+        roles: ['it-admin', 'asset-manager', 42, null],
+      },
+    });
+    const claims = await makeVerifier().verify('t');
+    expect(claims.roles).toEqual(['it-admin', 'asset-manager']);
   });
 
   it('throws SSO_TOKEN_INVALID when jose verification fails', async () => {

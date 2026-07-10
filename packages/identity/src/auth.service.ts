@@ -14,7 +14,7 @@
  * Note: rally's `@Span(...)` tracing decorators are intentionally omitted — they
  * are product observability infrastructure, not auth behaviour.
  */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'node:crypto';
 import { uuidv7 } from 'uuidv7';
@@ -24,7 +24,8 @@ import { signAccessToken } from './access-token';
 import { CLAIMS_PROVIDER, type IClaimsProvider, type ProductClaims } from './claims-provider';
 import { generateRefreshToken, hashToken, parseTtlSeconds } from './refresh-token';
 import { AUTH_SERVICE_OPTIONS, type AuthServiceOptions } from './auth-options';
-import { EntraTokenVerifier } from './entra-verifier';
+import { EntraTokenVerifier, type EntraClaims } from './entra-verifier';
+import { SSO_PROVISIONING_HOOK, type ISsoProvisioningHook } from './sso-provisioning-hook';
 import type { AuthSession, User } from './domain-types';
 import type { JwtPayload } from './jwt-payload';
 import {
@@ -72,8 +73,12 @@ export interface LoginResult {
   expiresIn: number;
   csrfToken: string;
   user: Pick<User, 'id' | 'email' | 'displayName' | 'avatarUrl' | 'locale' | 'timezone'>;
-  /** All active workspace memberships, most-recently-active first. Drives the workspace switcher. */
-  memberships: WorkspaceMembership[];
+  /**
+   * All active workspace memberships, most-recently-active first. Drives the
+   * workspace switcher. Omitted for single-tenant products (opshub) that have no
+   * workspace service bound.
+   */
+  memberships?: WorkspaceMembership[];
 }
 
 export interface RefreshResult {
@@ -98,16 +103,23 @@ export class AuthService {
   constructor(
     @Inject(USER_REPOSITORY) private readonly userRepo: IUserRepository,
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessionRepo: IAuthSessionRepository,
-    @Inject(SSO_CONNECTION_REPOSITORY) private readonly ssoConnectionRepo: ISsoConnectionRepository,
+    @Optional()
+    @Inject(SSO_CONNECTION_REPOSITORY)
+    private readonly ssoConnectionRepo: ISsoConnectionRepository | null,
     @Inject(TRANSACTION_RUNNER) private readonly txRunner: ITransactionRunner,
-    @Inject(ACCESS_SERVICE) private readonly accessService: IAccessService,
+    @Optional() @Inject(ACCESS_SERVICE) private readonly accessService: IAccessService | null,
     @Inject(CLAIMS_PROVIDER) private readonly claimsProvider: IClaimsProvider,
-    @Inject(WORKSPACE_SERVICE) private readonly workspaceService: IWorkspaceService,
+    @Optional()
+    @Inject(WORKSPACE_SERVICE)
+    private readonly workspaceService: IWorkspaceService | null,
     @Inject(AUDIT_SERVICE) private readonly audit: IAuditService,
     @Inject(AUTH_SERVICE_OPTIONS) private readonly options: AuthServiceOptions,
     @Inject(JwtService) private readonly jwt: JwtService,
     @Inject(EntraTokenVerifier) private readonly entraVerifier: EntraTokenVerifier,
     @Inject(ValkeyService) private readonly valkey: ValkeyService,
+    @Optional()
+    @Inject(SSO_PROVISIONING_HOOK)
+    private readonly provisioningHook: ISsoProvisioningHook | null = null,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -380,8 +392,18 @@ export class AuthService {
     targetWorkspaceId: string,
     ipAddress?: string,
   ): Promise<RefreshResult> {
+    // Workspace switching only exists for multi-tenant products that bind a
+    // workspace service; single-tenant products (opshub) have no workspaces.
+    const workspaceService = this.workspaceService;
+    if (!workspaceService) {
+      throw new UnauthorizedException(
+        'WORKSPACE_SWITCH_UNSUPPORTED',
+        'Workspace switching is not supported',
+      );
+    }
+
     // The caller must be an active member of the target workspace.
-    const keycard = await this.workspaceService.getMembership(payload.sub, targetWorkspaceId);
+    const keycard = await workspaceService.getMembership(payload.sub, targetWorkspaceId);
     if (!keycard || keycard.status !== 'active') {
       throw new UnauthorizedException(
         'WORKSPACE_ACCESS_DENIED',
@@ -448,7 +470,7 @@ export class AuthService {
       'Workspace switched',
     );
 
-    void this.workspaceService.touchMembership(user.id, targetWorkspaceId);
+    void workspaceService.touchMembership(user.id, targetWorkspaceId);
     void this.audit.record({
       workspaceId: targetWorkspaceId,
       actorId: user.id,
@@ -470,7 +492,28 @@ export class AuthService {
   async ssoLogin(idToken: string, ipAddress?: string): Promise<LoginResult> {
     // Verify signature + claims and extract the normalized identity. The verifier
     // throws SSO_NOT_CONFIGURED / SSO_TOKEN_INVALID / SSO_CLAIMS_MISSING.
-    const { oid, email, displayName, externalTenantId } = await this.entraVerifier.verify(idToken);
+    const entra = await this.entraVerifier.verify(idToken);
+
+    // Single-tenant products (opshub) bind no workspace service: take the simple
+    // SSO path (upsert identity, contextId=null, no memberships/enrollment/switch).
+    const workspaceService = this.workspaceService;
+    if (!workspaceService) {
+      return this.ssoLoginSimple(entra, ipAddress);
+    }
+    return this.ssoLoginWithWorkspace(entra, workspaceService, ipAddress);
+  }
+
+  /**
+   * SSO login for multi-tenant products: resolve the user's active workspace,
+   * run JIT provisioning through the SSO connection, auto-elevate platform
+   * admins, and return the full membership list for the workspace switcher.
+   */
+  private async ssoLoginWithWorkspace(
+    entra: EntraClaims,
+    workspaceService: IWorkspaceService,
+    ipAddress?: string,
+  ): Promise<LoginResult> {
+    const { oid, email, displayName, externalTenantId } = entra;
 
     // Look up existing SSO identity first (fast path — avoids workspace lookup).
     const existingIdentity = await this.userRepo.findSsoIdentity('entra', oid);
@@ -489,7 +532,7 @@ export class AuthService {
       }
       user = found;
       // Determine active workspace from memberships (most-recently-active first).
-      const membershipsEarly = await this.workspaceService.getMemberships(user.id);
+      const membershipsEarly = await workspaceService.getMemberships(user.id);
       ssoWorkspaceId = membershipsEarly[0]?.workspaceId ?? '';
       if (!ssoWorkspaceId) {
         // Identity exists but the user has no workspace membership (e.g. a prior
@@ -518,8 +561,13 @@ export class AuthService {
       ssoWorkspaceId = provisioned.workspaceId;
     }
 
+    // Product provisioning hook (e.g. reconcile IdP roles) before claims are read.
+    if (this.provisioningHook) {
+      await this.provisioningHook.onUserProvisioned(user, { entra, contextId: ssoWorkspaceId });
+    }
+
     // Auto-elevate platform admins to workspace_admin on every SSO login.
-    if (this.options.platformAdminEmails.includes(user.email.toLowerCase())) {
+    if (this.accessService && this.options.platformAdminEmails.includes(user.email.toLowerCase())) {
       const elevated = await this.accessService.elevateToWorkspaceAdmin(user.id, ssoWorkspaceId);
       if (elevated) {
         void this.audit.record({
@@ -561,10 +609,74 @@ export class AuthService {
       metadata: { provider: 'entra', oid },
     });
 
-    const memberships = await this.workspaceService.getMemberships(user.id);
-    void this.workspaceService.touchMembership(user.id, ssoWorkspaceId);
+    const memberships = await workspaceService.getMemberships(user.id);
+    void workspaceService.touchMembership(user.id, ssoWorkspaceId);
 
     return this.toLoginResult(session, user, memberships);
+  }
+
+  /**
+   * SSO login for single-tenant products (opshub): verify the Entra token,
+   * upsert the user + SSO identity link, run the optional provisioning hook, and
+   * mint a session with `contextId = null`. No workspace resolution, membership
+   * enrollment, platform-admin elevation, or membership list — those are
+   * multi-tenant concerns that do not exist here.
+   */
+  private async ssoLoginSimple(entra: EntraClaims, ipAddress?: string): Promise<LoginResult> {
+    const { oid, email, displayName } = entra;
+
+    const existingIdentity = await this.userRepo.findSsoIdentity('entra', oid);
+
+    let user: User;
+    if (existingIdentity) {
+      const found = await this.userRepo.findById(existingIdentity.userId);
+      if (
+        !found ||
+        found.deletedAt ||
+        found.status === 'suspended' ||
+        found.status === 'inactive'
+      ) {
+        throw new UnauthorizedException('USER_DEACTIVATED', 'Account is not active');
+      }
+      user = found;
+    } else {
+      // JIT provision: find-or-create the user and link the SSO identity.
+      user = await this.userRepo.upsertBySsoIdentity('entra', oid, email, displayName);
+    }
+
+    // Product provisioning hook (e.g. reconcile Entra App Roles onto the
+    // product's RBAC) before claims are read, so freshly-synced roles are minted.
+    if (this.provisioningHook) {
+      await this.provisioningHook.onUserProvisioned(user, { entra, contextId: null });
+    }
+
+    const claims = await this.claimsProvider.getClaims(user.id, null);
+    const session = await this.createSession({
+      user,
+      contextId: null,
+      authMethod: 'sso',
+      claims,
+      ipAddress,
+      ssoProvider: 'entra',
+    });
+
+    this.logger.log(
+      { userId: user.id, jti: session.jti, sessionId: session.sessionId, provider: 'entra' },
+      'User logged in via SSO',
+    );
+
+    void this.audit.record({
+      workspaceId: '',
+      actorId: user.id,
+      actorEmail: user.email,
+      action: 'auth.login.sso',
+      resourceType: 'session',
+      resourceId: session.sessionId,
+      ipAddress,
+      metadata: { provider: 'entra', oid },
+    });
+
+    return this.toLoginResult(session, user);
   }
 
   // ---------------------------------------------------------------------------
@@ -593,7 +705,39 @@ export class AuthService {
       );
     }
 
-    const memberships = await this.workspaceService.getMemberships(user.id);
+    // Single-tenant products (opshub) bind no workspace service: mint a session
+    // with contextId=null and no membership resolution.
+    const workspaceService = this.workspaceService;
+    if (!workspaceService) {
+      const simpleClaims = await this.claimsProvider.getClaims(user.id, null);
+      const simpleSession = await this.createSession({
+        user,
+        contextId: null,
+        authMethod: 'password',
+        claims: simpleClaims,
+        ipAddress,
+      });
+
+      this.logger.log(
+        { userId: user.id, jti: simpleSession.jti, sessionId: simpleSession.sessionId },
+        'User logged in via dev-login',
+      );
+
+      void this.audit.record({
+        workspaceId: '',
+        actorId: user.id,
+        actorEmail: user.email,
+        action: 'auth.login.dev',
+        resourceType: 'session',
+        resourceId: simpleSession.sessionId,
+        ipAddress,
+        metadata: { method: 'dev-login' },
+      });
+
+      return this.toLoginResult(simpleSession, user);
+    }
+
+    const memberships = await workspaceService.getMemberships(user.id);
     const workspaceId = memberships[0]?.workspaceId;
     if (!workspaceId) {
       throw new UnauthorizedException(
@@ -629,7 +773,7 @@ export class AuthService {
       metadata: { method: 'dev-login' },
     });
 
-    void this.workspaceService.touchMembership(user.id, workspaceId);
+    void workspaceService.touchMembership(user.id, workspaceId);
 
     return this.toLoginResult(session, user, memberships);
   }
@@ -657,14 +801,21 @@ export class AuthService {
   }): Promise<{ user: User; workspaceId: string }> {
     const { oid, email, displayName, externalTenantId } = input;
 
+    // Only reachable from the workspace login path, so these are always bound.
+    const workspaceService = this.workspaceService;
+    const ssoConnectionRepo = this.ssoConnectionRepo;
+    if (!workspaceService || !ssoConnectionRepo) {
+      throw new UnauthorizedException(
+        'SSO_NO_ACCESS',
+        'No workspace is configured for your organization. Please ask your administrator for an invitation.',
+      );
+    }
+
     let connectionWorkspaceId: string | null = null;
     let defaultRoleSlug: string | undefined;
 
     if (externalTenantId) {
-      const connection = await this.ssoConnectionRepo.findByExternalTenantId(
-        'entra',
-        externalTenantId,
-      );
+      const connection = await ssoConnectionRepo.findByExternalTenantId('entra', externalTenantId);
       if (connection) {
         if (connection.status !== 'active') {
           throw new UnauthorizedException(
@@ -703,9 +854,9 @@ export class AuthService {
     const user = await this.userRepo.upsertBySsoIdentity('entra', oid, email, displayName);
 
     // Ensure the user is an active member of the SSO connection's workspace.
-    await this.workspaceService.enrollMember(workspaceId, user.id);
+    await workspaceService.enrollMember(workspaceId, user.id);
 
-    if (defaultRoleSlug) {
+    if (defaultRoleSlug && this.accessService) {
       await this.accessService.ensureDefaultRole(user.id, workspaceId, defaultRoleSlug);
     }
 
@@ -813,9 +964,9 @@ export class AuthService {
   private toLoginResult(
     session: { accessToken: string; refreshToken: string; expiresIn: number; csrfToken: string },
     user: User,
-    memberships: WorkspaceMembership[],
+    memberships?: WorkspaceMembership[],
   ): LoginResult {
-    return {
+    const result: LoginResult = {
       accessToken: session.accessToken,
       refreshToken: session.refreshToken,
       expiresIn: session.expiresIn,
@@ -828,7 +979,9 @@ export class AuthService {
         locale: user.locale,
         timezone: user.timezone,
       },
-      memberships,
     };
+    // Only multi-tenant products carry a membership list (workspace switcher).
+    if (memberships) result.memberships = memberships;
+    return result;
   }
 }

@@ -22,7 +22,7 @@ import {
   encodeCursor,
   PageQuerySchema,
   type CursorPayload,
-} from './http/pagination';
+} from './http/pagination/cursor';
 
 describe('error taxonomy', () => {
   it('maps HTTP statuses to stable codes with an INTERNAL fallback', () => {

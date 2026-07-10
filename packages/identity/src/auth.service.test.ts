@@ -69,7 +69,13 @@ function makePayload(overrides: Partial<JwtPayload> = {}): JwtPayload {
 
 function buildService(opts?: {
   options?: Partial<AuthServiceOptions>;
-  claims?: { oid: string; email: string; displayName: string; externalTenantId: string | null };
+  claims?: {
+    oid: string;
+    email: string;
+    displayName: string;
+    externalTenantId: string | null;
+    roles?: string[];
+  };
   user?: User | null;
   existingIdentity?: { userId: string } | null;
   memberships?: Array<{ workspaceId: string }>;
@@ -88,6 +94,10 @@ function buildService(opts?: {
   graceValue?: string | null;
   /** When set, `getRotationGrace` rejects to simulate a cache outage. */
   graceThrows?: boolean;
+  /** Single-tenant mode: no workspace/access/sso-connection services bound (opshub). */
+  workspaceless?: boolean;
+  /** Bind the optional SSO provisioning hook (e.g. opshub Entra-role sync). */
+  withHook?: boolean;
 }) {
   const userRepo = {
     findByEmail: vi.fn(async () => opts?.user ?? null),
@@ -144,23 +154,26 @@ function buildService(opts?: {
           email: 'alice@acme.test',
           displayName: 'Alice',
           externalTenantId: 'tid-1',
+          roles: [],
         },
     ),
   };
+  const provisioningHook = { onUserProvisioned: vi.fn(async () => {}) };
 
   const service = new AuthService(
     userRepo as never,
     sessionRepo as never,
-    ssoConnectionRepo as never,
+    (opts?.workspaceless ? null : ssoConnectionRepo) as never,
     txRunner as never,
-    accessService as never,
+    (opts?.workspaceless ? null : accessService) as never,
     claimsProvider as never,
-    workspaceService as never,
+    (opts?.workspaceless ? null : workspaceService) as never,
     audit as never,
     { ...baseOptions, ...opts?.options },
     jwt as never,
     entraVerifier as never,
     valkey as never,
+    (opts?.withHook ? provisioningHook : null) as never,
   );
 
   return {
@@ -176,6 +189,7 @@ function buildService(opts?: {
     jwt,
     entraVerifier,
     valkey,
+    provisioningHook,
   };
 }
 
@@ -352,6 +366,105 @@ describe('AuthService.devLogin', () => {
     const h = buildService({ user: makeUser(), memberships: [] });
     await expect(h.service.devLogin('alice@acme.test')).rejects.toMatchObject({
       code: 'ACCOUNT_DEACTIVATED',
+    });
+  });
+});
+
+describe('AuthService — single-tenant (workspace-less) mode', () => {
+  it('ssoLogin mints a null-context session with no memberships', async () => {
+    const user = makeUser();
+    const h = buildService({
+      workspaceless: true,
+      existingIdentity: { userId: user.id },
+      user,
+    });
+
+    const result = await h.service.ssoLogin('id-token', '9.9.9.9');
+
+    expect(result.accessToken).toBe('signed.jwt');
+    expect(result.memberships).toBeUndefined();
+    // No workspace resolution or membership enrollment in single-tenant mode.
+    expect(h.workspaceService.getMemberships).not.toHaveBeenCalled();
+    expect(h.ssoConnectionRepo.findByExternalTenantId).not.toHaveBeenCalled();
+    const signedPayload = h.jwt.sign.mock.calls[0][0] as { contextId: string | null };
+    expect(signedPayload.contextId).toBeNull();
+  });
+
+  it('ssoLogin JIT-provisions a brand-new user without a connection', async () => {
+    const user = makeUser({ id: 'user-9', email: 'new@opshub.test' });
+    const h = buildService({
+      workspaceless: true,
+      existingIdentity: null,
+      user,
+      claims: {
+        oid: 'oid-9',
+        email: 'new@opshub.test',
+        displayName: 'New Hire',
+        externalTenantId: 'tid-1',
+        roles: ['it-admin'],
+      },
+    });
+
+    const result = await h.service.ssoLogin('id-token');
+
+    expect(h.userRepo.upsertBySsoIdentity).toHaveBeenCalledWith(
+      'entra',
+      'oid-9',
+      'new@opshub.test',
+      'New Hire',
+    );
+    expect(result.accessToken).toBe('signed.jwt');
+    expect(result.memberships).toBeUndefined();
+  });
+
+  it('ssoLogin invokes the provisioning hook with the Entra claims and null context', async () => {
+    const user = makeUser();
+    const h = buildService({
+      workspaceless: true,
+      withHook: true,
+      existingIdentity: { userId: user.id },
+      user,
+      claims: {
+        oid: 'oid-1',
+        email: 'alice@acme.test',
+        displayName: 'Alice',
+        externalTenantId: 'tid-1',
+        roles: ['it-admin', 'asset-manager'],
+      },
+    });
+
+    await h.service.ssoLogin('id-token');
+
+    expect(h.provisioningHook.onUserProvisioned).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({
+        contextId: null,
+        entra: expect.objectContaining({ roles: ['it-admin', 'asset-manager'] }),
+      }),
+    );
+  });
+
+  it('devLogin mints a null-context session without requiring a membership', async () => {
+    const user = makeUser();
+    const h = buildService({ workspaceless: true, user });
+
+    const result = await h.service.devLogin('alice@acme.test');
+
+    expect(result.accessToken).toBe('signed.jwt');
+    expect(result.memberships).toBeUndefined();
+    expect(h.workspaceService.getMemberships).not.toHaveBeenCalled();
+    const signedPayload = h.jwt.sign.mock.calls[0][0] as {
+      contextId: string | null;
+      authMethod: string;
+    };
+    expect(signedPayload.contextId).toBeNull();
+    expect(signedPayload.authMethod).toBe('password');
+  });
+
+  it('switchWorkspace is unsupported in single-tenant mode', async () => {
+    const h = buildService({ workspaceless: true, user: makeUser() });
+    await expect(h.service.switchWorkspace(makePayload(), 'ws-2')).rejects.toMatchObject({
+      code: 'WORKSPACE_SWITCH_UNSUPPORTED',
     });
   });
 });
