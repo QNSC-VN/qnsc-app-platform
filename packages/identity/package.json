@@ -23,7 +23,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@qnsc/platform-cache": "workspace:^"
+    "@qnsc/platform-cache": "workspace:^",
+    "jose": "^6.2.3",
+    "uuidv7": "^1.2.1"
   },
   "peerDependencies": {
     "@nestjs/common": ">=11",
