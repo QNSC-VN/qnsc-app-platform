@@ -27,7 +27,7 @@
     "uuidv7": "^1.2.1"
   },
   "peerDependencies": {
-    "@qnsc-vn/platform-cache": ">=1.0.0",
+    "@qnsc-vn/platform-cache": ">=2.0.0",
     "@qnsc-vn/platform-http": ">=2.0.0",
     "@fastify/cookie": ">=11",
     "@nestjs/common": ">=11",

@@ -28,6 +28,7 @@ export * from './transaction-runner';
 export * from './auth-options';
 export * from './access-token';
 export * from './auth.service';
+export * from './auth-token-cache.service';
 export * from './auth.dto';
 export * from './auth.controller';
 export * from './auth.module';

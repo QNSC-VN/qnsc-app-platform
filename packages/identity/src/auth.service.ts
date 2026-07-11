@@ -18,7 +18,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'node:crypto';
 import { uuidv7 } from 'uuidv7';
-import { ValkeyService } from '@qnsc-vn/platform-cache';
+import { AuthTokenCache } from './auth-token-cache.service';
 import { NotFoundException, UnauthorizedException } from '@qnsc-vn/platform-http';
 import { signAccessToken } from './access-token';
 import { CLAIMS_PROVIDER, type IClaimsProvider, type ProductClaims } from './claims-provider';
@@ -116,7 +116,7 @@ export class AuthService {
     @Inject(AUTH_SERVICE_OPTIONS) private readonly options: AuthServiceOptions,
     @Inject(JwtService) private readonly jwt: JwtService,
     @Inject(EntraTokenVerifier) private readonly entraVerifier: EntraTokenVerifier,
-    @Inject(ValkeyService) private readonly valkey: ValkeyService,
+    @Inject(AuthTokenCache) private readonly authCache: AuthTokenCache,
     @Optional()
     @Inject(SSO_PROVISIONING_HOOK)
     private readonly provisioningHook: ISsoProvisioningHook | null = null,
@@ -238,7 +238,7 @@ export class AuthService {
     // concurrent/retried reuse replays these exact tokens. Best-effort: a cache
     // write failure must not fail the refresh itself.
     try {
-      await this.valkey.storeRotationGrace(
+      await this.authCache.storeRotationGrace(
         tokenHash,
         JSON.stringify(result),
         REFRESH_ROTATION_GRACE_SECONDS,
@@ -318,7 +318,7 @@ export class AuthService {
   /** Poll the rotation grace cache up to `tries` times (25ms apart). */
   private async waitForGrace(tokenHash: string, tries: number): Promise<string | null> {
     for (let attempt = 0; attempt < tries; attempt++) {
-      const value = await this.valkey.getRotationGrace(tokenHash);
+      const value = await this.authCache.getRotationGrace(tokenHash);
       if (value) return value;
       if (attempt < tries - 1) await sleep(25);
     }
@@ -340,7 +340,7 @@ export class AuthService {
 
     await Promise.all([
       // Denylist the access token until it would have expired anyway.
-      ttl > 0 ? this.valkey.denylistToken(payload.jti, ttl) : Promise.resolve(),
+      ttl > 0 ? this.authCache.denylistToken(payload.jti, ttl) : Promise.resolve(),
       // Revoke the refresh session in the DB.
       this.sessionRepo.revokeById(payload.sessionId),
     ]);
@@ -370,7 +370,7 @@ export class AuthService {
     const ttl = Math.max(payload.exp - now, 0);
 
     await Promise.all([
-      ttl > 0 ? this.valkey.denylistToken(payload.jti, ttl) : Promise.resolve(),
+      ttl > 0 ? this.authCache.denylistToken(payload.jti, ttl) : Promise.resolve(),
       this.sessionRepo.revokeAllForUser(payload.sub),
     ]);
 
@@ -446,7 +446,7 @@ export class AuthService {
     const ttl = Math.max(payload.exp - now, 0);
 
     await Promise.all([
-      ttl > 0 ? this.valkey.denylistToken(payload.jti, ttl) : Promise.resolve(),
+      ttl > 0 ? this.authCache.denylistToken(payload.jti, ttl) : Promise.resolve(),
       this.txRunner.transaction(async (tx) => {
         await this.sessionRepo.revokeById(payload.sessionId, tx);
         await this.sessionRepo.create(
