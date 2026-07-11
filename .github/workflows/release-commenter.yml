@@ -1,0 +1,18 @@
+# =============================================================================
+# Release Commenter — thin caller of the shared reusable (qnsc-ci). When a
+# GitHub Release is published, back-comments on every PR merged since the last
+# release and adds a "released: vX.Y.Z" label (semantic-release bot UX).
+# =============================================================================
+name: Release Commenter
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  comment:
+    uses: QNSC-VN/qnsc-ci/.github/workflows/release-commenter.yml@v1
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
