@@ -1,7 +1,7 @@
 {
   "name": "@qnsc-vn/platform-cache",
   "version": "1.0.0",
-  "description": "Shared Valkey/Redis cache service (ioredis wrapper) for QNSC product backends.",
+  "description": "Shared Valkey/Redis cache primitive (ioredis wrapper) for QNSC product backends.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

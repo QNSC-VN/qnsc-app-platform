@@ -8,6 +8,7 @@ import {
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { AuthTokenCache } from './auth-token-cache.service';
 import { EntraTokenVerifier } from './entra-verifier';
 import { JwtAuthGuard } from './jwt.guard';
 import { JwtStrategy } from './jwt.strategy';
@@ -28,7 +29,7 @@ import { PermissionGuard } from './permission.guard';
  *   adapter), and the `AUTH_CONTEXT` adapter.
  * - The option tokens — `AUTH_SERVICE_OPTIONS`, `JWT_STRATEGY_OPTIONS`,
  *   `ENTRA_VERIFIER_OPTIONS`.
- * - `JwtService` (via `JwtModule`) and `ValkeyService` (via `CacheModule`).
+ * - `JwtService` (via `JwtModule`) and `CacheService` (via `CacheModule`).
  *
  * Async configuration is expressed through the product's own `useFactory`
  * providers / imported modules, so no separate `forRootAsync` is needed.
@@ -73,13 +74,14 @@ export class AuthModule {
       controllers: options.controller === false ? [] : [AuthController],
       providers: [
         AuthService,
+        AuthTokenCache,
         EntraTokenVerifier,
         JwtStrategy,
         JwtAuthGuard,
         PermissionGuard,
         ...(options.providers ?? []),
       ],
-      exports: [AuthService, EntraTokenVerifier, JwtAuthGuard, PermissionGuard],
+      exports: [AuthService, AuthTokenCache, EntraTokenVerifier, JwtAuthGuard, PermissionGuard],
     };
   }
 }

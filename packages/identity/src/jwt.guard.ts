@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { ValkeyService } from '@qnsc-vn/platform-cache';
+import { AuthTokenCache } from './auth-token-cache.service';
 import { AUTH_CONTEXT, type AuthContextSetter } from './auth-context';
 
 /**
@@ -23,7 +23,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
   constructor(
     @Inject(AUTH_CONTEXT) private readonly ctx: AuthContextSetter,
-    @Inject(ValkeyService) private readonly valkey: ValkeyService,
+    @Inject(AuthTokenCache) private readonly authCache: AuthTokenCache,
   ) {
     super();
   }
@@ -46,8 +46,8 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       // Check both token-level (logout) and user-level (suspension/deactivation) denylist.
       // Parallel lookups: saves ~1 RTT per authenticated request.
       const [tokenRevoked, userRevoked] = await Promise.all([
-        this.valkey.isTokenDenied(req.user.jti),
-        this.valkey.isUserRevoked(req.user.sub),
+        this.authCache.isTokenDenied(req.user.jti),
+        this.authCache.isUserRevoked(req.user.sub),
       ]);
       if (tokenRevoked || userRevoked) {
         throw new UnauthorizedException('Token has been revoked');

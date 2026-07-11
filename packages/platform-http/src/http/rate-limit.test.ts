@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import type { ValkeyService } from '@qnsc-vn/platform-cache';
+import type { CacheService } from '@qnsc-vn/platform-cache';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -44,14 +44,14 @@ function makeReflector(values: { skip?: boolean; tier?: string }): Reflector {
 }
 
 function makeValkey(result: { allowed: boolean; remaining: number; resetAt: number } | Error): {
-  valkey: ValkeyService;
+  valkey: CacheService;
   spy: ReturnType<typeof vi.fn>;
 } {
   const spy = vi.fn(async () => {
     if (result instanceof Error) throw result;
     return result;
   });
-  return { valkey: { consumeRateLimit: spy } as unknown as ValkeyService, spy };
+  return { valkey: { consumeRateLimit: spy } as unknown as CacheService, spy };
 }
 
 describe('RateLimitGuard', () => {
