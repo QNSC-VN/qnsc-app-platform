@@ -121,12 +121,17 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     await this.client.del(...keys);
   }
 
-  // ── Rate-limit token bucket (generic mechanism) ──────────────────────────────
+  // ── Rate-limit (atomic sliding-window log via sorted sets) ───────────────────
 
   /**
-   * Check + consume one token from a fixed-window bucket.
-   * Returns `{ allowed, remaining, resetAt }`. Fails open (allowed) when the
-   * cache is disabled so a missing cache never blocks traffic.
+   * Atomic sliding-window rate limiter, evaluated server-side in a single Lua
+   * call: evict entries older than the window, count what remains, then admit
+   * (record the request) or reject. A true sliding window avoids the burst that
+   * a fixed-window counter allows at window boundaries.
+   *
+   * Returns `{ allowed, remaining, resetAt }` where `resetAt` is the Unix-seconds
+   * timestamp at which the window next frees a slot. Fails open (allowed) when
+   * the cache is disabled so a missing cache never blocks traffic.
    *
    * This is a generic mechanism; rate-limit *policy* (tiers, limits, which routes)
    * stays in each product's guard.
@@ -136,26 +141,55 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     limit: number,
     windowSeconds: number,
   ): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
-    const now = Math.floor(Date.now() / 1000);
-    const resetAt = (Math.floor(now / windowSeconds) + 1) * windowSeconds;
+    const windowMs = windowSeconds * 1000;
+    const nowMs = Date.now();
 
     if (!this.client) {
-      return { allowed: true, remaining: limit, resetAt };
+      return { allowed: true, remaining: limit, resetAt: Math.floor(nowMs / 1000) + windowSeconds };
     }
 
-    const windowKey = `rl:${key}:${Math.floor(now / windowSeconds)}`;
-    const current = await this.client
-      .multi()
-      .incr(windowKey)
-      .expire(windowKey, windowSeconds)
-      .exec();
+    // Unique member so multiple requests in the same millisecond each get a slot.
+    const member = `${nowMs}:${Math.random().toString(36).slice(2, 10)}`;
+    const [allowed, remaining, resetAtMs] = (await this.client.eval(
+      CacheService.SLIDING_WINDOW_LUA,
+      1,
+      `rl:${key}`,
+      String(nowMs),
+      String(windowMs),
+      String(limit),
+      member,
+    )) as [number, number, number];
 
-    const count = (current?.[0]?.[1] as number) ?? 1;
-    const allowed = count <= limit;
-    const remaining = Math.max(0, limit - count);
-
-    return { allowed, remaining, resetAt };
+    return {
+      allowed: Number(allowed) === 1,
+      remaining: Math.max(0, Number(remaining)),
+      resetAt: Math.ceil(Number(resetAtMs) / 1000),
+    };
   }
+
+  /**
+   * Sliding-window admission control over a sorted set scored by request time
+   * (ms). Returns `{ allowed, remaining, resetAtMs }`.
+   */
+  private static readonly SLIDING_WINDOW_LUA = `
+local key    = KEYS[1]
+local now    = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local limit  = tonumber(ARGV[3])
+local member = ARGV[4]
+
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
+local count = redis.call('ZCARD', key)
+
+if count < limit then
+  redis.call('ZADD', key, now, member)
+  redis.call('PEXPIRE', key, window)
+  return {1, limit - count - 1, now + window}
+else
+  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+  return {0, 0, tonumber(oldest[2]) + window}
+end
+`;
 
   // ── Distributed locks (Redlock-lite via SET NX PX) ───────────────────────────
 
