@@ -1,7 +1,7 @@
 # Auto-creates per-package "chore(release): <component> <version>" PRs on every
 # main push, then tags "<component>-v<version>" when merged. The tag triggers
 # publish.yml. Reuses the shared workflow from QNSC-VN/qnsc-ci.
-name: Release Please
+name: Release
 
 on:
   push:
