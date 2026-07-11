@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-cache-v2.0.0...platform-cache-v2.1.0) (2026-07-11)
+
+
+### ✨ Features
+
+* **platform-cache:** make consumeRateLimit a true sliding window ([2dc2997](https://github.com/QNSC-VN/qnsc-app-platform/commit/2dc2997652ec878c7f36b9fc6b3d31dacf174529))
+* unify cache/auth primitives (sliding-window rate limit + AuthTokenCache.unrevokeUser) ([8308ced](https://github.com/QNSC-VN/qnsc-app-platform/commit/8308cedab55a506c59a029cad416a7695db5c177))
+
 ## [2.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-cache-v1.0.0...platform-cache-v2.0.0) (2026-07-11)
 
 
