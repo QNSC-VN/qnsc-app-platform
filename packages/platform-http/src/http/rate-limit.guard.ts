@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { ValkeyService } from '@qnsc-vn/platform-cache';
+import { CacheService } from '@qnsc-vn/platform-cache';
 import { RateLimitedException } from '../errors';
 import {
   RATE_LIMIT_METADATA_KEY,
@@ -53,7 +53,7 @@ export class RateLimitGuard implements CanActivate {
 
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
-    @Inject(ValkeyService) private readonly valkey: ValkeyService,
+    @Inject(CacheService) private readonly cache: CacheService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -109,7 +109,7 @@ export class RateLimitGuard implements CanActivate {
     let resetAt: number;
 
     try {
-      ({ allowed, remaining, resetAt } = await this.valkey.consumeRateLimit(
+      ({ allowed, remaining, resetAt } = await this.cache.consumeRateLimit(
         key,
         limit,
         windowSeconds,

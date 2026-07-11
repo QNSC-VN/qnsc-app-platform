@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import { type Observable, from, of } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
-import { ValkeyService } from '@qnsc-vn/platform-cache';
+import { CacheService } from '@qnsc-vn/platform-cache';
 
 /** TTL for cached idempotent responses (24 hours). */
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
@@ -35,7 +35,7 @@ const IDEMPOTENCY_METHODS = new Set(['POST', 'PUT']);
 export class IdempotencyInterceptor implements NestInterceptor {
   private readonly logger = new Logger(IdempotencyInterceptor.name);
 
-  constructor(@Inject(ValkeyService) private readonly valkey: ValkeyService) {}
+  constructor(@Inject(CacheService) private readonly cache: CacheService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
@@ -58,7 +58,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
         .slice(0, 16);
     const redisKey = `idem:${userId}:${req.method}:${req.url}:${idempotencyKey}`;
 
-    return from(this.valkey.instance.get(redisKey)).pipe(
+    return from(this.cache.instance.get(redisKey)).pipe(
       switchMap((cached: string | null) => {
         if (cached !== null) {
           this.logger.debug({ msg: 'idempotency: cache hit', redisKey });
@@ -68,7 +68,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
         return next.handle().pipe(
           tap(async (response: unknown) => {
             try {
-              await this.valkey.instance.set(
+              await this.cache.instance.set(
                 redisKey,
                 JSON.stringify(response),
                 'EX',

@@ -22,10 +22,9 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {
-    "@qnsc-vn/platform-cache": "workspace:^"
-  },
+  "dependencies": {},
   "peerDependencies": {
+    "@qnsc-vn/platform-cache": ">=2.0.0",
     "@nestjs/common": ">=11",
     "@nestjs/core": ">=11",
     "@nestjs/swagger": ">=11",
@@ -35,6 +34,7 @@
     "zod": ">=4"
   },
   "devDependencies": {
+    "@qnsc-vn/platform-cache": "workspace:^",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/swagger": "^11.4.5",

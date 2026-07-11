@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import type { ValkeyService } from '@qnsc-vn/platform-cache';
+import type { CacheService } from '@qnsc-vn/platform-cache';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { lastValueFrom, of } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
@@ -107,10 +107,10 @@ describe('IdempotencyInterceptor', () => {
   function fakeValkey(overrides?: {
     get?: ReturnType<typeof vi.fn>;
     set?: ReturnType<typeof vi.fn>;
-  }): { svc: ValkeyService; get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> } {
+  }): { svc: CacheService; get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> } {
     const get = overrides?.get ?? vi.fn().mockResolvedValue(null);
     const set = overrides?.set ?? vi.fn().mockResolvedValue('OK');
-    return { svc: { instance: { get, set } } as unknown as ValkeyService, get, set };
+    return { svc: { instance: { get, set } } as unknown as CacheService, get, set };
   }
 
   it('passes through non-idempotent methods without touching the cache', async () => {
