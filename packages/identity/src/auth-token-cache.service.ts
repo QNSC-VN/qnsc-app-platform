@@ -80,4 +80,16 @@ export class AuthTokenCache {
     const val = await client.get(`denylist:user:${userId}`);
     return val !== null;
   }
+
+  /**
+   * Clear a user-level revocation — e.g. when re-activating a previously
+   * suspended/deactivated account. Without this, a reactivated user's freshly
+   * issued tokens would keep being rejected until the revocation key's TTL
+   * lapsed. No-op when the cache is disabled.
+   */
+  async unrevokeUser(userId: string): Promise<void> {
+    const client = this.cache.redis;
+    if (!client) return;
+    await client.del(`denylist:user:${userId}`);
+  }
 }
