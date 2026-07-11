@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-cache-v1.0.0...platform-cache-v2.0.0) (2026-07-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **platform-cache:** ValkeyService/VALKEY_OPTIONS are removed. Use CacheService and CACHE_OPTIONS. Auth-token denylist/rotation/revocation now live in @qnsc-vn/identity (AuthTokenCache).
+
+### ✨ Features
+
+* **platform-cache:** replace ValkeyService with generic mode-aware CacheService ([8598871](https://github.com/QNSC-VN/qnsc-app-platform/commit/8598871bb07e218e3ab9b3b8ddeadd099eff0e6c))
+
 ## 1.0.0 (2026-07-10)
 
 
