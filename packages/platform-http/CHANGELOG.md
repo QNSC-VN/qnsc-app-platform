@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v2.0.0...platform-http-v3.0.0) (2026-07-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **platform-http:** @qnsc-vn/platform-cache is now a peerDependency and must be provided by the consumer; requires >=2.0.0.
+
+### ✨ Features
+
+* **platform-http:** consume CacheService and make platform-cache a peer dependency ([4f888d7](https://github.com/QNSC-VN/qnsc-app-platform/commit/4f888d70b9a532ec727fd60445cbc2ddd480b3c7))
+
 ## [2.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v1.0.1...platform-http-v2.0.0) (2026-07-10)
 
 
