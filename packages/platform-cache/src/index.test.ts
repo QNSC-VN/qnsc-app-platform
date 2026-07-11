@@ -9,39 +9,49 @@ vi.mock('ioredis', async () => {
   return { default: RedisMock };
 });
 
-import { CacheModule } from './valkey.module';
-import { ValkeyService } from './valkey.service';
-import { VALKEY_OPTIONS } from './valkey.types';
+import { CacheModule } from './cache.module';
+import { CacheService } from './cache.service';
+import { CACHE_OPTIONS } from './cache.types';
 
-function makeService(): ValkeyService {
-  const service = new ValkeyService({ url: 'redis://localhost:6379', keyPrefix: 'test:' });
+function makeService(): CacheService {
+  const service = new CacheService({ url: 'redis://localhost:6379', keyPrefix: 'test:' });
   service.onModuleInit();
   return service;
 }
 
-describe('ValkeyService', () => {
-  let service: ValkeyService;
+describe('CacheService', () => {
+  let service: CacheService;
 
   beforeEach(() => {
     service = makeService();
   });
 
-  it('denylists a token and reports it as denied', async () => {
-    expect(await service.isTokenDenied('jti-1')).toBe(false);
-    await service.denylistToken('jti-1', 60);
-    expect(await service.isTokenDenied('jti-1')).toBe(true);
+  it('stores and reads a string value with TTL', async () => {
+    expect(await service.get('k')).toBeNull();
+    await service.set('k', 'v', 60);
+    expect(await service.get('k')).toBe('v');
   });
 
-  it('stores and replays a rotation-grace payload', async () => {
-    expect(await service.getRotationGrace('hash-1')).toBeNull();
-    await service.storeRotationGrace('hash-1', 'payload', 30);
-    expect(await service.getRotationGrace('hash-1')).toBe('payload');
+  it('stores and reads a JSON value', async () => {
+    expect(await service.getJson('j')).toBeNull();
+    await service.setJson('j', { a: 1, b: 'two' }, 60);
+    expect(await service.getJson('j')).toEqual({ a: 1, b: 'two' });
   });
 
-  it('fast-revokes a user', async () => {
-    expect(await service.isUserRevoked('user-1')).toBe(false);
-    await service.revokeUser('user-1', 900);
-    expect(await service.isUserRevoked('user-1')).toBe(true);
+  it('returns null for corrupt JSON', async () => {
+    await service.set('bad', 'not-json');
+    expect(await service.getJson('bad')).toBeNull();
+  });
+
+  it('deletes keys', async () => {
+    await service.set('d', 'v');
+    await service.del('d');
+    expect(await service.get('d')).toBeNull();
+  });
+
+  it('reports availability and exposes the raw client', () => {
+    expect(service.redis).not.toBeNull();
+    expect(() => service.instance).not.toThrow();
   });
 
   it('allows requests up to the limit then blocks', async () => {
@@ -65,14 +75,45 @@ describe('ValkeyService', () => {
   });
 });
 
+describe('CacheService (optional mode, disabled)', () => {
+  function makeDisabled(): CacheService {
+    const service = new CacheService({ mode: 'optional' });
+    service.onModuleInit();
+    return service;
+  }
+
+  it('degrades gracefully when no url is supplied', async () => {
+    const service = makeDisabled();
+    expect(service.redis).toBeNull();
+    expect(service.isAvailable).toBe(false);
+    expect(() => service.instance).toThrow();
+
+    // Generic ops no-op / return empty.
+    await service.set('k', 'v');
+    expect(await service.get('k')).toBeNull();
+    expect(await service.getJson('k')).toBeNull();
+    await service.del('k');
+
+    // Rate-limit fails open; locks refuse.
+    const rl = await service.consumeRateLimit('x', 5, 60);
+    expect(rl.allowed).toBe(true);
+    expect(await service.acquireLock('x', 1000)).toBe(false);
+  });
+
+  it('throws in required mode when no url is supplied', () => {
+    const service = new CacheService({ mode: 'required' });
+    expect(() => service.onModuleInit()).toThrow();
+  });
+});
+
 describe('CacheModule', () => {
   it('forRoot wires the options value and the service', () => {
     const mod = CacheModule.forRoot({ url: 'redis://localhost:6379', keyPrefix: 'rally:' });
     expect(mod.module).toBe(CacheModule);
-    expect(mod.exports).toContain(ValkeyService);
+    expect(mod.exports).toContain(CacheService);
     const optionsProvider = (mod.providers ?? []).find(
       (p): p is { provide: symbol; useValue: unknown } =>
-        typeof p === 'object' && 'provide' in p && p.provide === VALKEY_OPTIONS,
+        typeof p === 'object' && 'provide' in p && p.provide === CACHE_OPTIONS,
     );
     expect(optionsProvider?.useValue).toEqual({
       url: 'redis://localhost:6379',
@@ -85,10 +126,10 @@ describe('CacheModule', () => {
       useFactory: () => ({ url: 'redis://localhost:6379' }),
     });
     expect(mod.module).toBe(CacheModule);
-    expect(mod.exports).toContain(ValkeyService);
+    expect(mod.exports).toContain(CacheService);
     const optionsProvider = (mod.providers ?? []).find(
       (p): p is { provide: symbol; useFactory: () => unknown; inject: unknown[] } =>
-        typeof p === 'object' && 'provide' in p && p.provide === VALKEY_OPTIONS,
+        typeof p === 'object' && 'provide' in p && p.provide === CACHE_OPTIONS,
     );
     expect(optionsProvider?.useFactory).toBeTypeOf('function');
   });
