@@ -1,6 +1,6 @@
 {
   "name": "@qnsc-vn/identity",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "Shared identity/auth primitives for QNSC product backends: ES256 JWT strategy, JWT auth guard, permission guard, and auth decorators.",
   "license": "UNLICENSED",
   "main": "dist/index.js",

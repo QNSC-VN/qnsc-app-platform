@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.1.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.0.0...identity-v5.1.0) (2026-07-11)
+
+
+### ✨ Features
+
+* **identity:** add unrevokeUser to AuthTokenCache ([9587f0c](https://github.com/QNSC-VN/qnsc-app-platform/commit/9587f0cbf244bc10114b3d093d7bc659736d2286))
+* unify cache/auth primitives (sliding-window rate limit + AuthTokenCache.unrevokeUser) ([8308ced](https://github.com/QNSC-VN/qnsc-app-platform/commit/8308cedab55a506c59a029cad416a7695db5c177))
+
 ## [5.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v4.0.0...identity-v5.0.0) (2026-07-11)
 
 
