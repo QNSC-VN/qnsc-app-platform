@@ -1,0 +1,35 @@
+# =============================================================================
+# Security · Scan — thin caller of the shared reusable suite (qnsc-ci).
+#
+# qnsc-app-platform is a TypeScript library monorepo (packages/* published as
+# @qnsc-vn/*, no Dockerfile), so it calls the shared workflow with
+# `scan_container: false`: the Trivy container-CVE job is skipped while Semgrep
+# (SAST, replaces CodeQL), Gitleaks (secrets) and osv-scanner (dependency CVEs,
+# reads pnpm-lock.yaml) still run source-based.
+#
+# This is a foundational library consumed by rally/opshub — a vulnerable
+# transitive dep or injected pattern here propagates to every product, so this
+# gate belongs here just as much as in the app repos.
+# =============================================================================
+name: Security · Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * 1' # weekly Monday 04:00 UTC — catch new CVEs between pushes
+
+permissions:
+  contents: read
+  security-events: write # SARIF upload (no-op on the free plan, lights up after GHAS)
+
+jobs:
+  security:
+    uses: QNSC-VN/qnsc-ci/.github/workflows/security.yml@v1
+    with:
+      product: qnsc-app-platform
+      scan_container: false # no Dockerfile — skip Trivy, keep Semgrep + Gitleaks + osv
+      node_version: '22'
+    # security.yml declares no secrets — nothing to pass (no `secrets: inherit`).
