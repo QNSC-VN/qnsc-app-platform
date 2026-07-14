@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.3.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.2.0...identity-v5.3.0) (2026-07-14)
+
+
+### ✨ Features
+
+* **identity:** add OIDC authority override + always assign JIT default role ([#47](https://github.com/QNSC-VN/qnsc-app-platform/issues/47)) ([3c06f1c](https://github.com/QNSC-VN/qnsc-app-platform/commit/3c06f1c3050d4091d3ba94f3bb55b6140042e69e))
+
 ## [5.2.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.1.0...identity-v5.2.0) (2026-07-14)
 
 
