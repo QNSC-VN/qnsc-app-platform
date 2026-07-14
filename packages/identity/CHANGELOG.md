@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.2.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.1.0...identity-v5.2.0) (2026-07-14)
+
+
+### ✨ Features
+
+* **identity:** hoist BFF Entra OIDC login mechanism into shared package ([#43](https://github.com/QNSC-VN/qnsc-app-platform/issues/43)) ([e04204e](https://github.com/QNSC-VN/qnsc-app-platform/commit/e04204ea2cd08ded8a33ba3b5c981b023141fd16))
+
 ## [5.1.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.0.0...identity-v5.1.0) (2026-07-11)
 
 
