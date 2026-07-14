@@ -100,12 +100,21 @@ export class EntraOidcClient {
     return this.options.entra.redirectUri;
   }
 
+  /**
+   * OIDC authority (host) base URL fronting the tenant-segmented endpoints.
+   * Defaults to Microsoft's global cloud; overridable via {@link BffEntraOptions.authority}
+   * (e.g. a local mock OIDC server) to exercise the full login flow in tests.
+   */
+  private get authority(): string {
+    return this.options.entra.authority ?? 'https://login.microsoftonline.com';
+  }
+
   private get authorizeEndpoint(): string {
-    return `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/authorize`;
+    return `${this.authority}/${this.tenantId}/oauth2/v2.0/authorize`;
   }
 
   private get tokenEndpoint(): string {
-    return `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`;
+    return `${this.authority}/${this.tenantId}/oauth2/v2.0/token`;
   }
 }
 

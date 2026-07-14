@@ -57,6 +57,20 @@ describe('EntraOidcClient.buildAuthorizeUrl', () => {
     expect(url.searchParams.get('code_challenge')).toBe('challenge-1');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   });
+
+  it('honours an overridden authority (e.g. a mock OIDC server) for the authorize endpoint', () => {
+    const client = new EntraOidcClient(makeOptions({ authority: 'http://localhost:8899' }));
+    const url = new URL(
+      client.buildAuthorizeUrl({ state: 'state-1', codeChallenge: 'challenge-1' }),
+    );
+
+    expect(url.origin + url.pathname).toBe(
+      'http://localhost:8899/tenant-123/oauth2/v2.0/authorize',
+    );
+    // Overriding only the host leaves the flow params untouched.
+    expect(url.searchParams.get('client_id')).toBe('client-abc');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  });
 });
 
 describe('EntraOidcClient.exchangeCode', () => {
@@ -81,6 +95,21 @@ describe('EntraOidcClient.exchangeCode', () => {
     expect(body.get('client_secret')).toBe('secret-xyz');
     expect(body.get('code')).toBe('auth-code');
     expect(body.get('code_verifier')).toBe('verifier-1');
+  });
+
+  it('honours an overridden authority for the token endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id_token: 'the-id-token' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new EntraOidcClient(makeOptions({ authority: 'http://localhost:8899' }));
+    await client.exchangeCode({ code: 'auth-code', codeVerifier: 'verifier-1' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://localhost:8899/tenant-123/oauth2/v2.0/token',
+    );
   });
 
   it('throws when the token endpoint returns a non-2xx', async () => {
