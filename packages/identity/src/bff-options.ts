@@ -23,6 +23,15 @@ export interface BffEntraOptions {
   clientSecret: string;
   /** Registered redirect URI Entra returns the authorization code to. */
   redirectUri: string;
+  /**
+   * OIDC authority (host) base URL that fronts the tenant-segmented
+   * authorize/token endpoints. Defaults to Microsoft's global cloud
+   * (`https://login.microsoftonline.com`). Override it — e.g. to a local mock
+   * OIDC server — to exercise the full login flow end-to-end in tests or a
+   * sovereign/national cloud (`https://login.microsoftonline.us`). No trailing
+   * slash.
+   */
+  authority?: string;
 }
 
 /** Resolved options for the shared BFF mechanism. */

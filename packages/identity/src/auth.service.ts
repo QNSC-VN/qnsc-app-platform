@@ -856,7 +856,13 @@ export class AuthService {
     // Ensure the user is an active member of the SSO connection's workspace.
     await workspaceService.enrollMember(workspaceId, user.id);
 
-    if (defaultRoleSlug && this.accessService) {
+    // Every JIT-provisioned member must land with a baseline role — a member row
+    // with no role assignment falls through to the product's minimal-permission
+    // fallback, which is not the intended default. `ensureDefaultRole` is
+    // idempotent and supplies its own default when `defaultRoleSlug` is absent,
+    // so we call it whenever an access service is bound rather than gating on a
+    // slug being present (the slug is nullable on some connections).
+    if (this.accessService) {
       await this.accessService.ensureDefaultRole(user.id, workspaceId, defaultRoleSlug);
     }
 

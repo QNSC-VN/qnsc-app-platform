@@ -255,6 +255,32 @@ describe('AuthService.ssoLogin', () => {
     expect(result.accessToken).toBe('signed.jwt');
   });
 
+  it('assigns a baseline role on JIT provision even when the connection has no default slug', async () => {
+    const user = makeUser({ id: 'user-2', email: 'bob@acme.test' });
+    const h = buildService({
+      existingIdentity: null,
+      user,
+      claims: {
+        oid: 'oid-2',
+        email: 'bob@acme.test',
+        displayName: 'Bob',
+        externalTenantId: 'tid-1',
+      },
+      connection: {
+        workspaceId: 'ws-9',
+        status: 'active',
+        allowedEmailDomains: ['acme.test'],
+        jitEnabled: true,
+        // no defaultRoleSlug — the access service supplies its own default so the
+        // provisioned member never lands role-less (minimal-permission fallback).
+      },
+    });
+
+    await h.service.ssoLogin('id-token');
+
+    expect(h.accessService.ensureDefaultRole).toHaveBeenCalledWith('user-2', 'ws-9', undefined);
+  });
+
   it('rejects a deactivated existing account', async () => {
     const user = makeUser({ status: 'suspended' });
     const h = buildService({ existingIdentity: { userId: user.id }, user });
