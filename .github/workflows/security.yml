@@ -21,9 +21,18 @@ on:
   schedule:
     - cron: '0 4 * * 1' # weekly Monday 04:00 UTC — catch new CVEs between pushes
 
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write # SARIF upload (no-op on the free plan, lights up after GHAS)
+  packages: read # ceiling for the reusable Trivy job's `packages: read`; a called
+  # workflow's job permissions can only be REDUCED, not elevated, above the caller's
+  # top-level grant. Trivy is skipped here (scan_container: false), but GitHub validates
+  # every reusable job's permission ceiling at STARTUP before evaluating `if:`, so this
+  # must be present or the whole run fails with startup_failure.
 
 jobs:
   security:
