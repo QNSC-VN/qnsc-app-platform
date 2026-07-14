@@ -5,8 +5,9 @@
  * Passport strategy, the JWT auth guard (with Valkey denylist checks), the
  * wildcard-aware permission guard, the auth decorators, Entra/SSO token
  * verification, and refresh-token crypto, the refresh-rotation auth service,
- * and the cookie-based auth HTTP controller. The BFF session handlers follow
- * in later phases.
+ * the cookie-based auth HTTP controller, and the Backend-for-Frontend (BFF)
+ * Entra OIDC login mechanism (session store, OIDC client, orchestrator, and
+ * the opt-in `BffModule`).
  */
 export * from './jwt-payload';
 export * from './jwt-options';
@@ -32,3 +33,10 @@ export * from './auth-token-cache.service';
 export * from './auth.dto';
 export * from './auth.controller';
 export * from './auth.module';
+export * from './bff-options';
+export * from './bff.types';
+export * from './bff.util';
+export * from './entra-oidc.client';
+export * from './bff-session.store';
+export * from './bff.service';
+export * from './bff.module';
