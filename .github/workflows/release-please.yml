@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   release:
-    uses: QNSC-VN/qnsc-ci/.github/workflows/release-please.yml@v1
+    uses: QNSC-VN/qnsc-ci/.github/workflows/release-please.yml@v1.3.0
     with:
       config_file: release-please-config.json
       manifest_file: .release-please-manifest.json
