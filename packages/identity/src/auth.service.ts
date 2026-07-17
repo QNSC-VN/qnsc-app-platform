@@ -94,6 +94,7 @@ export interface UpdateProfileInput {
   avatarUrl?: string | null;
   locale?: string;
   timezone?: string;
+  phone?: string | null;
 }
 
 @Injectable()

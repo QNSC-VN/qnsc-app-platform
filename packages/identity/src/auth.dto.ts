@@ -9,6 +9,7 @@ export const UpdateProfileSchema = z.object({
   avatarUrl: z.string().url().nullable().optional(),
   locale: z.string().min(2).max(10).optional(),
   timezone: z.string().min(1).max(100).optional(),
+  phone: z.string().trim().max(32).nullable().optional(),
 });
 
 export class UpdateProfileDto extends createZodDto(UpdateProfileSchema) {}
@@ -42,6 +43,7 @@ const UserProfileSchema = z.object({
   avatarUrl: z.string().nullable(),
   locale: z.string(),
   timezone: z.string(),
+  phone: z.string().nullable().optional(),
 });
 
 const WorkspaceMembershipSchema = z.object({
