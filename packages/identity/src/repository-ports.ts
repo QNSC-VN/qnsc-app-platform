@@ -31,7 +31,13 @@ export interface IUserRepository<Tx = unknown> {
   updateStatus(id: string, status: string, tx?: Tx): Promise<void>;
   updateProfile(
     id: string,
-    input: { displayName?: string; avatarUrl?: string | null; locale?: string; timezone?: string },
+    input: {
+      displayName?: string;
+      avatarUrl?: string | null;
+      locale?: string;
+      timezone?: string;
+      phone?: string | null;
+    },
   ): Promise<User>;
 
   /** Look up an existing SSO identity row by provider + providerSub (Entra oid). */

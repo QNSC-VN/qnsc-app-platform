@@ -18,6 +18,11 @@ export interface User {
   emailVerified: boolean;
   locale: string;
   timezone: string;
+  /**
+   * Optional contact phone number. Products that expose a phone field on their
+   * users table populate this; single-tenant products may leave it undefined.
+   */
+  phone?: string | null;
   sessionVersion: number;
   lastLoginAt: Date | null;
   deletedAt: Date | null;
