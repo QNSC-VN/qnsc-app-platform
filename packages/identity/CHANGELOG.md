@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.4.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.3.0...identity-v5.4.0) (2026-07-18)
+
+
+### ✨ Features
+
+* **identity:** add optional phone field to user profile contract ([#49](https://github.com/QNSC-VN/qnsc-app-platform/issues/49)) ([db8b841](https://github.com/QNSC-VN/qnsc-app-platform/commit/db8b841181d7acbd00be87edad96c4318e2d7105))
+
 ## [5.3.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.2.0...identity-v5.3.0) (2026-07-14)
 
 
