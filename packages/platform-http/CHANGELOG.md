@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v3.0.0...platform-http-v3.1.0) (2026-07-18)
+
+
+### ✨ Features
+
+* **platform-http:** map HTTP 412 to PRECONDITION_FAILED ([#52](https://github.com/QNSC-VN/qnsc-app-platform/issues/52)) ([f166300](https://github.com/QNSC-VN/qnsc-app-platform/commit/f166300d437e332bd5da15660a91d71106c76833))
+
 ## [3.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v2.0.0...platform-http-v3.0.0) (2026-07-11)
 
 
