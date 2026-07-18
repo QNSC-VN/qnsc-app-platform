@@ -46,6 +46,7 @@ export const HttpErrorCodes = {
   BAD_REQUEST: 'BAD_REQUEST',
   METHOD_NOT_ALLOWED: 'METHOD_NOT_ALLOWED',
   CONFLICT: 'CONFLICT',
+  PRECONDITION_FAILED: 'PRECONDITION_FAILED',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   UNSUPPORTED_MEDIA_TYPE: 'UNSUPPORTED_MEDIA_TYPE',
 } as const;
@@ -65,6 +66,8 @@ export function httpStatusToErrorCode(status: number): string {
       return HttpErrorCodes.METHOD_NOT_ALLOWED;
     case 409:
       return HttpErrorCodes.CONFLICT;
+    case 412:
+      return HttpErrorCodes.PRECONDITION_FAILED;
     case 413:
       return HttpErrorCodes.PAYLOAD_TOO_LARGE;
     case 415:

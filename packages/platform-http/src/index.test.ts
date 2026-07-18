@@ -27,6 +27,7 @@ import {
 describe('error taxonomy', () => {
   it('maps HTTP statuses to stable codes with an INTERNAL fallback', () => {
     expect(httpStatusToErrorCode(404)).toBe(HttpErrorCodes.NOT_FOUND);
+    expect(httpStatusToErrorCode(412)).toBe(HttpErrorCodes.PRECONDITION_FAILED);
     expect(httpStatusToErrorCode(429)).toBe(HttpErrorCodes.RATE_LIMITED);
     expect(httpStatusToErrorCode(418)).toBe(HttpErrorCodes.INTERNAL_ERROR);
   });
