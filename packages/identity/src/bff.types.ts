@@ -15,6 +15,17 @@ export interface BffAuthRequest {
   returnTo: string;
   /** Epoch ms the request was created (for observability / expiry sanity). */
   createdAt: number;
+  /**
+   * OIDC `nonce` bound to this request (multi-IdP broker path). Verified against
+   * the id_token on callback. Absent on the legacy home flow.
+   */
+  nonce?: string;
+  /**
+   * Resolved connection id (multi-IdP broker path). Present ⇒ the callback
+   * routes through the generic client/verifier for this connection. Absent ⇒
+   * the legacy home (Entra) path.
+   */
+  connectionId?: string;
 }
 
 /**

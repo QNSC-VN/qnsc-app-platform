@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { UnauthorizedException } from '@qnsc-vn/platform-http';
 import { randomUUID } from 'node:crypto';
 import { AuthService } from './auth.service';
 import { BFF_OPTIONS, type BffOptions } from './bff-options';
@@ -6,6 +7,9 @@ import { BffSessionStore } from './bff-session.store';
 import type { BffSession } from './bff.types';
 import { decodeAccessTokenClaims, isSafeReturnTo } from './bff.util';
 import { EntraOidcClient } from './entra-oidc.client';
+import { ConnectionRegistry } from './oidc/connection-registry';
+import { OidcClient } from './oidc/oidc.client';
+import { OidcTokenVerifier } from './oidc/oidc-verifier';
 import type { JwtPayload } from './jwt-payload';
 
 /** Refresh the access token this many ms *before* it actually expires. */
@@ -44,6 +48,11 @@ export class BffService {
     @Inject(EntraOidcClient) private readonly oidc: EntraOidcClient,
     @Inject(BffSessionStore) private readonly store: BffSessionStore,
     @Inject(AuthService) private readonly authService: AuthService,
+    // Multi-IdP broker collaborators — optional so single-tenant consumers
+    // (which never wire them) keep working on the legacy home path.
+    @Optional() @Inject(ConnectionRegistry) private readonly registry?: ConnectionRegistry,
+    @Optional() @Inject(OidcClient) private readonly brokerOidc?: OidcClient,
+    @Optional() @Inject(OidcTokenVerifier) private readonly verifier?: OidcTokenVerifier,
   ) {}
 
   /**
@@ -69,18 +78,46 @@ export class BffService {
    * Begin login: generate PKCE + `state`, persist the pending auth request, and
    * return the Entra authorize URL to redirect the browser to.
    */
-  async beginLogin(rawReturnTo: string | undefined): Promise<BffLoginStart> {
-    const state = randomUUID();
-    const { verifier, challenge } = EntraOidcClient.generatePkce();
+  async beginLogin(rawReturnTo: string | undefined, email?: string): Promise<BffLoginStart> {
     const returnTo = isSafeReturnTo(rawReturnTo) ? rawReturnTo : this.options.postLoginRedirect;
 
+    // ── Multi-IdP broker path: email → connection → its IdP ──────────────────
+    if (email) {
+      if (!this.registry || !this.brokerOidc) {
+        throw new Error('Multi-IdP broker is not configured on this server');
+      }
+      const conn = await this.registry.resolveForEmail(email);
+      if (!conn) {
+        throw new UnauthorizedException('NO_CONNECTION', 'No access — contact your administrator');
+      }
+      const state = randomUUID();
+      const { verifier, challenge } = OidcClient.generatePkce();
+      const nonce = OidcClient.generateNonce();
+      await this.store.saveAuthRequest({
+        state,
+        codeVerifier: verifier,
+        nonce,
+        connectionId: conn.id,
+        returnTo,
+        createdAt: Date.now(),
+      });
+      const authorizeUrl = this.brokerOidc.buildAuthorizeUrl(conn, {
+        state,
+        codeChallenge: challenge,
+        nonce,
+      });
+      return { authorizeUrl, state };
+    }
+
+    // ── Legacy home path (the "Sign in with Microsoft" quick button) ─────────
+    const state = randomUUID();
+    const { verifier, challenge } = EntraOidcClient.generatePkce();
     await this.store.saveAuthRequest({
       state,
       codeVerifier: verifier,
       returnTo,
       createdAt: Date.now(),
     });
-
     const authorizeUrl = this.oidc.buildAuthorizeUrl({ state, codeChallenge: challenge });
     return { authorizeUrl, state };
   }
@@ -107,11 +144,31 @@ export class BffService {
       throw new Error('BFF auth request not found or already used');
     }
 
-    const { idToken } = await this.oidc.exchangeCode({
-      code: params.code,
-      codeVerifier: authRequest.codeVerifier,
-    });
-    const loginResult = await this.authService.ssoLogin(idToken, params.ip);
+    let loginResult;
+    if (authRequest.connectionId) {
+      // ── Multi-IdP broker path: route by the connection stored with the state ──
+      if (!this.registry || !this.brokerOidc || !this.verifier) {
+        throw new Error('Multi-IdP broker is not configured on this server');
+      }
+      const conn = await this.registry.resolveById(authRequest.connectionId);
+      if (!conn) {
+        // Connection was disabled between start and callback (cutoff).
+        throw new UnauthorizedException('NO_CONNECTION', 'No access — contact your administrator');
+      }
+      const { idToken } = await this.brokerOidc.exchangeCode(conn, {
+        code: params.code,
+        codeVerifier: authRequest.codeVerifier,
+      });
+      const claims = await this.verifier.verify(idToken, conn, authRequest.nonce);
+      loginResult = await this.authService.ssoLoginFromConnection(conn, claims, params.ip);
+    } else {
+      // ── Legacy home path ─────────────────────────────────────────────────
+      const { idToken } = await this.oidc.exchangeCode({
+        code: params.code,
+        codeVerifier: authRequest.codeVerifier,
+      });
+      loginResult = await this.authService.ssoLogin(idToken, params.ip);
+    }
 
     const sid = randomUUID();
     await this.store.saveSession(sid, this.toSession(loginResult), this.sessionTtlSeconds);

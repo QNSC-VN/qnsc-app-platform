@@ -9,6 +9,13 @@ export interface ResolvedConnection {
   id: string;
   kind: 'directory' | 'shared';
   provider: string;
+  // ── Provisioning fields (mirror the row) so this doubles as the provisioning
+  // contract on the callback — no second lookup needed. ───────────────────────
+  workspaceId: string;
+  defaultRoleSlug: string;
+  allowedEmailDomains: string[];
+  jitEnabled: boolean;
+  // ── OIDC fields ─────────────────────────────────────────────────────────────
   clientId: string;
   clientSecret: string;
   redirectUri: string;
