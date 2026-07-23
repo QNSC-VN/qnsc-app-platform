@@ -332,10 +332,10 @@ describe('AuthService.ssoLogin', () => {
     });
   });
 
-  it('rejects when JIT is disabled', async () => {
+  it('rejects a brand-new user when JIT is disabled (invite-only)', async () => {
     const h = buildService({
       existingIdentity: null,
-      user: makeUser(),
+      user: null,
       connection: {
         workspaceId: 'ws-9',
         status: 'active',
@@ -346,6 +346,65 @@ describe('AuthService.ssoLogin', () => {
     await expect(h.service.ssoLogin('id-token')).rejects.toMatchObject({
       code: 'SSO_JIT_DISABLED',
     });
+  });
+
+  it('allows a pre-provisioned (invited) user when JIT is disabled', async () => {
+    const user = makeUser({ id: 'user-2', email: 'bob@acme.test' });
+    const h = buildService({
+      existingIdentity: null,
+      user,
+      claims: {
+        oid: 'oid-2',
+        email: 'bob@acme.test',
+        displayName: 'Bob',
+        externalTenantId: 'tid-1',
+      },
+      connection: {
+        workspaceId: 'ws-9',
+        status: 'active',
+        allowedEmailDomains: ['acme.test'],
+        jitEnabled: false,
+        defaultRoleSlug: 'project_member',
+      },
+    });
+
+    const result = await h.service.ssoLogin('id-token');
+
+    expect(h.userRepo.findByEmail).toHaveBeenCalledWith('bob@acme.test');
+    expect(h.userRepo.upsertBySsoIdentity).toHaveBeenCalled();
+    expect(h.workspaceService.enrollMember).toHaveBeenCalledWith('ws-9', 'user-2');
+    expect(result.accessToken).toBe('signed.jwt');
+  });
+
+  it('allows a platform admin when JIT is disabled even with no prior account', async () => {
+    const user = makeUser({ id: 'user-3', email: 'admin@acme.test' });
+    const h = buildService({
+      existingIdentity: null,
+      user,
+      claims: {
+        oid: 'oid-4',
+        email: 'admin@acme.test',
+        displayName: 'Admin',
+        externalTenantId: 'tid-1',
+      },
+      connection: {
+        workspaceId: 'ws-9',
+        status: 'active',
+        allowedEmailDomains: ['acme.test'],
+        jitEnabled: false,
+        defaultRoleSlug: 'project_member',
+      },
+      options: { platformAdminEmails: ['admin@acme.test'] },
+    });
+    // No prior account: the admin is provisioned via the break-glass allow-list,
+    // never via the invited-user match.
+    h.userRepo.findByEmail.mockResolvedValue(null);
+
+    const result = await h.service.ssoLogin('id-token');
+
+    expect(h.userRepo.upsertBySsoIdentity).toHaveBeenCalled();
+    expect(h.accessService.elevateToWorkspaceAdmin).toHaveBeenCalledWith('user-3', 'ws-9');
+    expect(result.accessToken).toBe('signed.jwt');
   });
 
   it('auto-elevates a platform admin and audits the elevation', async () => {
