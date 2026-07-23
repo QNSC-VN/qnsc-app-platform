@@ -1,5 +1,5 @@
 {
-  "packages/identity": "5.4.0",
+  "packages/identity": "5.5.0",
   "packages/platform-cache": "2.1.0",
   "packages/platform-http": "3.1.0"
 }
