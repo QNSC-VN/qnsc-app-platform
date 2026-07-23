@@ -830,11 +830,23 @@ export class AuthService {
             'Your email domain is not permitted to sign in to this organization.',
           );
         }
+        // Invite-only mode. When JIT is disabled the directory's domain no longer
+        // grants automatic access: a user may sign in ONLY if they were already
+        // provisioned — seeded or invited (matched by email and linked below) — or
+        // are an explicit platform admin (the break-glass allow-list that must
+        // never be locked out). Any brand-new identity is rejected until an admin
+        // invites them.
         if (!connection.jitEnabled) {
-          throw new UnauthorizedException(
-            'SSO_JIT_DISABLED',
-            'Automatic account creation is disabled. Please ask your administrator for an invitation.',
+          const normalizedEmail = email.toLowerCase().trim();
+          const isPlatformAdmin = this.options.platformAdminEmails.some(
+            (e) => e.toLowerCase() === normalizedEmail,
           );
+          if (!isPlatformAdmin && !(await this.userRepo.findByEmail(normalizedEmail))) {
+            throw new UnauthorizedException(
+              'SSO_JIT_DISABLED',
+              'Automatic account creation is disabled. Please ask your administrator for an invitation.',
+            );
+          }
         }
         connectionWorkspaceId = connection.workspaceId;
         defaultRoleSlug = connection.defaultRoleSlug;
