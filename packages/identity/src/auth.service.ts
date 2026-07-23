@@ -962,47 +962,21 @@ export class AuthService {
       );
     }
 
-    let connectionWorkspaceId: string | null = null;
-    let defaultRoleSlug: string | undefined;
-
-    if (externalTenantId) {
-      const connection = await ssoConnectionRepo.findByExternalTenantId('entra', externalTenantId);
-      if (connection) {
-        // Single source of truth for the connection gate (status / owned-domain /
-        // invite-only break-glass) — shared with the multi-IdP broker path.
-        await this.assertConnectionAllows(connection, email);
-        connectionWorkspaceId = connection.workspaceId;
-        defaultRoleSlug = connection.defaultRoleSlug;
-      }
-    }
-
-    if (!connectionWorkspaceId) {
+    // Resolve the connection by the token's tenant id, then provision through the
+    // shared connection-driven path — one source of truth for the gate AND the
+    // upsert/enrol/default-role tail (see provisionIntoConnection), reused by the
+    // multi-IdP broker. An unmapped IdP is rejected rather than silently dropped
+    // into a default workspace.
+    const connection = externalTenantId
+      ? await ssoConnectionRepo.findByExternalTenantId('entra', externalTenantId)
+      : null;
+    if (!connection) {
       throw new UnauthorizedException(
         'SSO_NO_ACCESS',
         'No workspace is configured for your organization. Please ask your administrator for an invitation.',
       );
     }
-
-    const workspaceId = connectionWorkspaceId;
-
-    // Upsert the user + SSO identity link. The SSO identity is install-global;
-    // workspace membership is handled separately below.
-    const user = await this.userRepo.upsertBySsoIdentity('entra', oid, email, displayName);
-
-    // Ensure the user is an active member of the SSO connection's workspace.
-    await workspaceService.enrollMember(workspaceId, user.id);
-
-    // Every JIT-provisioned member must land with a baseline role — a member row
-    // with no role assignment falls through to the product's minimal-permission
-    // fallback, which is not the intended default. `ensureDefaultRole` is
-    // idempotent and supplies its own default when `defaultRoleSlug` is absent,
-    // so we call it whenever an access service is bound rather than gating on a
-    // slug being present (the slug is nullable on some connections).
-    if (this.accessService) {
-      await this.accessService.ensureDefaultRole(user.id, workspaceId, defaultRoleSlug);
-    }
-
-    return { user, workspaceId };
+    return this.provisionIntoConnection(connection, { oid, email, displayName });
   }
 
   /** Returns true when the email's domain is permitted (empty list = any). */

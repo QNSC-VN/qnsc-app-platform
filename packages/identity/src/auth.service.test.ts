@@ -119,7 +119,11 @@ function buildService(opts?: {
     revokeAllForUser: vi.fn(async () => {}),
   };
   const ssoConnectionRepo = {
-    findByExternalTenantId: vi.fn(async () => opts?.connection ?? null),
+    // Real rows always carry a provider; the fixture omits it, so default to
+    // 'entra' (the home-tenant provider) which the connection-driven upsert keys on.
+    findByExternalTenantId: vi.fn(async () =>
+      opts?.connection ? { provider: 'entra', ...opts.connection } : null,
+    ),
   };
   const txRunner = { transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn({})) };
   const accessService = {
