@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.5.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.4.0...identity-v5.5.0) (2026-07-23)
+
+
+### ✨ Features
+
+* **identity:** break-glass for JIT-disabled connections ([#55](https://github.com/QNSC-VN/qnsc-app-platform/issues/55)) ([092b57e](https://github.com/QNSC-VN/qnsc-app-platform/commit/092b57e7a6696bf705735830350eb2d112e5776a))
+* **identity:** provider-agnostic multi-IdP OIDC broker ([#56](https://github.com/QNSC-VN/qnsc-app-platform/issues/56)) ([6b2b30f](https://github.com/QNSC-VN/qnsc-app-platform/commit/6b2b30f1f4dff2bf0926955e0afed5fbfadaec2c))
+
 ## [5.4.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.3.0...identity-v5.4.0) (2026-07-18)
 
 
