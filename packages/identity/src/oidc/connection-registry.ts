@@ -1,6 +1,6 @@
 import type { ISsoConnectionRepository } from '../repository-ports';
 import type { SsoConnection } from '../domain-types';
-import { OidcDiscovery } from './oidc-discovery';
+import type { OidcDiscovery } from './oidc-discovery';
 import { isBrokerConfigured, type ISecretResolver, type ResolvedConnection } from './oidc-connection';
 
 interface CacheEntry {

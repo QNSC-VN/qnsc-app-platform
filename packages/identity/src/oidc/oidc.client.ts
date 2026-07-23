@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { ResolvedConnection } from './oidc-connection';
 
-export interface PkcePair {
+export interface OidcPkcePair {
   verifier: string;
   challenge: string;
 }
@@ -18,7 +18,7 @@ const b64url = (b: Buffer) => b.toString('base64url');
 export class OidcClient {
   constructor(private readonly fetchFn: typeof fetch = fetch) {}
 
-  static generatePkce(): PkcePair {
+  static generatePkce(): OidcPkcePair {
     const verifier = b64url(randomBytes(32));
     const challenge = b64url(createHash('sha256').update(verifier).digest());
     return { verifier, challenge };
