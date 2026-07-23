@@ -97,13 +97,21 @@ describe('ConnectionRegistry', () => {
     expect(r?.acceptedIssuers).toEqual(['https://a', 'https://b']);
   });
 
-  it('caches by connection id (no repeat discovery/secret fetch within TTL)', async () => {
-    const { reg, fetchFn, secretsGet } = make({
-      findById: vi.fn().mockResolvedValue(row()),
-    });
+  it('does not cache the assembled connection (discovery is cached one layer down)', async () => {
+    const { reg, fetchFn } = make({ findById: vi.fn().mockResolvedValue(row()) });
     await reg.resolveById('c1');
     await reg.resolveById('c1');
+    // OidcDiscovery memoizes the .well-known fetch; the registry re-reads the row.
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect(secretsGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('reflects a disabled connection immediately — no stale cache (instant cutoff)', async () => {
+    const findById = vi
+      .fn()
+      .mockResolvedValueOnce(row())
+      .mockResolvedValueOnce(row({ status: 'disabled' }));
+    const { reg } = make({ findById });
+    expect(await reg.resolveById('c1')).not.toBeNull();
+    expect(await reg.resolveById('c1')).toBeNull(); // flipped → instantly denied
   });
 });

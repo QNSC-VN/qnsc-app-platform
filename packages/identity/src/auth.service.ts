@@ -26,7 +26,7 @@ import { generateRefreshToken, hashToken, parseTtlSeconds } from './refresh-toke
 import { AUTH_SERVICE_OPTIONS, type AuthServiceOptions } from './auth-options';
 import { EntraTokenVerifier, type EntraClaims } from './entra-verifier';
 import { SSO_PROVISIONING_HOOK, type ISsoProvisioningHook } from './sso-provisioning-hook';
-import type { AuthSession, User, SsoConnection } from './domain-types';
+import type { AuthSession, User } from './domain-types';
 import type { JwtPayload } from './jwt-payload';
 import {
   AUTH_SESSION_REPOSITORY,
@@ -46,6 +46,22 @@ import {
   type WorkspaceMembership,
 } from './service-ports';
 import { TRANSACTION_RUNNER, type ITransactionRunner } from './transaction-runner';
+
+/**
+ * Minimal connection shape SSO provisioning needs — satisfied by BOTH the DB row
+ * ({@link SsoConnection}) and the broker's `ResolvedConnection`, so one gate +
+ * provisioning path serves the legacy home flow and the multi-IdP broker.
+ */
+export interface ProvisioningConnection {
+  id: string;
+  provider: string;
+  kind?: 'directory' | 'shared';
+  workspaceId: string;
+  defaultRoleSlug: string;
+  allowedEmailDomains: string[];
+  jitEnabled: boolean;
+  status?: 'active' | 'disabled';
+}
 
 /** Fallback refresh-token lifetime when `jwtRefreshExpiry` is unparseable (30 days). */
 const REMEMBER_ME_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -637,7 +653,7 @@ export class AuthService {
    * (never by re-deriving tenant/provider from claims) and mint the session.
    */
   async ssoLoginFromConnection(
-    connection: SsoConnection,
+    connection: ProvisioningConnection,
     claims: EntraClaims,
     ipAddress?: string,
   ): Promise<LoginResult> {
@@ -696,8 +712,8 @@ export class AuthService {
    * and honor invite-only mode (jitEnabled=false) with the platform-admin
    * break-glass allow-list.
    */
-  private async assertConnectionAllows(connection: SsoConnection, email: string): Promise<void> {
-    if (connection.status !== 'active') {
+  private async assertConnectionAllows(connection: ProvisioningConnection, email: string): Promise<void> {
+    if (connection.status && connection.status !== 'active') {
       throw new UnauthorizedException(
         'SSO_CONNECTION_DISABLED',
         'SSO for your organization is disabled. Please contact your administrator.',
@@ -725,7 +741,7 @@ export class AuthService {
 
   /** Provision (idempotent) a user into a RESOLVED connection's workspace + role. */
   private async provisionIntoConnection(
-    connection: SsoConnection,
+    connection: ProvisioningConnection,
     claims: { oid: string; email: string; displayName: string },
   ): Promise<{ user: User; workspaceId: string }> {
     const workspaceService = this.workspaceService;
@@ -952,36 +968,9 @@ export class AuthService {
     if (externalTenantId) {
       const connection = await ssoConnectionRepo.findByExternalTenantId('entra', externalTenantId);
       if (connection) {
-        if (connection.status !== 'active') {
-          throw new UnauthorizedException(
-            'SSO_CONNECTION_DISABLED',
-            'SSO for your organization is disabled. Please contact your administrator.',
-          );
-        }
-        if (!this.isEmailDomainAllowed(email, connection.allowedEmailDomains)) {
-          throw new UnauthorizedException(
-            'SSO_DOMAIN_NOT_ALLOWED',
-            'Your email domain is not permitted to sign in to this organization.',
-          );
-        }
-        // Invite-only mode. When JIT is disabled the directory's domain no longer
-        // grants automatic access: a user may sign in ONLY if they were already
-        // provisioned — seeded or invited (matched by email and linked below) — or
-        // are an explicit platform admin (the break-glass allow-list that must
-        // never be locked out). Any brand-new identity is rejected until an admin
-        // invites them.
-        if (!connection.jitEnabled) {
-          const normalizedEmail = email.toLowerCase().trim();
-          const isPlatformAdmin = this.options.platformAdminEmails.some(
-            (e) => e.toLowerCase() === normalizedEmail,
-          );
-          if (!isPlatformAdmin && !(await this.userRepo.findByEmail(normalizedEmail))) {
-            throw new UnauthorizedException(
-              'SSO_JIT_DISABLED',
-              'Automatic account creation is disabled. Please ask your administrator for an invitation.',
-            );
-          }
-        }
+        // Single source of truth for the connection gate (status / owned-domain /
+        // invite-only break-glass) — shared with the multi-IdP broker path.
+        await this.assertConnectionAllows(connection, email);
         connectionWorkspaceId = connection.workspaceId;
         defaultRoleSlug = connection.defaultRoleSlug;
       }

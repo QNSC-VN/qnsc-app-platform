@@ -3,29 +3,25 @@ import type { SsoConnection } from '../domain-types';
 import type { OidcDiscovery } from './oidc-discovery';
 import { isBrokerConfigured, type ISecretResolver, type ResolvedConnection } from './oidc-connection';
 
-interface CacheEntry {
-  value: ResolvedConnection;
-  expiresAt: number;
-}
-
 /**
- * Turns an `sso_connections` row into a fully-formed {@link ResolvedConnection}
- * (secret + discovered endpoints + app redirect), and resolves the connection
- * for an email (directory-by-domain, else shared-by-invite) or by id (callback).
- * Short-TTL cache keyed by connection id avoids re-fetching discovery/secret on
- * every login. Disabled / unconfigured rows resolve to null (instant cutoff).
+ * Resolves an `sso_connections` row into a fully-formed {@link ResolvedConnection}
+ * (client secret + discovered endpoints + the app redirect), for an email
+ * (directory-by-domain, else shared-by-invite) or by id (the callback).
+ *
+ * Deliberately does **not** cache the assembled connection: the only expensive
+ * I/O is already cached one layer down — {@link OidcDiscovery} (endpoint TTL
+ * cache) and the {@link ISecretResolver} implementation (secret TTL cache). So
+ * every resolve re-reads the current row, keeping status/config fresh and making
+ * a `status='disabled'` cutoff take effect **immediately** (no stale-cache
+ * window). Disabled / unconfigured rows resolve to `null`.
  */
 export class ConnectionRegistry {
-  private readonly cache = new Map<string, CacheEntry>();
-
   constructor(
     private readonly repo: ISsoConnectionRepository,
     private readonly secrets: ISecretResolver,
     private readonly discovery: OidcDiscovery,
     /** The single app-level callback (Decision 9), shared by every connection. */
     private readonly redirectUri: string,
-    private readonly ttlMs = 300_000,
-    private readonly now: () => number = () => Date.now(),
   ) {}
 
   /** Email-first routing: a directory that owns the domain, else a shared IdP the email is invited to. */
@@ -38,8 +34,6 @@ export class ConnectionRegistry {
 
   /** Callback path: resolve the connection stored with the auth request's state. */
   async resolveById(id: string): Promise<ResolvedConnection | null> {
-    const cached = this.cache.get(id);
-    if (cached && cached.expiresAt > this.now()) return cached.value;
     const row = await this.repo.findById(id);
     return row ? this.resolve(row) : null;
   }
@@ -47,12 +41,9 @@ export class ConnectionRegistry {
   private async resolve(row: SsoConnection): Promise<ResolvedConnection | null> {
     if (row.status !== 'active' || !isBrokerConfigured(row)) return null;
 
-    const cached = this.cache.get(row.id);
-    if (cached && cached.expiresAt > this.now()) return cached.value;
-
     const endpoints = await this.discovery.resolve(row.authorityUrl!);
     const clientSecret = await this.secrets.get(row.clientSecretRef!);
-    const resolved: ResolvedConnection = {
+    return {
       id: row.id,
       kind: row.kind ?? 'directory',
       provider: row.provider,
@@ -73,7 +64,5 @@ export class ConnectionRegistry {
       tokenEndpoint: endpoints.tokenEndpoint,
       jwksUri: row.jwksUri ?? endpoints.jwksUri,
     };
-    this.cache.set(row.id, { value: resolved, expiresAt: this.now() + this.ttlMs });
-    return resolved;
   }
 }
