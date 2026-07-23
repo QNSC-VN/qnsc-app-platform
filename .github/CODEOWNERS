@@ -1,3 +1,15 @@
 # Default owner for the whole repo. Required by the branch ruleset's
 # code-owner review rule.
-* @Nghia-VanTrong
+*                            @QNSC-VN/platform-infra
+
+# Published packages — consumed by rally and opshub backends.
+# Breaking changes here affect both products; keep ownership scoped
+# to platform-infra until a package needs a dedicated owning team.
+packages/identity/          @QNSC-VN/platform-infra
+packages/platform-cache/    @QNSC-VN/platform-infra
+packages/platform-http/     @QNSC-VN/platform-infra
+
+# Release/publish config — controls what gets published to GitHub Packages
+release-please-config.json  @QNSC-VN/platform-infra
+.release-please-manifest.json @QNSC-VN/platform-infra
+.github/workflows/           @QNSC-VN/platform-infra
