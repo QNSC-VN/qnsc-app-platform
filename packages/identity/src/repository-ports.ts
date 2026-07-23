@@ -84,6 +84,28 @@ export interface ISsoConnectionRepository {
    * Look up an active SSO connection by provider + external IdP tenant id
    * (Entra `tid`). Runs across all workspaces — this is how a federated user is
    * routed to the correct workspace before any workspace context is known.
+   *
+   * @deprecated for the broker path — kept for the legacy home flow. New code
+   * resolves the connection up-front (by email/id) and routes by it.
    */
   findByExternalTenantId(provider: string, externalTenantId: string): Promise<SsoConnection | null>;
+
+  // ── Broker resolution (multi-IdP) ──────────────────────────────────────────
+  /**
+   * Active `directory` connection that OWNS the email's domain. At most one by
+   * the `sso_connection_domains` UNIQUE(domain) constraint. Used for email-first
+   * routing and the provisioning domain gate.
+   */
+  findDirectoryByEmailDomain(email: string): Promise<SsoConnection | null>;
+  /**
+   * Active `shared` connection the email has a PENDING invitation to. Consumer
+   * IdPs (e.g. Gmail) are never domain-routed — access is gated by invite.
+   */
+  findSharedByInvitedEmail(email: string): Promise<SsoConnection | null>;
+  /** Resolve a connection by id (used on the callback, keyed off the stored state). */
+  findById(id: string): Promise<SsoConnection | null>;
+  /** Active `shared` connections to render as explicit login buttons. */
+  listActiveShared(): Promise<SsoConnection[]>;
+  /** True if the email's domain is owned by this (directory) connection — the provisioning gate. */
+  connectionOwnsEmailDomain(connectionId: string, email: string): Promise<boolean>;
 }

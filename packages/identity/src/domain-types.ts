@@ -92,6 +92,30 @@ export interface SsoConnection {
   status: 'active' | 'disabled';
   createdAt: Date;
   updatedAt: Date;
+  // ── OIDC broker fields (multi-IdP). Nullable for legacy rows; a row is only
+  // broker-usable once fully configured (see isBrokerConfigured). ──────────────
+  /**
+   * Routing/gating model:
+   * - `directory`: this connection OWNS its email domains → routed by domain,
+   *   JIT-provisioned by domain (a company tenant / Google Workspace).
+   * - `shared`: a shared/consumer IdP we do NOT own (e.g. consumer Google) →
+   *   never domain-routed; reached via an explicit button and gated by invite.
+   */
+  kind?: 'directory' | 'shared';
+  /** OIDC issuer base for mandatory `.well-known` discovery. */
+  authorityUrl?: string | null;
+  /** Optional JWKS override; otherwise taken from discovery. */
+  jwksUri?: string | null;
+  /** Extra accepted issuers (e.g. Entra v1 `sts.windows.net` + v2). Empty ⇒ `[discovery issuer]`. */
+  acceptedIssuers?: string[] | null;
+  /** OAuth scopes; defaults to `openid profile email`. */
+  scopes?: string | null;
+  /** Public IdP client id (also the expected token audience). */
+  clientId?: string | null;
+  /** Reference (SSM param name / ARN) to the client secret in the secret store — never the secret. */
+  clientSecretRef?: string | null;
+  /** Human label for the login button + logs/audit. */
+  displayName?: string | null;
 }
 
 export interface CreateUserInput {
