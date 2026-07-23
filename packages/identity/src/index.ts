@@ -40,3 +40,12 @@ export * from './entra-oidc.client';
 export * from './bff-session.store';
 export * from './bff.service';
 export * from './bff.module';
+// ── Multi-IdP OIDC broker (provider-agnostic; secret store via the SecretResolver
+// port — concrete resolvers, e.g. AWS SSM, are supplied by the consuming app so
+// this package stays store-agnostic). ─────────────────────────────────────────
+export * from './oidc/connection.contract';
+export * from './oidc/oidc-connection';
+export * from './oidc/oidc-discovery';
+export * from './oidc/oidc.client';
+export * from './oidc/oidc-verifier';
+export * from './oidc/connection-registry';

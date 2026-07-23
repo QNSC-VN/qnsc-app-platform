@@ -293,3 +293,119 @@ describe('BffService', () => {
     });
   });
 });
+
+describe('BffService — multi-IdP broker path', () => {
+  const resolvedConn = {
+    id: 'conn-9',
+    kind: 'directory',
+    provider: 'google',
+    workspaceId: 'ws-9',
+    defaultRoleSlug: 'developer',
+    allowedEmailDomains: ['vendor.com'],
+    jitEnabled: true,
+    clientId: 'cid',
+    clientSecret: 'sec',
+    redirectUri: 'https://app/cb',
+    scopes: 'openid',
+    issuer: 'https://idp/x',
+    acceptedIssuers: ['https://idp/x'],
+    authorizeEndpoint: 'https://idp/x/auth',
+    tokenEndpoint: 'https://idp/x/token',
+    jwksUri: 'https://idp/x/keys',
+  };
+
+  function accessTok(): string {
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    return `${b64({ alg: 'ES256' })}.${b64({ sub: 'u', sessionId: 's', jti: 'j', exp: Math.floor(Date.now() / 1000) + 3600, claims: { permissions: [] } })}.sig`;
+  }
+
+  function buildBroker() {
+    const store = {
+      saveAuthRequest: vi.fn().mockResolvedValue(undefined),
+      takeAuthRequest: vi.fn(),
+      saveSession: vi.fn().mockResolvedValue(undefined),
+      getSession: vi.fn(),
+      deleteSession: vi.fn(),
+    };
+    const registry = {
+      resolveForEmail: vi.fn().mockResolvedValue(resolvedConn),
+      resolveById: vi.fn().mockResolvedValue(resolvedConn),
+    };
+    const brokerOidc = {
+      buildAuthorizeUrl: vi.fn().mockReturnValue('https://idp/authorize'),
+      exchangeCode: vi.fn().mockResolvedValue({ idToken: 'idt' }),
+    };
+    const verifier = { verify: vi.fn().mockResolvedValue({ oid: 'o', email: 'x@vendor.com' }) };
+    const authService = {
+      ssoLogin: vi.fn(),
+      ssoLoginFromConnection: vi
+        .fn()
+        .mockResolvedValue({ accessToken: accessTok(), refreshToken: 'r', csrfToken: 'c' }),
+    };
+    const oidc = { buildAuthorizeUrl: vi.fn(), exchangeCode: vi.fn() };
+    const svc = new BffService(
+      makeOptions(),
+      oidc as never,
+      store as never,
+      authService as never,
+      registry as never,
+      brokerOidc as never,
+      verifier as never,
+    );
+    return { svc, store, registry, brokerOidc, verifier, authService };
+  }
+
+  it('beginLogin(email) resolves the connection and persists state + nonce + connectionId', async () => {
+    const { svc, store, registry, brokerOidc } = buildBroker();
+    const out = await svc.beginLogin('/back', 'user@vendor.com');
+    expect(registry.resolveForEmail).toHaveBeenCalledWith('user@vendor.com');
+    expect(out.authorizeUrl).toBe('https://idp/authorize');
+    const saved = store.saveAuthRequest.mock.calls[0][0];
+    expect(saved).toMatchObject({ connectionId: 'conn-9' });
+    expect(saved.nonce).toEqual(expect.any(String));
+    expect(brokerOidc.buildAuthorizeUrl).toHaveBeenCalled();
+  });
+
+  it('beginLogin(unknown email) rejects with NO_CONNECTION', async () => {
+    const { svc, registry } = buildBroker();
+    registry.resolveForEmail.mockResolvedValue(null);
+    await expect(svc.beginLogin('/back', 'nobody@nowhere.com')).rejects.toMatchObject({
+      code: 'NO_CONNECTION',
+    });
+  });
+
+  it('completeLogin routes by the stored connectionId through the broker verify + login', async () => {
+    const { svc, store, registry, brokerOidc, verifier, authService } = buildBroker();
+    store.takeAuthRequest.mockResolvedValue({
+      state: 'st',
+      codeVerifier: 'v',
+      nonce: 'n',
+      connectionId: 'conn-9',
+      returnTo: '/back',
+      createdAt: Date.now(),
+    });
+    const res = await svc.completeLogin({ code: 'c', state: 'st', cookieState: 'st', ip: '1.1.1.1' });
+    expect(registry.resolveById).toHaveBeenCalledWith('conn-9');
+    expect(brokerOidc.exchangeCode).toHaveBeenCalled();
+    expect(verifier.verify).toHaveBeenCalledWith('idt', resolvedConn, 'n');
+    expect(authService.ssoLoginFromConnection).toHaveBeenCalled();
+    expect(res.returnTo).toBe('/back');
+    expect(res.sid).toEqual(expect.any(String));
+  });
+
+  it('completeLogin denies when the connection was disabled between start and callback', async () => {
+    const { svc, store, registry } = buildBroker();
+    registry.resolveById.mockResolvedValue(null);
+    store.takeAuthRequest.mockResolvedValue({
+      state: 'st',
+      codeVerifier: 'v',
+      nonce: 'n',
+      connectionId: 'conn-9',
+      returnTo: '/back',
+      createdAt: Date.now(),
+    });
+    await expect(
+      svc.completeLogin({ code: 'c', state: 'st', cookieState: 'st', ip: '1.1.1.1' }),
+    ).rejects.toMatchObject({ code: 'NO_CONNECTION' });
+  });
+});

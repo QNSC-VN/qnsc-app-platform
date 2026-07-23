@@ -47,6 +47,22 @@ import {
 } from './service-ports';
 import { TRANSACTION_RUNNER, type ITransactionRunner } from './transaction-runner';
 
+/**
+ * Minimal connection shape SSO provisioning needs — satisfied by BOTH the DB row
+ * ({@link SsoConnection}) and the broker's `ResolvedConnection`, so one gate +
+ * provisioning path serves the legacy home flow and the multi-IdP broker.
+ */
+export interface ProvisioningConnection {
+  id: string;
+  provider: string;
+  kind?: 'directory' | 'shared';
+  workspaceId: string;
+  defaultRoleSlug: string;
+  allowedEmailDomains: string[];
+  jitEnabled: boolean;
+  status?: 'active' | 'disabled';
+}
+
 /** Fallback refresh-token lifetime when `jwtRefreshExpiry` is unparseable (30 days). */
 const REMEMBER_ME_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -562,12 +578,27 @@ export class AuthService {
       ssoWorkspaceId = provisioned.workspaceId;
     }
 
-    // Product provisioning hook (e.g. reconcile IdP roles) before claims are read.
+    return this.finishWorkspaceSso(workspaceService, user, ssoWorkspaceId, entra, ipAddress, 'entra');
+  }
+
+  /**
+   * Shared tail for a workspace SSO login (legacy home path AND the multi-IdP
+   * broker): run the provisioning hook, auto-elevate platform admins, mint the
+   * session, audit, and return the login result. `ssoProvider` is the resolved
+   * connection's provider so the session records the real IdP.
+   */
+  private async finishWorkspaceSso(
+    workspaceService: IWorkspaceService,
+    user: User,
+    ssoWorkspaceId: string,
+    entra: EntraClaims,
+    ipAddress: string | undefined,
+    ssoProvider: string,
+  ): Promise<LoginResult> {
     if (this.provisioningHook) {
       await this.provisioningHook.onUserProvisioned(user, { entra, contextId: ssoWorkspaceId });
     }
 
-    // Auto-elevate platform admins to workspace_admin on every SSO login.
     if (this.accessService && this.options.platformAdminEmails.includes(user.email.toLowerCase())) {
       const elevated = await this.accessService.elevateToWorkspaceAdmin(user.id, ssoWorkspaceId);
       if (elevated) {
@@ -591,11 +622,11 @@ export class AuthService {
       authMethod: 'sso',
       claims,
       ipAddress,
-      ssoProvider: 'entra',
+      ssoProvider,
     });
 
     this.logger.log(
-      { userId: user.id, jti: session.jti, sessionId: session.sessionId, provider: 'entra' },
+      { userId: user.id, jti: session.jti, sessionId: session.sessionId, provider: ssoProvider },
       'User logged in via SSO',
     );
 
@@ -607,13 +638,132 @@ export class AuthService {
       resourceType: 'session',
       resourceId: session.sessionId,
       ipAddress,
-      metadata: { provider: 'entra', oid },
+      metadata: { provider: ssoProvider, oid: entra.oid },
     });
 
     const memberships = await workspaceService.getMemberships(user.id);
     void workspaceService.touchMembership(user.id, ssoWorkspaceId);
 
     return this.toLoginResult(session, user, memberships);
+  }
+
+  /**
+   * Multi-IdP broker SSO login: the connection is ALREADY resolved + the token
+   * ALREADY verified (per-connection) by the BFF. Provision by the connection
+   * (never by re-deriving tenant/provider from claims) and mint the session.
+   */
+  async ssoLoginFromConnection(
+    connection: ProvisioningConnection,
+    claims: EntraClaims,
+    ipAddress?: string,
+  ): Promise<LoginResult> {
+    const workspaceService = this.workspaceService;
+    if (!workspaceService) {
+      throw new UnauthorizedException(
+        'SSO_NO_ACCESS',
+        'No workspace is configured for your organization. Please ask your administrator for an invitation.',
+      );
+    }
+
+    const existingIdentity = await this.userRepo.findSsoIdentity(connection.provider, claims.oid);
+    let user: User;
+    let workspaceId: string;
+
+    if (existingIdentity) {
+      const found = await this.userRepo.findById(existingIdentity.userId);
+      if (
+        !found ||
+        found.deletedAt ||
+        found.status === 'suspended' ||
+        found.status === 'inactive'
+      ) {
+        throw new UnauthorizedException('USER_DEACTIVATED', 'Account is not active');
+      }
+      // Re-validate the connection gate on every login (cutoff / domain / JIT).
+      await this.assertConnectionAllows(connection, claims.email);
+      user = found;
+      const memberships = await workspaceService.getMemberships(user.id);
+      workspaceId = memberships[0]?.workspaceId ?? '';
+      if (!workspaceId) {
+        const provisioned = await this.provisionIntoConnection(connection, claims);
+        user = provisioned.user;
+        workspaceId = provisioned.workspaceId;
+      }
+    } else {
+      const provisioned = await this.provisionIntoConnection(connection, claims);
+      user = provisioned.user;
+      workspaceId = provisioned.workspaceId;
+    }
+
+    return this.finishWorkspaceSso(
+      workspaceService,
+      user,
+      workspaceId,
+      claims,
+      ipAddress,
+      connection.provider,
+    );
+  }
+
+  /**
+   * The connection gate, shared by the legacy tenant-routed path and the broker:
+   * reject a disabled connection, enforce the owned-domain allow-list for
+   * `directory` connections (shared/consumer IdPs are invite-gated upstream),
+   * and honor invite-only mode (jitEnabled=false) with the platform-admin
+   * break-glass allow-list.
+   */
+  private async assertConnectionAllows(connection: ProvisioningConnection, email: string): Promise<void> {
+    if (connection.status && connection.status !== 'active') {
+      throw new UnauthorizedException(
+        'SSO_CONNECTION_DISABLED',
+        'SSO for your organization is disabled. Please contact your administrator.',
+      );
+    }
+    if (connection.kind !== 'shared' && !this.isEmailDomainAllowed(email, connection.allowedEmailDomains)) {
+      throw new UnauthorizedException(
+        'SSO_DOMAIN_NOT_ALLOWED',
+        'Your email domain is not permitted to sign in to this organization.',
+      );
+    }
+    if (!connection.jitEnabled) {
+      const normalizedEmail = email.toLowerCase().trim();
+      const isPlatformAdmin = this.options.platformAdminEmails.some(
+        (e) => e.toLowerCase() === normalizedEmail,
+      );
+      if (!isPlatformAdmin && !(await this.userRepo.findByEmail(normalizedEmail))) {
+        throw new UnauthorizedException(
+          'SSO_JIT_DISABLED',
+          'Automatic account creation is disabled. Please ask your administrator for an invitation.',
+        );
+      }
+    }
+  }
+
+  /** Provision (idempotent) a user into a RESOLVED connection's workspace + role. */
+  private async provisionIntoConnection(
+    connection: ProvisioningConnection,
+    claims: { oid: string; email: string; displayName: string },
+  ): Promise<{ user: User; workspaceId: string }> {
+    const workspaceService = this.workspaceService;
+    if (!workspaceService) {
+      throw new UnauthorizedException(
+        'SSO_NO_ACCESS',
+        'No workspace is configured for your organization. Please ask your administrator for an invitation.',
+      );
+    }
+    await this.assertConnectionAllows(connection, claims.email);
+    const workspaceId = connection.workspaceId;
+    const user = await this.userRepo.upsertBySsoIdentity(
+      connection.provider,
+      claims.oid,
+      claims.email,
+      claims.displayName,
+    );
+    await workspaceService.enrollMember(workspaceId, user.id);
+    if (this.accessService) {
+      await this.accessService.ensureDefaultRole(user.id, workspaceId, connection.defaultRoleSlug);
+    }
+    return { user, workspaceId };
   }
 
   /**
@@ -818,36 +968,9 @@ export class AuthService {
     if (externalTenantId) {
       const connection = await ssoConnectionRepo.findByExternalTenantId('entra', externalTenantId);
       if (connection) {
-        if (connection.status !== 'active') {
-          throw new UnauthorizedException(
-            'SSO_CONNECTION_DISABLED',
-            'SSO for your organization is disabled. Please contact your administrator.',
-          );
-        }
-        if (!this.isEmailDomainAllowed(email, connection.allowedEmailDomains)) {
-          throw new UnauthorizedException(
-            'SSO_DOMAIN_NOT_ALLOWED',
-            'Your email domain is not permitted to sign in to this organization.',
-          );
-        }
-        // Invite-only mode. When JIT is disabled the directory's domain no longer
-        // grants automatic access: a user may sign in ONLY if they were already
-        // provisioned — seeded or invited (matched by email and linked below) — or
-        // are an explicit platform admin (the break-glass allow-list that must
-        // never be locked out). Any brand-new identity is rejected until an admin
-        // invites them.
-        if (!connection.jitEnabled) {
-          const normalizedEmail = email.toLowerCase().trim();
-          const isPlatformAdmin = this.options.platformAdminEmails.some(
-            (e) => e.toLowerCase() === normalizedEmail,
-          );
-          if (!isPlatformAdmin && !(await this.userRepo.findByEmail(normalizedEmail))) {
-            throw new UnauthorizedException(
-              'SSO_JIT_DISABLED',
-              'Automatic account creation is disabled. Please ask your administrator for an invitation.',
-            );
-          }
-        }
+        // Single source of truth for the connection gate (status / owned-domain /
+        // invite-only break-glass) — shared with the multi-IdP broker path.
+        await this.assertConnectionAllows(connection, email);
         connectionWorkspaceId = connection.workspaceId;
         defaultRoleSlug = connection.defaultRoleSlug;
       }
