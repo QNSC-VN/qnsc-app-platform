@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { NotFoundException, UnauthorizedException } from '@qnsc-vn/platform-http';
 import { AuthService, type LoginResult } from './auth.service';
 import type { AuthServiceOptions } from './auth-options';
-import type { AuthSession, User } from './domain-types';
+import type { AuthSession, User, SsoConnection } from './domain-types';
 import type { JwtPayload } from './jwt-payload';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
@@ -793,5 +793,96 @@ describe('AuthService.updateProfile', () => {
     await expect(h.service.updateProfile('ghost', { locale: 'fr' })).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+// ── Multi-IdP broker: connection-driven SSO login ────────────────────────────
+
+const makeConn = (o: Partial<SsoConnection> = {}): SsoConnection => ({
+  id: 'conn-1',
+  workspaceId: 'ws-9',
+  provider: 'entra',
+  externalTenantId: 't1',
+  issuer: null,
+  defaultRoleSlug: 'project_member',
+  allowedEmailDomains: [],
+  jitEnabled: true,
+  status: 'active',
+  createdAt: now,
+  updatedAt: now,
+  kind: 'directory',
+  ...o,
+});
+
+const brokerClaims = (o: Partial<{ oid: string; email: string; displayName: string }> = {}) => ({
+  oid: 'oid-9',
+  email: 'x@vendor.com',
+  displayName: 'X',
+  externalTenantId: null,
+  roles: [] as string[],
+  ...o,
+});
+
+describe('AuthService.ssoLoginFromConnection', () => {
+  it('provisions a new identity into the resolved connection workspace + role', async () => {
+    const user = makeUser({ id: 'u-9', email: 'x@vendor.com' });
+    const h = buildService({ existingIdentity: null, user });
+    const conn = makeConn({ workspaceId: 'ws-9', provider: 'google', defaultRoleSlug: 'developer' });
+
+    const result = await h.service.ssoLoginFromConnection(conn, brokerClaims(), '1.2.3.4');
+
+    expect(result.accessToken).toBe('signed.jwt');
+    // Identity keyed by the connection's provider (namespace), never hardcoded 'entra'.
+    expect(h.userRepo.upsertBySsoIdentity).toHaveBeenCalledWith(
+      'google',
+      'oid-9',
+      'x@vendor.com',
+      'X',
+    );
+    expect(h.workspaceService.enrollMember).toHaveBeenCalledWith('ws-9', 'u-9');
+    expect(h.accessService.ensureDefaultRole).toHaveBeenCalledWith('u-9', 'ws-9', 'developer');
+  });
+
+  it('logs in an existing identity without re-provisioning', async () => {
+    const user = makeUser({ id: 'u-9' });
+    const h = buildService({ existingIdentity: { userId: 'u-9' }, user, memberships: [{ workspaceId: 'ws-9' }] });
+
+    await h.service.ssoLoginFromConnection(makeConn(), brokerClaims(), '1.2.3.4');
+
+    expect(h.userRepo.upsertBySsoIdentity).not.toHaveBeenCalled();
+    expect(h.workspaceService.enrollMember).not.toHaveBeenCalled();
+  });
+
+  it('rejects a disabled connection (cutoff)', async () => {
+    const h = buildService({ existingIdentity: null, user: makeUser() });
+    await expect(
+      h.service.ssoLoginFromConnection(makeConn({ status: 'disabled' }), brokerClaims()),
+    ).rejects.toMatchObject({ code: 'SSO_CONNECTION_DISABLED' });
+  });
+
+  it('rejects a disallowed domain for a directory connection', async () => {
+    const h = buildService({ existingIdentity: null, user: makeUser() });
+    await expect(
+      h.service.ssoLoginFromConnection(
+        makeConn({ kind: 'directory', allowedEmailDomains: ['other.com'] }),
+        brokerClaims({ email: 'x@vendor.com' }),
+      ),
+    ).rejects.toMatchObject({ code: 'SSO_DOMAIN_NOT_ALLOWED' });
+  });
+
+  it('skips the domain gate for a shared (consumer IdP) connection', async () => {
+    const user = makeUser({ id: 'u-9' });
+    const h = buildService({ existingIdentity: null, user });
+    const conn = makeConn({ kind: 'shared', provider: 'google', allowedEmailDomains: ['other.com'] });
+
+    const result = await h.service.ssoLoginFromConnection(conn, brokerClaims({ email: 'guest@gmail.com' }));
+    expect(result.accessToken).toBe('signed.jwt');
+  });
+
+  it('rejects a brand-new user when JIT is disabled and they are not invited', async () => {
+    const h = buildService({ existingIdentity: null, user: null });
+    await expect(
+      h.service.ssoLoginFromConnection(makeConn({ jitEnabled: false }), brokerClaims()),
+    ).rejects.toMatchObject({ code: 'SSO_JIT_DISABLED' });
   });
 });
