@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.5.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.5.0...identity-v5.5.1) (2026-07-24)
+
+
+### ♻️ Refactors
+
+* **identity:** collapse legacy provisioning into provisionIntoConnection ([#58](https://github.com/QNSC-VN/qnsc-app-platform/issues/58)) ([6baf68d](https://github.com/QNSC-VN/qnsc-app-platform/commit/6baf68d72c043b0e218120728c71f0beec874508))
+
 ## [5.5.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.4.0...identity-v5.5.0) (2026-07-23)
 
 
