@@ -108,4 +108,10 @@ export interface ISsoConnectionRepository {
   listActiveShared(): Promise<SsoConnection[]>;
   /** True if the email's domain is owned by this (directory) connection — the provisioning gate. */
   connectionOwnsEmailDomain(connectionId: string, email: string): Promise<boolean>;
+  /**
+   * True if `email` has a PENDING invitation to `workspaceId`. Lets an invited
+   * (but not-yet-provisioned) user through the invite-only gate (`jitEnabled=false`)
+   * on their first SSO login — the directory analogue of {@link findSharedByInvitedEmail}.
+   */
+  hasPendingInvitation(workspaceId: string, email: string): Promise<boolean>;
 }
