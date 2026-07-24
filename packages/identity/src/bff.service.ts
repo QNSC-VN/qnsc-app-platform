@@ -105,6 +105,7 @@ export class BffService {
         state,
         codeChallenge: challenge,
         nonce,
+        loginHint: email,
       });
       return { authorizeUrl, state };
     }

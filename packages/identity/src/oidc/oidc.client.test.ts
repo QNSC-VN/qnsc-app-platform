@@ -28,6 +28,19 @@ describe('OidcClient', () => {
     expect(url.searchParams.get('state')).toBe('s');
     expect(url.searchParams.get('nonce')).toBe('n');
     expect(url.searchParams.get('redirect_uri')).toBe('https://app/cb');
+    expect(url.searchParams.has('login_hint')).toBe(false);
+  });
+
+  it('sets login_hint when the typed email is passed', () => {
+    const url = new URL(
+      new OidcClient().buildAuthorizeUrl(conn, {
+        state: 's',
+        codeChallenge: 'ch',
+        nonce: 'n',
+        loginHint: 'user@qnsc.vn',
+      }),
+    );
+    expect(url.searchParams.get('login_hint')).toBe('user@qnsc.vn');
   });
 
   it('exchanges code and returns id_token', async () => {

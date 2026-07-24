@@ -31,7 +31,7 @@ export class OidcClient {
 
   buildAuthorizeUrl(
     conn: ResolvedConnection,
-    params: { state: string; codeChallenge: string; nonce: string },
+    params: { state: string; codeChallenge: string; nonce: string; loginHint?: string },
   ): string {
     const url = new URL(conn.authorizeEndpoint);
     url.searchParams.set('client_id', conn.clientId);
@@ -43,6 +43,11 @@ export class OidcClient {
     url.searchParams.set('nonce', params.nonce);
     url.searchParams.set('code_challenge', params.codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
+    // Home-realm hint: pre-selects the account the user typed at the email-first
+    // form, so a multi-account IdP session targets that identity instead of
+    // silently reusing whichever session is already signed in. A hint only — the
+    // IdP still authenticates and may show an account picker.
+    if (params.loginHint) url.searchParams.set('login_hint', params.loginHint);
     return url.toString();
   }
 
