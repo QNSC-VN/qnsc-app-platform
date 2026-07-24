@@ -124,6 +124,7 @@ function buildService(opts?: {
     findByExternalTenantId: vi.fn(async () =>
       opts?.connection ? { provider: 'entra', ...opts.connection } : null,
     ),
+    hasPendingInvitation: vi.fn(async () => opts?.pendingInvite ?? false),
   };
   const txRunner = { transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn({})) };
   const accessService = {
@@ -888,5 +889,14 @@ describe('AuthService.ssoLoginFromConnection', () => {
     await expect(
       h.service.ssoLoginFromConnection(makeConn({ jitEnabled: false }), brokerClaims()),
     ).rejects.toMatchObject({ code: 'SSO_JIT_DISABLED' });
+  });
+
+  it('admits a brand-new user with a pending invitation when JIT is disabled', async () => {
+    const h = buildService({ existingIdentity: null, user: null, pendingInvite: true });
+    const result = await h.service.ssoLoginFromConnection(
+      makeConn({ jitEnabled: false }),
+      brokerClaims(),
+    );
+    expect(result.accessToken).toBe('signed.jwt');
   });
 });

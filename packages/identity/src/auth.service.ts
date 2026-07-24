@@ -730,7 +730,15 @@ export class AuthService {
       const isPlatformAdmin = this.options.platformAdminEmails.some(
         (e) => e.toLowerCase() === normalizedEmail,
       );
-      if (!isPlatformAdmin && !(await this.userRepo.findByEmail(normalizedEmail))) {
+      // Invite-only: admits platform-admins (break-glass), already-provisioned
+      // users, and — so a fresh invitee can complete their FIRST login — anyone
+      // holding a pending invitation to this connection's workspace.
+      const allowed =
+        isPlatformAdmin ||
+        (await this.userRepo.findByEmail(normalizedEmail)) != null ||
+        (await this.ssoConnectionRepo?.hasPendingInvitation(connection.workspaceId, normalizedEmail)) ===
+          true;
+      if (!allowed) {
         throw new UnauthorizedException(
           'SSO_JIT_DISABLED',
           'Automatic account creation is disabled. Please ask your administrator for an invitation.',

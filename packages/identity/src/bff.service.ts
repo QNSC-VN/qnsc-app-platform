@@ -8,6 +8,7 @@ import type { BffSession } from './bff.types';
 import { decodeAccessTokenClaims, isSafeReturnTo } from './bff.util';
 import { EntraOidcClient } from './entra-oidc.client';
 import { ConnectionRegistry } from './oidc/connection-registry';
+import type { ResolvedConnection } from './oidc/oidc-connection';
 import { OidcClient } from './oidc/oidc.client';
 import { OidcTokenVerifier } from './oidc/oidc-verifier';
 import type { JwtPayload } from './jwt-payload';
@@ -83,33 +84,14 @@ export class BffService {
 
     // ── Multi-IdP broker path: email → connection → its IdP ──────────────────
     if (email) {
-      if (!this.registry || !this.brokerOidc) {
-        throw new Error('Multi-IdP broker is not configured on this server');
-      }
-      const conn = await this.registry.resolveForEmail(email);
+      const conn = await this.requireRegistry().resolveForEmail(email);
       if (!conn) {
         throw new UnauthorizedException('NO_CONNECTION', 'No access — contact your administrator');
       }
-      const state = randomUUID();
-      const { verifier, challenge } = OidcClient.generatePkce();
-      const nonce = OidcClient.generateNonce();
-      await this.store.saveAuthRequest({
-        state,
-        codeVerifier: verifier,
-        nonce,
-        connectionId: conn.id,
-        returnTo,
-        createdAt: Date.now(),
-      });
-      const authorizeUrl = this.brokerOidc.buildAuthorizeUrl(conn, {
-        state,
-        codeChallenge: challenge,
-        nonce,
-      });
-      return { authorizeUrl, state };
+      return this.startBrokerFlow(conn, returnTo, email);
     }
 
-    // ── Legacy home path (the "Sign in with Microsoft" quick button) ─────────
+    // ── Legacy home path (kept for consumers without the email-first UI) ──────
     const state = randomUUID();
     const { verifier, challenge } = EntraOidcClient.generatePkce();
     await this.store.saveAuthRequest({
@@ -119,6 +101,53 @@ export class BffService {
       createdAt: Date.now(),
     });
     const authorizeUrl = this.oidc.buildAuthorizeUrl({ state, codeChallenge: challenge });
+    return { authorizeUrl, state };
+  }
+
+  /**
+   * Broker-native start of a SPECIFIC connection by id (no email routing) —
+   * powers a one-click "Sign in with <home IdP>" shortcut. The caller resolves
+   * which connection (e.g. the home directory connection) and passes its id.
+   */
+  async beginLoginById(rawReturnTo: string | undefined, connectionId: string): Promise<BffLoginStart> {
+    const returnTo = isSafeReturnTo(rawReturnTo) ? rawReturnTo : this.options.postLoginRedirect;
+    const conn = await this.requireRegistry().resolveById(connectionId);
+    if (!conn) {
+      throw new UnauthorizedException('NO_CONNECTION', 'No access — contact your administrator');
+    }
+    return this.startBrokerFlow(conn, returnTo);
+  }
+
+  private requireRegistry(): ConnectionRegistry {
+    if (!this.registry || !this.brokerOidc) {
+      throw new Error('Multi-IdP broker is not configured on this server');
+    }
+    return this.registry;
+  }
+
+  /** Persist the PKCE/nonce auth request + build the IdP authorize URL for a resolved connection. */
+  private async startBrokerFlow(
+    conn: ResolvedConnection,
+    returnTo: string,
+    loginHint?: string,
+  ): Promise<BffLoginStart> {
+    const state = randomUUID();
+    const { verifier, challenge } = OidcClient.generatePkce();
+    const nonce = OidcClient.generateNonce();
+    await this.store.saveAuthRequest({
+      state,
+      codeVerifier: verifier,
+      nonce,
+      connectionId: conn.id,
+      returnTo,
+      createdAt: Date.now(),
+    });
+    const authorizeUrl = this.brokerOidc!.buildAuthorizeUrl(conn, {
+      state,
+      codeChallenge: challenge,
+      nonce,
+      loginHint,
+    });
     return { authorizeUrl, state };
   }
 
