@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.6.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.5.1...identity-v5.6.0) (2026-07-24)
+
+
+### ✨ Features
+
+* **identity:** broker login_hint + home-login shortcut + invite-aware JIT-off ([#60](https://github.com/QNSC-VN/qnsc-app-platform/issues/60)) ([b25ceef](https://github.com/QNSC-VN/qnsc-app-platform/commit/b25ceef828109512e7f44a1d05d5e3a2f612c6fa))
+
 ## [5.5.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.5.0...identity-v5.5.1) (2026-07-24)
 
 
