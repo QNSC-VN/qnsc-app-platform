@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/QNSC-VN/qnsc-app-platform/compare/observability-v0.1.2...observability-v0.1.3) (2026-07-26)
+
+
+### 🐛 Bug Fixes
+
+* **observability:** pull-based pool gauges, one fail-open contract, shared ignore list ([#66](https://github.com/QNSC-VN/qnsc-app-platform/issues/66)) ([aac3b8e](https://github.com/QNSC-VN/qnsc-app-platform/commit/aac3b8e6faa99cad1ef26d2e6e592832816d1cf1))
+
 ## [0.1.2](https://github.com/QNSC-VN/qnsc-app-platform/compare/observability-v0.1.1...observability-v0.1.2) (2026-07-26)
 
 
