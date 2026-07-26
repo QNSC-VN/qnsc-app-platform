@@ -10,16 +10,51 @@
   "include-v-in-tag": true,
   "tag-separator": "-",
   "changelog-sections": [
-    { "type": "feat", "section": "✨ Features" },
-    { "type": "fix", "section": "🐛 Bug Fixes" },
-    { "type": "perf", "section": "⚡ Performance" },
-    { "type": "refactor", "section": "♻️ Refactors", "hidden": false },
-    { "type": "security", "section": "🔒 Security" },
-    { "type": "deps", "section": "📦 Dependencies" },
-    { "type": "chore", "section": "🔧 Chores", "hidden": true },
-    { "type": "ci", "section": "👷 CI/CD", "hidden": true },
-    { "type": "docs", "section": "📚 Docs", "hidden": true },
-    { "type": "test", "section": "✅ Tests", "hidden": true }
+    {
+      "type": "feat",
+      "section": "\u2728 Features"
+    },
+    {
+      "type": "fix",
+      "section": "\ud83d\udc1b Bug Fixes"
+    },
+    {
+      "type": "perf",
+      "section": "\u26a1 Performance"
+    },
+    {
+      "type": "refactor",
+      "section": "\u267b\ufe0f Refactors",
+      "hidden": false
+    },
+    {
+      "type": "security",
+      "section": "\ud83d\udd12 Security"
+    },
+    {
+      "type": "deps",
+      "section": "\ud83d\udce6 Dependencies"
+    },
+    {
+      "type": "chore",
+      "section": "\ud83d\udd27 Chores",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "\ud83d\udc77 CI/CD",
+      "hidden": true
+    },
+    {
+      "type": "docs",
+      "section": "\ud83d\udcda Docs",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "\u2705 Tests",
+      "hidden": true
+    }
   ],
   "packages": {
     "packages/identity": {
@@ -36,8 +71,13 @@
       "package-name": "@qnsc-vn/platform-http",
       "component": "platform-http",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/observability": {
+      "package-name": "@qnsc-vn/observability",
+      "component": "observability",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "pull-request-title-pattern": "chore(release): ${component} ${version}",
-  "pull-request-header": "🤖 Opened by Release Please. Merging tags `${component}-v${version}` and publishes the package to GitHub Packages."
+  "pull-request-header": "\ud83e\udd16 Opened by Release Please. Merging tags `${component}-v${version}` and publishes the package to GitHub Packages."
 }
