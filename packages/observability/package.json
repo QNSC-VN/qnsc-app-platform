@@ -16,7 +16,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "otel.js",
+    "otel.d.ts"
   ],
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
