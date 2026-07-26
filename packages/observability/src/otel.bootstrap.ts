@@ -28,28 +28,13 @@ import {
   TraceIdRatioBasedSampler,
 } from '@opentelemetry/sdk-trace-base';
 import { resourceFromAttributes } from '@opentelemetry/resources';
+import { IGNORED_REQUEST_PATHS } from './ignored-paths';
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
   ATTR_DEPLOYMENT_ENVIRONMENT_NAME,
 } from '@opentelemetry/semantic-conventions';
 
-/**
- * Request paths that never produce a useful span. Skipped outright — no span is
- * created, so no sampling decision is needed and no quota is consumed.
- *
- * Readiness is included deliberately: it is polled by the load balancer on the same
- * schedule as liveness, and omitting it meant every readiness probe produced a span
- * nobody looks at. Both prefixed and unprefixed forms are listed so products differ
- * in global prefix without losing the filter.
- */
-const IGNORED_REQUEST_PATHS: ReadonlySet<string> = new Set([
-  '/v1/healthz',
-  '/v1/readyz',
-  '/healthz',
-  '/readyz',
-  '/favicon.ico',
-]);
 
 export interface OtelBootstrapOptions {
   /**
@@ -157,5 +142,5 @@ export function resetOtelForTesting(): void {
   sdk = undefined;
 }
 
-/** Exported for the spec that pins the ignore list against the health routes. */
+/** @deprecated Use {@link IGNORED_REQUEST_PATHS}. Retained for the existing spec. */
 export const __ignoredRequestPaths = IGNORED_REQUEST_PATHS;

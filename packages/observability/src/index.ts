@@ -10,3 +10,7 @@ export * from './logger.factory';
 export * from './request-context';
 export * from './job-context';
 export * from './metrics';
+export * from './fail-open';
+export * from './span.decorator';
+export * from './trace-context';
+export * from './ignored-paths';

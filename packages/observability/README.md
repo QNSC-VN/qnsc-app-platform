@@ -122,10 +122,49 @@ The generated id is prefixed with the job name (`daily-cleanup:8f3a…`), so a l
 search can scope to one job without another field, and an id that escapes into a
 payload is self-describing.
 
+## Metrics
+
+```ts
+// RED, from a global interceptor — every route, no per-controller wiring
+httpMetrics.record({ route: '/v1/work-items/:id', method, statusCode, durationMs, errorCode });
+
+// Jobs: records outcome AND re-throws, so instrumenting cannot swallow a failure
+await jobMetrics.time('daily-cleanup', () => this.run());
+
+// Queues: lag is what reveals a relay falling behind; throughput alone looks fine
+queueMetrics.recordProcessed(name, n); queueMetrics.recordFailure(name, n); queueMetrics.recordLag(name, seconds);
+
+// Pool: register ONCE with a closure over the driver's pool. OTel pulls it on
+// collection, so there is no timer to own and no stale reading.
+dbPoolMetrics.register(() => ({ inUse: pool.totalCount - pool.idleCount, waiting: pool.waitingCount }));
+
+// Security: pair with failOpenLog() — same FailOpenControl union, so the metric label
+// and the log-based alarm pattern cannot drift apart
+securityMetrics.recordFailOpen('denylist');
+```
+
+**Labels are bounded by construction.** Status codes collapse to `2xx/3xx/4xx/5xx`,
+methods to a fixed set plus `OTHER`, error labels take a domain code. Passing an id is
+a type error. IDs belong on spans and logs. `normalizeRoute()` is the safety net for
+when a framework cannot supply a route template.
+
+## `@Span` policy
+
+Auto-instrumentation already spans every HTTP request, database query, cache call and
+AWS SDK call. `@Span` is for **deliberate** additions on top of that:
+
+- a method with meaningful internal fan-out, where one flat span hides the shape
+- a hot path whose duration you would want to see separately
+- a long-running domain operation
+
+It is **not** for CRUD passthroughs — a span that merely wraps one query duplicates the
+pg span underneath it. Uneven `@Span` coverage across services is expected and fine;
+the auto-instrumented baseline is what guarantees nothing is blind.
+
 ## What this package deliberately does not do
 
-- **No metrics registry yet.** Declaring metric names without implementing them is
-  worse than nothing: it implies coverage that does not exist. Added when the first
-  product emits them.
 - **No log shipping.** Logs go to stdout; the platform decides where from there.
-- **No sampling policy beyond head sampling.** That belongs in the collector.
+- **No sampling policy beyond head sampling.** Keeping 100% of errors requires a
+  collector-side tail sampler, because the decision needs the finished trace.
+- **No health controller.** Readiness checks are product-specific and would drag
+  Terminus in as a peer dependency.
