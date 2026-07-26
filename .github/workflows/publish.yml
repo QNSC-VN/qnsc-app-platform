@@ -9,6 +9,7 @@ on:
       - 'identity-v*'
       - 'platform-cache-v*'
       - 'platform-http-v*'
+      - 'observability-v*'
 
 permissions:
   contents: read
