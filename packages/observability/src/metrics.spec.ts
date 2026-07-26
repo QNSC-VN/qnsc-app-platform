@@ -5,11 +5,13 @@ const record = vi.fn();
 const add = vi.fn();
 const createHistogram = vi.fn(() => ({ record }));
 const createCounter = vi.fn(() => ({ add }));
-const createUpDownCounter = vi.fn(() => ({ add }));
+const addCallback = vi.fn();
+const createObservableGauge = vi.fn(() => ({ addCallback }));
 
 vi.mock('@opentelemetry/api', () => ({
+  ValueType: { INT: 1 },
   metrics: {
-    getMeter: () => ({ createHistogram, createCounter, createUpDownCounter }),
+    getMeter: () => ({ createHistogram, createCounter, createObservableGauge }),
   },
 }));
 
@@ -201,14 +203,43 @@ describe('QueueMetrics', () => {
   });
 });
 
-describe('DbPoolMetrics + SecurityMetrics', () => {
+describe('DbPoolMetrics', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('observes pool saturation', () => {
-    new DbPoolMetrics().observe({ inUse: 3, waiting: 1 });
-    expect(add).toHaveBeenCalledWith(3);
-    expect(add).toHaveBeenCalledWith(1);
+  it('registers observable callbacks rather than pushing values', () => {
+    // A pool reading is a gauge, not a counter: UpDownCounter.add(3) twice reports 6.
+    // Observable gauges are pulled at collection time, so the value is always current
+    // and the product owns no timer.
+    new DbPoolMetrics().register(() => ({ inUse: 3, waiting: 1 }));
+    expect(addCallback).toHaveBeenCalledTimes(2);
   });
+
+  it('reads the pool through the callback on each collection', () => {
+    let inUse = 2;
+    new DbPoolMetrics().register(() => ({ inUse, waiting: 0 }));
+
+    const observe = vi.fn();
+    const inUseCallback = addCallback.mock.calls[0][0] as (r: { observe: typeof observe }) => void;
+
+    inUseCallback({ observe });
+    inUse = 7;
+    inUseCallback({ observe });
+
+    // Second collection sees the new value — the point of a pull-based gauge.
+    expect(observe).toHaveBeenNthCalledWith(1, 2);
+    expect(observe).toHaveBeenNthCalledWith(2, 7);
+  });
+
+  it('ignores a second register, which would double-report every value', () => {
+    const metrics = new DbPoolMetrics();
+    metrics.register(() => ({ inUse: 1, waiting: 0 }));
+    metrics.register(() => ({ inUse: 1, waiting: 0 }));
+    expect(addCallback).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('SecurityMetrics', () => {
+  beforeEach(() => vi.clearAllMocks());
 
   it('counts a fail-open by control name', () => {
     new SecurityMetrics().recordFailOpen('denylist');
@@ -236,7 +267,7 @@ describe('METRIC_NAMES', () => {
     const created = [
       ...createHistogram.mock.calls,
       ...createCounter.mock.calls,
-      ...createUpDownCounter.mock.calls,
+      ...createObservableGauge.mock.calls,
     ].map((call) => call[0]);
 
     expect(new Set(created)).toEqual(new Set(Object.values(METRIC_NAMES)));

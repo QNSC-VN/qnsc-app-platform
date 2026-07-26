@@ -1,5 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { metrics, type Counter, type Histogram, type Meter, type UpDownCounter } from '@opentelemetry/api';
+import {
+  metrics,
+  ValueType,
+  type Counter,
+  type Histogram,
+  type Meter,
+  type ObservableGauge,
+} from '@opentelemetry/api';
+import type { FailOpenControl } from './fail-open';
 
 /**
  * Metric instruments, shared across products.
@@ -216,24 +224,57 @@ export class QueueMetrics {
   }
 }
 
-/** Connection-pool saturation: the USE half, and the usual cause of latency cliffs. */
+/** A point-in-time reading of a connection pool. */
+export interface DbPoolReading {
+  /** Connections currently checked out. */
+  inUse: number;
+  /** Callers queued waiting for a connection — the number that predicts a stall. */
+  waiting: number;
+}
+
+/**
+ * Connection-pool saturation: the USE half, and the usual cause of latency cliffs.
+ *
+ * Modelled as OBSERVABLE gauges, deliberately. A counter is the wrong instrument for
+ * a pool reading — `UpDownCounter.add(3)` twice reports 6, not 3 — and a
+ * product-side timer that pushed readings would be both duplicated per product and
+ * out of step with the export interval. Instead the product registers a callback
+ * once and OTel pulls it on each collection, so the value is always a true reading
+ * at export time and there is no timer to own.
+ */
 @Injectable()
 export class DbPoolMetrics {
   private readonly meter = getMeter();
 
-  private readonly inUse: UpDownCounter = this.meter.createUpDownCounter(
+  private readonly inUse: ObservableGauge = this.meter.createObservableGauge(
     METRIC_NAMES.DB_POOL_IN_USE,
-    { description: 'Checked-out database connections' },
+    { description: 'Checked-out database connections', valueType: ValueType.INT },
   );
 
-  private readonly waiting: UpDownCounter = this.meter.createUpDownCounter(
+  private readonly waiting: ObservableGauge = this.meter.createObservableGauge(
     METRIC_NAMES.DB_POOL_WAITING,
-    { description: 'Requests waiting for a database connection' },
+    { description: 'Callers waiting for a database connection', valueType: ValueType.INT },
   );
 
-  observe(input: { inUse: number; waiting: number }): void {
-    this.inUse.add(input.inUse);
-    this.waiting.add(input.waiting);
+  private registered = false;
+
+  /**
+   * Register the pool to observe. Call once at startup with a closure over the
+   * driver's pool; `read` is invoked on every metric collection.
+   *
+   * Idempotent: a second call is ignored rather than double-registering, which would
+   * report each value twice.
+   */
+  register(read: () => DbPoolReading): void {
+    if (this.registered) return;
+    this.registered = true;
+
+    this.inUse.addCallback((result) => {
+      result.observe(read().inUse);
+    });
+    this.waiting.addCallback((result) => {
+      result.observe(read().waiting);
+    });
   }
 }
 
@@ -256,8 +297,12 @@ export class SecurityMetrics {
     description: 'Access tokens rejected because their authorization snapshot was superseded',
   });
 
-  /** `control` is a fixed enum of guard names — bounded. */
-  recordFailOpen(control: string): void {
+  /**
+   * `control` is the shared {@link FailOpenControl} union, not a string: the same
+   * value is a metric label here and the value a log-based alarm matches, so the two
+   * must agree by construction.
+   */
+  recordFailOpen(control: FailOpenControl): void {
     this.failOpen.add(1, { control });
   }
 
