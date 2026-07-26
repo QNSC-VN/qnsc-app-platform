@@ -9,21 +9,35 @@ const base = {
   level: 'info',
 };
 
+/**
+ * `pinoHttp` is typed as a union that includes a DestinationStream, so reading the
+ * option fields needs one narrowing here rather than a cast at every assertion.
+ */
+interface PinoHttpShape {
+  level?: string;
+  transport?: unknown;
+  redact?: { paths: string[]; censor: string };
+  autoLogging?: boolean;
+  customProps?: () => Record<string, unknown>;
+  mixin?: () => Record<string, unknown>;
+}
+
+function optionsOf(params: ReturnType<typeof createLoggerOptions>): PinoHttpShape {
+  return params.pinoHttp as PinoHttpShape;
+}
+
 /** The mixin is the only part with logic; reach it the way pino would. */
-function mixinOf(options: ReturnType<typeof createLoggerOptions>) {
-  const mixin = options.pinoHttp?.mixin;
+function mixinOf(params: ReturnType<typeof createLoggerOptions>) {
+  const mixin = optionsOf(params).mixin;
   if (typeof mixin !== 'function') throw new Error('mixin is not configured');
-  return () => mixin({}, 0, {} as never);
+  return mixin;
 }
 
 describe('createLoggerOptions', () => {
   it('redacts every credential-bearing path', () => {
     // The worker's hand-rolled copy of this config had NO redact list at all, which
     // is the defect this factory exists to make impossible. Pin the list.
-    const { pinoHttp } = createLoggerOptions(base);
-    const paths = pinoHttp?.redact;
-
-    expect(paths).toMatchObject({ censor: '[REDACTED]' });
+    expect(optionsOf(createLoggerOptions(base)).redact).toMatchObject({ censor: '[REDACTED]' });
     for (const path of [
       'req.headers.authorization',
       'req.headers.cookie',
@@ -43,37 +57,37 @@ describe('createLoggerOptions', () => {
   });
 
   it('stamps service, env and version on every line', () => {
-    const { pinoHttp } = createLoggerOptions(base);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const props = (pinoHttp as any).customProps();
+    const props = optionsOf(createLoggerOptions(base)).customProps?.();
     expect(props).toEqual({ service: 'rally-api', env: 'test', version: '1.2.3' });
   });
 
   it('takes the service name from the caller, so api and worker differ', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const worker = (createLoggerOptions({ ...base, serviceName: 'rally-worker' }).pinoHttp as any)
-      .customProps();
-    expect(worker.service).toBe('rally-worker');
+    const worker = optionsOf(
+      createLoggerOptions({ ...base, serviceName: 'rally-worker' }),
+    ).customProps?.();
+    expect(worker?.['service']).toBe('rally-worker');
   });
 
   it('disables autoLogging so the interceptor owns the request line', () => {
-    expect(createLoggerOptions(base).pinoHttp?.autoLogging).toBe(false);
+    expect(optionsOf(createLoggerOptions(base)).autoLogging).toBe(false);
   });
 
   describe('pretty printing', () => {
     it('is on outside production', () => {
-      expect(createLoggerOptions({ ...base, nodeEnv: 'development' }).pinoHttp?.transport).toBeDefined();
+      expect(
+        optionsOf(createLoggerOptions({ ...base, nodeEnv: 'development' })).transport,
+      ).toBeDefined();
     });
 
     it('is off in production, so aggregators get raw JSON', () => {
       expect(
-        createLoggerOptions({ ...base, nodeEnv: 'production' }).pinoHttp?.transport,
+        optionsOf(createLoggerOptions({ ...base, nodeEnv: 'production' })).transport,
       ).toBeUndefined();
     });
 
     it('honours an explicit override', () => {
       expect(
-        createLoggerOptions({ ...base, nodeEnv: 'production', pretty: true }).pinoHttp?.transport,
+        optionsOf(createLoggerOptions({ ...base, nodeEnv: 'production', pretty: true })).transport,
       ).toBeDefined();
     });
   });
