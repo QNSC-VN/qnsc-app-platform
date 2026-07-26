@@ -9,3 +9,4 @@
 export * from './logger.factory';
 export * from './request-context';
 export * from './job-context';
+export * from './metrics';
