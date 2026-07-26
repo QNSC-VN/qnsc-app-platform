@@ -1,8 +1,8 @@
-// Legacy-resolution entry point for `@qnsc-vn/observability/otel`.
-//
-// The `exports` map in package.json handles modern resolvers, but TypeScript's
-// node10 resolution (module: commonjs with no explicit moduleResolution — what the
-// product backends use today) ignores `exports` entirely and looks for a real file
-// at this path. Without these two stubs the subpath import fails with TS2307 in
-// every consumer, so they are published deliberately.
+/* eslint-disable @typescript-eslint/no-require-imports --
+ * This file is a published CommonJS shim, not source. It exists so
+ * `@qnsc-vn/observability/otel` resolves under TypeScript's node10 algorithm,
+ * which every product backend uses (module: commonjs, no explicit
+ * moduleResolution) and which ignores the `exports` map in package.json. A real
+ * file has to sit at this path, and re-exporting dist requires `require()`.
+ */
 module.exports = require('./dist/otel.bootstrap.js');
