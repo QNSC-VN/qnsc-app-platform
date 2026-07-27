@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/QNSC-VN/qnsc-app-platform/compare/observability-v0.1.3...observability-v0.1.4) (2026-07-27)
+
+
+### 🐛 Bug Fixes
+
+* **observability:** take deployment identity from DEPLOYMENT_ENV, not NODE_ENV ([#68](https://github.com/QNSC-VN/qnsc-app-platform/issues/68)) ([e0d6002](https://github.com/QNSC-VN/qnsc-app-platform/commit/e0d6002edd00a8ec61aa66f780acd103413b34d9))
+
 ## [0.1.3](https://github.com/QNSC-VN/qnsc-app-platform/compare/observability-v0.1.2...observability-v0.1.3) (2026-07-26)
 
 
