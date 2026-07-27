@@ -103,6 +103,51 @@ describe('startOtel', () => {
       // Per-task, so a trace can be pinned to one container.
       expect(resource.attributes['service.instance.id']).toEqual(expect.any(String));
     });
+
+    // Regression guard. NODE_ENV is a runtime MODE, not a deployment identity, and
+    // products deliberately pin it to "production" outside production — rally's
+    // develop does, because `devLoginAllowed` is `nodeEnv !== 'production'` and a
+    // public host must not expose passwordless dev-login. Deriving deployment
+    // identity from it labelled every develop signal as production.
+    it('takes the deployment environment from DEPLOYMENT_ENV, not NODE_ENV', () => {
+      process.env['NODE_ENV'] = 'production'; // as rally's develop really runs
+      process.env['DEPLOYMENT_ENV'] = 'develop';
+      startOtel({ defaultServiceName: 'svc' });
+
+      const { resource } = nodeSdkConstructor.mock.calls[0][0] as {
+        resource: { attributes: Record<string, unknown> };
+      };
+      expect(resource.attributes['deployment.environment.name']).toBe('develop');
+    });
+
+    it('falls back to NODE_ENV when DEPLOYMENT_ENV is unset', () => {
+      // Keeps a deployment that has not adopted DEPLOYMENT_ENV on its old behaviour
+      // rather than reporting "unknown".
+      process.env['NODE_ENV'] = 'production';
+      delete process.env['DEPLOYMENT_ENV'];
+      startOtel({ defaultServiceName: 'svc' });
+
+      const { resource } = nodeSdkConstructor.mock.calls[0][0] as {
+        resource: { attributes: Record<string, unknown> };
+      };
+      expect(resource.attributes['deployment.environment.name']).toBe('production');
+    });
+
+    // The same root cause reached sampling: `isProd` gated the DEFAULT ratio, so a
+    // develop pinned to NODE_ENV=production silently sampled at the production 0.1
+    // and dropped 90% of the traces it was collecting them for.
+    it.each([
+      ['develop', 'TraceIdRatioBased{1}'],
+      ['production', 'TraceIdRatioBased{0.1}'],
+    ])('defaults the sampling ratio from DEPLOYMENT_ENV=%s', (env, expected) => {
+      process.env['NODE_ENV'] = 'production'; // identical in both deployments
+      process.env['DEPLOYMENT_ENV'] = env;
+      delete process.env['OTEL_SAMPLING_PROBABILITY'];
+      startOtel({ defaultServiceName: 'svc' });
+
+      const { sampler } = nodeSdkConstructor.mock.calls[0][0] as { sampler: unknown };
+      expect(String(sampler)).toContain(expected);
+    });
   });
 
   it('never traces health, readiness, or favicon requests', () => {

@@ -62,7 +62,21 @@ export function startOtel(options: OtelBootstrapOptions): boolean {
   if (process.env['OTEL_ENABLED'] !== 'true') return false;
   if (sdk) return true; // idempotent — a second call must not double-register
 
-  const isProd = process.env['NODE_ENV'] === 'production';
+  // DEPLOYMENT_ENV, not NODE_ENV. NODE_ENV is a RUNTIME MODE, not a deployment
+  // identity, and products deliberately pin it to "production" outside production:
+  // rally's develop does so because `devLoginAllowed` is `nodeEnv !== 'production'`,
+  // and a public host must not expose passwordless dev-login. Deriving deployment
+  // identity from it would label every develop span, metric and log
+  // `deployment.environment.name=production` — indistinguishable from real
+  // production, breaking the per-environment backend split, cost attribution, and
+  // every production alert. It also silently flipped the default sampling ratio to
+  // the production 0.1 in develop.
+  //
+  // Falls back to NODE_ENV so a deployment that has not set DEPLOYMENT_ENV yet keeps
+  // its previous behaviour rather than reporting "unknown".
+  const deploymentEnv =
+    process.env['DEPLOYMENT_ENV'] ?? process.env['NODE_ENV'] ?? 'development';
+  const isProd = deploymentEnv === 'production';
   const serviceName =
     process.env[options.serviceNameEnvVar ?? 'OTEL_SERVICE_NAME'] ?? options.defaultServiceName;
   const endpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://localhost:4318';
@@ -80,7 +94,7 @@ export function startOtel(options: OtelBootstrapOptions): boolean {
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: serviceName,
       [ATTR_SERVICE_VERSION]: process.env['SERVICE_VERSION'] ?? 'dev',
-      [ATTR_DEPLOYMENT_ENVIRONMENT_NAME]: process.env['NODE_ENV'] ?? 'development',
+      [ATTR_DEPLOYMENT_ENVIRONMENT_NAME]: deploymentEnv,
       // Namespace ties every product's signals together under one company label,
       // so a shared-dependency incident can be queried across products.
       'service.namespace': process.env['OTEL_SERVICE_NAMESPACE'] ?? 'qnsc',
