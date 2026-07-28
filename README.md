@@ -13,14 +13,21 @@ product's `libs/`.
 
 ## Packages
 
-| Package                                              | Purpose                                                                                                | Tag prefix          |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------- |
-| [`@qnsc-vn/identity`](packages/identity)             | Auth service, refresh rotation, CSRF, JWT strategy, guards, SSO/Entra validation, BFF session handlers | `identity-v*`       |
-| [`@qnsc-vn/platform-cache`](packages/platform-cache) | Valkey/Redis cache service (ioredis wrapper, key-prefix, fail-open)                                    | `platform-cache-v*` |
-| [`@qnsc-vn/platform-http`](packages/platform-http)   | Fastify bootstrap, CORS, cookie config, error codes, OTel wiring                                       | `platform-http-v*`  |
+| Package                                              | Purpose                                                                                                                                                               | Tag prefix          |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| [`@qnsc-vn/identity`](packages/identity)             | Auth **mechanism**: refresh rotation with theft detection, Entra/SSO verification, token denylist, JWT strategy, BFF session flow. Authorization stays in the product | `identity-v*`       |
+| [`@qnsc-vn/platform-cache`](packages/platform-cache) | Valkey/Redis cache service (ioredis wrapper, key-prefix, fail-open)                                                                                                   | `platform-cache-v*` |
+| [`@qnsc-vn/platform-http`](packages/platform-http)   | Error taxonomy + HTTP status mapping, global exception filter, pagination                                                                                             | `platform-http-v*`  |
+| [`@qnsc-vn/observability`](packages/observability)   | OTel bootstrap, logger factory, ALS request/job context, metric instruments, fail-open contract                                                                       | `observability-v*`  |
 
 Each package is versioned and released **independently** via release-please
 (Conventional Commits), mirroring the per-module tag model of `qnsc-tf-modules`.
+
+**Before adding anything here, read [docs/ADMISSION-TEST.md](docs/ADMISSION-TEST.md).**
+A file belongs in this repo only if divergence between products would be a security
+defect or a cross-repo contract break; if divergence would merely be inconsistent,
+it stays in the product. That document records the rule, the promotion checklist,
+and why each current exception is one.
 
 ## Consuming these packages
 
