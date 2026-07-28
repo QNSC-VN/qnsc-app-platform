@@ -1,6 +1,6 @@
 {
   "name": "@qnsc-vn/identity",
-  "version": "5.6.0",
+  "version": "6.0.0",
   "description": "Shared authentication mechanism for QNSC product backends: refresh-token rotation with theft detection, Entra/SSO verification, ES256 JWT strategy + guard, and the BFF session flow. Authorization stays in the product.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
