@@ -1,5 +1,18 @@
 # Changelog
 
+## [6.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.6.0...identity-v6.0.0) (2026-07-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** `AuthController`, `AuthModule`, the auth DTOs, `PermissionGuard`, `permissionGrants`, `WORKSPACE_ALL`, `PERMISSION_CHECKER`, `PermissionChecker`, `Public`, `Auth`, `RequirePermission`, `CurrentUser`, `ApiCommonErrors`, `IS_PUBLIC_KEY`, `PERMISSION_KEY` and `BffModule` are no longer exported. Neither QNSC product imports any of them, so both upgrade with no code change; a consumer outside this org must move its authorization guard, route decorators and auth controller into the product, where the equivalents already live in both apps.
+
+### ✨ Features
+
+* **identity:** drop the surface no product consumes ([13eca99](https://github.com/QNSC-VN/qnsc-app-platform/commit/13eca996619c92734b39013cdcc0dabe2471ef3d))
+* **identity:** reference consumer + port conformance kit ([0430aa9](https://github.com/QNSC-VN/qnsc-app-platform/commit/0430aa9ef4892ba15f02adc0adb2f922caffd748))
+* **identity:** reference consumer + port conformance kit ([db4448a](https://github.com/QNSC-VN/qnsc-app-platform/commit/db4448af0c989fd28918e233d2e29c6d7896dc7a))
+
 ## [5.6.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.5.1...identity-v5.6.0) (2026-07-24)
 
 
