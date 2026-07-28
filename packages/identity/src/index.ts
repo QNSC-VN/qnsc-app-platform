@@ -1,23 +1,24 @@
 /**
  * `@qnsc-vn/identity`
  *
- * Shared identity/auth primitives for QNSC product backends: the ES256 JWT
- * Passport strategy, the JWT auth guard (with Valkey denylist checks), the
- * wildcard-aware permission guard, the auth decorators, Entra/SSO token
- * verification, and refresh-token crypto, the refresh-rotation auth service,
- * the cookie-based auth HTTP controller, and the Backend-for-Frontend (BFF)
- * Entra OIDC login mechanism (session store, OIDC client, orchestrator, and
- * the opt-in `BffModule`).
+ * Shared AUTHENTICATION mechanism for QNSC product backends: the refresh-rotation
+ * auth service with family theft-detection, Entra/SSO token verification,
+ * refresh-token crypto, the access-token denylist, the ES256 JWT Passport
+ * strategy + auth guard, and the Backend-for-Frontend Entra OIDC login mechanism
+ * (session store, OIDC client, orchestrator).
+ *
+ * AUTHORIZATION is deliberately absent. Permission codes, wildcard semantics and
+ * scope models are product vocabulary — each product owns its own catalogue and
+ * guard, and both do. See the README's "Not in scope".
+ *
+ * Products own their HTTP surface too: controllers, DTOs, route names and cookie
+ * names. This package supplies the services those controllers call.
  */
 export * from './jwt-payload';
 export * from './jwt-options';
 export * from './jwt.strategy';
 export * from './auth-context';
 export * from './jwt.guard';
-export * from './permissions';
-export * from './permission.guard';
-export * from './metadata';
-export * from './decorators';
 export * from './entra-verifier';
 export * from './refresh-token';
 export * from './domain-types';
@@ -30,16 +31,12 @@ export * from './auth-options';
 export * from './access-token';
 export * from './auth.service';
 export * from './auth-token-cache.service';
-export * from './auth.dto';
-export * from './auth.controller';
-export * from './auth.module';
 export * from './bff-options';
 export * from './bff.types';
 export * from './bff.util';
 export * from './entra-oidc.client';
 export * from './bff-session.store';
 export * from './bff.service';
-export * from './bff.module';
 // ── Multi-IdP OIDC broker (provider-agnostic; secret store via the SecretResolver
 // port — concrete resolvers, e.g. AWS SSM, are supplied by the consuming app so
 // this package stays store-agnostic). ─────────────────────────────────────────

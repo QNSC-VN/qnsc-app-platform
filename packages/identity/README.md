@@ -129,11 +129,28 @@ Assumptions baked in today. Each is a real limit, not a config gap:
 
 ## Not in scope
 
-Authorization stays in the product. `permission.guard.ts` + `PERMISSION_CHECKER`
-are the one exception, and they are **deprecated pending removal in the next
-major**: they hardcode one product's `ns:*` wildcard vocabulary, both products now
-run their own guard, and neither imports them any more.
+The line: **divergence in the mechanism above is a security defect; divergence in
+controllers, DTOs, routes, cookie names and permission codes is merely
+inconsistent.** The first belongs here, the second in the product.
 
-Also product-owned: HTTP controllers and DTOs, route names, and cookie names.
-Divergence in those is merely inconsistent; divergence in the mechanism above is a
-security defect — which is the line that decides what lives here.
+Removed in v6 because nothing consumed it and all of it was on the wrong side of
+that line:
+
+| removed                                                                                | why                                                                                                                                                                |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AuthController`, auth DTOs, `AuthModule`                                              | HTTP surface. Both products write their own controller (one needed a `switch-workspace` route the other has no concept of) and neither called `AuthModule.forRoot` |
+| `PermissionGuard`, `permissions.ts`, `PERMISSION_CHECKER`                              | authorization, and hardcoded one product's `ns:*` wildcard vocabulary — unusable by a product whose codes are `resource.action`                                    |
+| `Public`, `Auth`, `RequirePermission`, `CurrentUser`, `ApiCommonErrors`, metadata keys | route decorators; `Auth()` mounted the deleted permission guard. Both products already have their own                                                              |
+| `BffModule`                                                                            | products bind the three BFF providers directly                                                                                                                     |
+
+## Convergence candidate
+
+`JwtStrategy`, `JwtAuthGuard`, `AUTH_CONTEXT` and `JWT_STRATEGY_OPTIONS` are
+exported but **used by neither product today** — each wrote its own guard to carry
+an extended `JwtPayload` plus product concerns (BFF-cookie-vs-Bearer branch,
+denylist, authorization-epoch check, fail-open telemetry).
+
+They are kept, not deleted, because that duplication is drift rather than a real
+divergence: the cookie-vs-Bearer branch is mechanism, and the second product needs
+exactly the first one's version when it adopts BFF sessions. Converging them here
+is the next step, not another deletion.

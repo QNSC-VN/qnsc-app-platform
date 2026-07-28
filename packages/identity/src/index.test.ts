@@ -1,73 +1,17 @@
 import 'reflect-metadata';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
-import type { ExecutionContext } from '@nestjs/common';
-import type { Reflector } from '@nestjs/core';
+import { UnauthorizedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthContextSetter } from './auth-context';
 import { JwtAuthGuard } from './jwt.guard';
 import type { JwtPayload } from './jwt-payload';
 import { JwtStrategy } from './jwt.strategy';
-import { PermissionGuard } from './permission.guard';
-import { permissionGrants, WORKSPACE_ALL } from './permissions';
 
-describe('permissionGrants', () => {
-  it('denies when the user has no permissions', () => {
-    expect(permissionGrants(undefined, 'project:update')).toBe(false);
-    expect(permissionGrants([], 'project:update')).toBe(false);
-  });
-
-  it('allows an exact match', () => {
-    expect(permissionGrants(['project:update'], 'project:update')).toBe(true);
-  });
-
-  it('allows the global workspace wildcard', () => {
-    expect(permissionGrants([WORKSPACE_ALL], 'anything:goes')).toBe(true);
-  });
-
-  it('allows a namespace wildcard', () => {
-    expect(permissionGrants(['project:*'], 'project:delete')).toBe(true);
-    expect(permissionGrants(['project:*'], 'workitem:delete')).toBe(false);
-  });
-});
-
-describe('PermissionGuard', () => {
-  function contextWith(user: Partial<JwtPayload> | undefined): ExecutionContext {
-    return {
-      getHandler: () => undefined,
-      getClass: () => undefined,
-      switchToHttp: () => ({ getRequest: () => ({ user }) }),
-    } as unknown as ExecutionContext;
-  }
-
-  function guardRequiring(required: string | undefined): PermissionGuard {
-    const reflector = { getAllAndOverride: () => required } as unknown as Reflector;
-    return new PermissionGuard(reflector);
-  }
-
-  it('allows routes with no required permission', () => {
-    expect(guardRequiring(undefined).canActivate(contextWith(undefined))).toBe(true);
-  });
-
-  it('allows a caller holding the permission', () => {
-    const guard = guardRequiring('project:update');
-    const ctx = contextWith({ sub: 'u1', claims: { permissions: ['project:update'] } });
-    expect(guard.canActivate(ctx)).toBe(true);
-  });
-
-  it('forbids a caller missing the permission', () => {
-    const guard = guardRequiring('project:update');
-    const ctx = contextWith({ sub: 'u1', claims: { permissions: ['workitem:read'] } });
-    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
-  });
-
-  it('honors an injected custom checker', () => {
-    const reflector = { getAllAndOverride: () => 'x:y' } as unknown as Reflector;
-    const guard = new PermissionGuard(reflector, () => true);
-    expect(
-      guard.canActivate(contextWith({ sub: 'u1', claims: { permissions: ['unrelated'] } })),
-    ).toBe(true);
-  });
-});
+/**
+ * Guard + strategy behaviour. The permission-guard and wildcard-matching cases
+ * that used to live here went with the code: authorization is product-owned, so
+ * `permission.guard.ts` and `permissions.ts` were removed rather than kept as a
+ * shared surface neither product used.
+ */
 
 describe('JwtStrategy', () => {
   it('passes the verified payload through to request.user', () => {
