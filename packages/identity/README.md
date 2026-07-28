@@ -113,6 +113,34 @@ export class IdentityModule {}
 A missing binding surfaces as a Nest resolution error at boot, naming the token it
 could not resolve — check it against the required table above.
 
+## Testing your adapters
+
+`@qnsc-vn/identity/testing` ships typed in-memory ports and the conformance suites
+that cover the semantics the interfaces cannot express:
+
+```ts
+import { describeAuthSessionRepositoryContract } from '@qnsc-vn/identity/testing';
+
+describeAuthSessionRepositoryContract({
+  name: 'AuthSessionDrizzleRepository',
+  create: async () => new AuthSessionDrizzleRepository(db),
+});
+```
+
+Run these against your real repositories. A `revokeByIdIfActive` that returns
+`true` unconditionally typechecks perfectly and turns single-use refresh rotation
+into a token that can be replayed for ever — the suite is what catches it. Same for
+family revocation scope (theft detection) and `upsertBySsoIdentity` linking an
+existing email instead of creating a second account.
+
+The in-memory classes (`InMemoryUserRepository`, `InMemoryAuthSessionRepository`,
+`InMemoryTransactionRunner`, `StubClaimsProvider`, `RecordingAuditService`,
+`RecordingAuthContext`) are usable directly in your own tests. They carry real
+`implements` clauses, so a port change breaks them at compile time.
+
+`reference-consumer.spec.ts` in this package boots a real Nest context with exactly
+the required bindings below and nothing else — that is what keeps the table honest.
+
 ## Constraints
 
 Assumptions baked in today. Each is a real limit, not a config gap:
