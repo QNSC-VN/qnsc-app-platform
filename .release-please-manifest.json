@@ -1,6 +1,6 @@
 {
   "packages/identity": "6.0.0",
   "packages/platform-cache": "2.1.0",
-  "packages/platform-http": "3.1.0",
+  "packages/platform-http": "3.1.1",
   "packages/observability": "0.1.4"
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v3.1.0...platform-http-v3.1.1) (2026-08-07)
+
+
+### 🐛 Bug Fixes
+
+* **platform-http:** give 503 its own error code instead of INTERNAL_ERROR ([#77](https://github.com/QNSC-VN/qnsc-app-platform/issues/77)) ([0e11e39](https://github.com/QNSC-VN/qnsc-app-platform/commit/0e11e39d6921c8c9be989ce4bdd98b3d1286544c))
+
 ## [3.1.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/platform-http-v3.0.0...platform-http-v3.1.0) (2026-07-18)
 
 
