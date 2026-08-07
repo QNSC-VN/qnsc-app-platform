@@ -32,6 +32,24 @@ describe('error taxonomy', () => {
     expect(httpStatusToErrorCode(418)).toBe(HttpErrorCodes.INTERNAL_ERROR);
   });
 
+  it('gives 503 its own code rather than calling it an internal error', () => {
+    // Both products throw ServiceUnavailableException when an optional integration is
+    // unconfigured — opshub's AI assistant, rally's SCM webhook secret. Under the
+    // INTERNAL_ERROR fallback the response said "this service is broken" about a service
+    // that was working and merely switched off, and on rally's INBOUND webhook that
+    // reached GitHub's delivery log as a rally fault.
+    expect(httpStatusToErrorCode(503)).toBe(HttpErrorCodes.SERVICE_UNAVAILABLE);
+    expect(httpStatusToErrorCode(503)).not.toBe(HttpErrorCodes.INTERNAL_ERROR);
+  });
+
+  it('still falls back to INTERNAL_ERROR for a status the app never throws', () => {
+    // 502 and 504 come from a proxy, so they never reach this filter; leaving them on the
+    // fallback keeps the table to statuses the apps actually produce. Measured across both
+    // repos: ServiceUnavailableException was the only thrown status missing a code.
+    expect(httpStatusToErrorCode(502)).toBe(HttpErrorCodes.INTERNAL_ERROR);
+    expect(httpStatusToErrorCode(500)).toBe(HttpErrorCodes.INTERNAL_ERROR);
+  });
+
   it('derives httpStatus from the category', () => {
     expect(new DomainException('X', 'x', 'CONFLICT').httpStatus).toBe(409);
     expect(new NotFoundException('A_NOT_FOUND', 'nope').httpStatus).toBe(404);
