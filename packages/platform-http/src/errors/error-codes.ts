@@ -49,6 +49,18 @@ export const HttpErrorCodes = {
   PRECONDITION_FAILED: 'PRECONDITION_FAILED',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   UNSUPPORTED_MEDIA_TYPE: 'UNSUPPORTED_MEDIA_TYPE',
+  /**
+   * 503. A dependency or optional integration is unavailable — including
+   * "not configured", which is the common case: both products throw
+   * `ServiceUnavailableException` when an optional integration has no
+   * credentials (opshub's AI assistant, rally's SCM webhook secret).
+   *
+   * It exists because the fallback below labelled those INTERNAL_ERROR, which
+   * says "this service is broken" about a service that is working correctly and
+   * merely switched off. On rally's inbound webhook that reached GitHub's
+   * delivery log, making a configuration gap read as a rally fault.
+   */
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
 } as const;
 
 /** Map a raw HTTP status (from a framework HttpException) to a stable error code. */
@@ -76,6 +88,8 @@ export function httpStatusToErrorCode(status: number): string {
       return HttpErrorCodes.VALIDATION_FAILED;
     case 429:
       return HttpErrorCodes.RATE_LIMITED;
+    case 503:
+      return HttpErrorCodes.SERVICE_UNAVAILABLE;
     default:
       return HttpErrorCodes.INTERNAL_ERROR;
   }
