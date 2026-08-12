@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   security:
-    uses: QNSC-VN/qnsc-ci/.github/workflows/security.yml@v1.6.3
+    uses: QNSC-VN/qnsc-ci/.github/workflows/security.yml@v1.8.0
     with:
       product: qnsc-app-platform
       scan_container: false # no Dockerfile — skip Trivy, keep Semgrep + Gitleaks + osv
