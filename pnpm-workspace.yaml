@@ -25,12 +25,19 @@ overrides:
   # introducer, malformed and repeated authority forms, and percent-encoded schemes.
   # Fixed in 3.1.6 on the 3.x line.
   #
-  # THE UPPER BOUND IS THE POINT. An unbounded floor resolves the newest thing that
-  # satisfies it, and this tree already carries an independent fast-uri 4.1.4 — so
-  # `>=3.1.6` alone would collapse the 3.x consumers onto a major none of them declare.
-  # That is not hypothetical: it is the exact failure rova's own fast-uri entry records,
-  # where an override written to close this parser's holes is what carried its tree into
-  # an unpatched major and became the thing tripping its scanner.
+  # THIS OVERRIDE MOVES 3.x CONSUMERS TO 4.x ON PURPOSE (#136). Two later advisories —
+  # GHSA-hrr3-gc8f-f4qj (host case normalisation via percent-encoded octets; patched in
+  # 2.4.7, 3.1.8 and 4.1.5) and GHSA-jvvf-x445-j334 (mailto header injection; 4.x only,
+  # patched in 4.1.5) — are cleared everywhere by one floor, `4.1.5`, so the whole tree is
+  # held to a single patched major instead of tracking a fix per major. The upper bound
+  # still matters: `>=4.1.5` alone would let it drift into 5.x, a major nothing here
+  # declares. rova's own fast-uri entry records where an unbounded override leads — a tree
+  # carried into an unpatched major, tripping its own scanner.
+  #
+  # Cost, stated rather than glossed: the 3.x line has its own fix (3.1.8), so this is a
+  # choice for one major over a per-major floor like the brace-expansion entries below. It
+  # is safe only while every consumer (ajv, reached through fastify and commitlint, both dev-time here) accepts 4.x; the
+  # test and build suites are the check.
   "fast-uri@<3.1.6": ">=4.1.5 <5.0.0"
   # GHSA-rgw5-rvv9-x895 (CVSS 7.5, DoS via unbounded intermediate arrays) and
   # GHSA-mh99-v99m-4gvg. The first explicitly BYPASSES the second's mitigation, so the
