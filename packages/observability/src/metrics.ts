@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   metrics,
   ValueType,
@@ -99,6 +99,88 @@ export function normalizeRoute(path: string): string {
   return normalized === '' ? '/' : normalized;
 }
 
+/** What a value becomes once its label has seen too many distinct values. */
+export const OVERFLOW_LABEL_VALUE = '__other__';
+
+/** Longest label value kept; a longer one is cut, not rejected. */
+const MAX_LABEL_VALUE_LENGTH = 128;
+
+/** Distinct values allowed per label when no specific limit is listed. */
+const DEFAULT_LABEL_LIMIT = 100;
+
+/**
+ * Distinct values allowed per label. These are tripwires, not budgets: a healthy product
+ * stays far below them (rova and opshub expose ~265 and ~335 endpoints in total), and the
+ * first value past the limit is almost always an id that slipped into a label. The point
+ * is that the damage stops at the limit instead of growing with traffic.
+ */
+const LABEL_LIMITS: Readonly<Record<string, number>> = {
+  route: 500,
+  error_code: 200,
+  job: DEFAULT_LABEL_LIMIT,
+  queue: DEFAULT_LABEL_LIMIT,
+};
+
+/**
+ * Runtime backstop for the one case the types cannot cover: a `string` label whose
+ * value turns out to be unbounded.
+ *
+ * `route`, `error_code`, `job` and `queue` are plain strings because the vocabulary is the
+ * product's. The recorder signatures steer callers to templates and codes, but a route
+ * built from a raw path, or a job named after a tenant, type-checks perfectly and mints a
+ * new time series per value — which is what exhausts a metrics backend's series quota and
+ * turns a free tier into a bill. This remembers the distinct values seen per
+ * (recorder, label) and, past the limit, records the overflow under
+ * {@link OVERFLOW_LABEL_VALUE} instead. It logs ONCE per label so the leak is visible
+ * without becoming its own log flood. Memory is bounded by `limit × 128` characters.
+ *
+ * Values already seen keep their own series after the limit is reached, so the counts that
+ * were correct stay correct; only the unbounded tail is merged.
+ */
+export class LabelCardinalityGuard {
+  private readonly logger = new Logger('MetricLabels');
+  private readonly seen = new Map<string, Set<string>>();
+  private readonly warned = new Set<string>();
+
+  constructor(
+    private readonly limits: Readonly<Record<string, number>> = LABEL_LIMITS,
+    private readonly defaultLimit = DEFAULT_LABEL_LIMIT,
+  ) {}
+
+  /** `scope` names the recorder (`http.server`), `label` the label key. */
+  bound(scope: string, label: string, value: string): string {
+    const bounded =
+      value.length > MAX_LABEL_VALUE_LENGTH ? value.slice(0, MAX_LABEL_VALUE_LENGTH) : value;
+    const key = `${scope}/${label}`;
+
+    let values = this.seen.get(key);
+    if (!values) {
+      values = new Set();
+      this.seen.set(key, values);
+    }
+    if (values.has(bounded)) return bounded;
+
+    const limit = this.limits[label] ?? this.defaultLimit;
+    if (values.size < limit) {
+      values.add(bounded);
+      return bounded;
+    }
+
+    if (!this.warned.has(key)) {
+      this.warned.add(key);
+      this.logger.warn(
+        `Metric label "${label}" on ${scope} passed ${limit} distinct values; ` +
+          `further new values are recorded as "${OVERFLOW_LABEL_VALUE}". ` +
+          'An id or a raw path is probably being used as a label — pass a template or a code.',
+      );
+    }
+    return OVERFLOW_LABEL_VALUE;
+  }
+}
+
+/** One guard per process: recorders are constructed many times (DI and `new`). */
+const labelGuard = new LabelCardinalityGuard();
+
 /** Shared meter. Named per service via the OTel resource, so no name is needed here. */
 export function getMeter(name = 'qnsc'): Meter {
   return metrics.getMeter(name, process.env['SERVICE_VERSION'] ?? 'dev');
@@ -139,14 +221,17 @@ export class HttpMetrics {
     errorCode?: string;
   }): void {
     const labels = {
-      route: input.route,
+      route: labelGuard.bound('http.server', 'route', input.route),
       method: methodLabelOf(input.method),
       status_class: statusClassOf(input.statusCode),
     };
     this.duration.record(input.durationMs, labels);
     this.requests.add(1, labels);
     if (input.statusCode >= 400) {
-      this.errors.add(1, { route: labels.route, error_code: input.errorCode ?? 'UNKNOWN' });
+      this.errors.add(1, {
+        route: labels.route,
+        error_code: labelGuard.bound('http.server', 'error_code', input.errorCode ?? 'UNKNOWN'),
+      });
     }
   }
 }
@@ -171,9 +256,10 @@ export class JobMetrics {
 
   /** `job` is a fixed name from the schedule, so its cardinality is the job count. */
   record(job: string, durationMs: number, outcome: 'success' | 'failure'): void {
-    this.duration.record(durationMs, { job, outcome });
-    this.runs.add(1, { job, outcome });
-    if (outcome === 'failure') this.failures.add(1, { job });
+    const name = labelGuard.bound('job', 'job', job);
+    this.duration.record(durationMs, { job: name, outcome });
+    this.runs.add(1, { job: name, outcome });
+    if (outcome === 'failure') this.failures.add(1, { job: name });
   }
 
   /** Time `fn`, record the outcome, and re-throw so callers see failures. */
@@ -209,11 +295,11 @@ export class QueueMetrics {
   });
 
   recordProcessed(queue: string, count = 1): void {
-    if (count > 0) this.processed.add(count, { queue });
+    if (count > 0) this.processed.add(count, { queue: labelGuard.bound('queue', 'queue', queue) });
   }
 
   recordFailure(queue: string, count = 1): void {
-    if (count > 0) this.failures.add(count, { queue });
+    if (count > 0) this.failures.add(count, { queue: labelGuard.bound('queue', 'queue', queue) });
   }
 
   /**
@@ -221,7 +307,9 @@ export class QueueMetrics {
    * healthy while a backlog grows.
    */
   recordLag(queue: string, seconds: number): void {
-    if (Number.isFinite(seconds) && seconds >= 0) this.lag.record(seconds, { queue });
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      this.lag.record(seconds, { queue: labelGuard.bound('queue', 'queue', queue) });
+    }
   }
 }
 

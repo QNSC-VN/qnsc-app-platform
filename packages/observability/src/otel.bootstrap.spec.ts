@@ -21,6 +21,7 @@ vi.mock('@opentelemetry/sdk-node', () => ({
 }));
 
 import { AggregationType } from '@opentelemetry/sdk-metrics';
+import { PROBE_PATHS } from './ignored-paths';
 import {
   __ignoredRequestPaths,
   resetOtelForTesting,
@@ -277,12 +278,166 @@ describe('startOtel', () => {
 
   it('never traces health, readiness, or favicon requests', () => {
     // Probes run on a fixed schedule and would otherwise dominate both the trace
-    // volume and the bill. Readiness was previously missing from this list.
+    // volume and the bill. `/livez` — the kubelet liveness path — was missing.
     expect([...__ignoredRequestPaths]).toEqual(
-      expect.arrayContaining(['/v1/healthz', '/v1/readyz', '/healthz', '/readyz', '/favicon.ico']),
+      expect.arrayContaining([...PROBE_PATHS, '/favicon.ico']),
     );
   });
+
+  describe('probe filtering', () => {
+    beforeEach(() => {
+      process.env['OTEL_ENABLED'] = 'true';
+    });
+
+    // The hook the HTTP instrumentation really calls — not just the constant — so a
+    // future edit that stops using the shared list fails here.
+    it.each([...PROBE_PATHS, '/favicon.ico', '/livez?verbose=1'])('ignores incoming %s', (url) => {
+      startOtel({ defaultServiceName: 'svc' });
+      expect(ignoreHook()({ url })).toBe(true);
+    });
+
+    it('keeps real routes', () => {
+      startOtel({ defaultServiceName: 'svc' });
+      expect(ignoreHook()({ url: '/v1/users' })).toBe(false);
+      expect(ignoreHook()({})).toBe(false);
+    });
+  });
+
+  describe('instrumentations', () => {
+    beforeEach(() => {
+      process.env['OTEL_ENABLED'] = 'true';
+    });
+
+    it('does not include the AWS SDK instrumentation', () => {
+      startOtel({ defaultServiceName: 'svc' });
+      expect(instrumentationNames()).not.toContain('@opentelemetry/instrumentation-aws-sdk');
+    });
+
+    it('still includes the instrumentations the products rely on', () => {
+      startOtel({ defaultServiceName: 'svc' });
+      expect(instrumentationNames()).toEqual(
+        expect.arrayContaining([
+          '@opentelemetry/instrumentation-http',
+          '@opentelemetry/instrumentation-pg',
+          '@opentelemetry/instrumentation-ioredis',
+        ]),
+      );
+    });
+  });
+
+  describe('Kubernetes resource attributes', () => {
+    beforeEach(() => {
+      process.env['OTEL_ENABLED'] = 'true';
+      delete process.env['K8S_POD_NAME'];
+      delete process.env['K8S_NAMESPACE'];
+      delete process.env['K8S_NODE_NAME'];
+    });
+
+    it('maps the downward-API variables onto k8s.* resource attributes', () => {
+      process.env['K8S_POD_NAME'] = 'rova-api-7d9f-x2k4q';
+      process.env['K8S_NAMESPACE'] = 'rova';
+      process.env['K8S_NODE_NAME'] = 'qnsc-node-1';
+      startOtel({ defaultServiceName: 'svc' });
+
+      expect(resourceAttributes()).toMatchObject({
+        'k8s.pod.name': 'rova-api-7d9f-x2k4q',
+        'k8s.namespace.name': 'rova',
+        'k8s.node.name': 'qnsc-node-1',
+      });
+    });
+
+    it('emits none of them outside Kubernetes, rather than empty strings', () => {
+      startOtel({ defaultServiceName: 'svc' });
+      const attributes = resourceAttributes();
+
+      expect(Object.keys(attributes).filter((key) => key.startsWith('k8s.'))).toEqual([]);
+    });
+
+    it('skips a variable that is set but blank', () => {
+      process.env['K8S_POD_NAME'] = '   ';
+      process.env['K8S_NAMESPACE'] = 'rova';
+      startOtel({ defaultServiceName: 'svc' });
+      const attributes = resourceAttributes();
+
+      expect(attributes).not.toHaveProperty('k8s.pod.name');
+      expect(attributes['k8s.namespace.name']).toBe('rova');
+    });
+  });
+
+  describe('sampling', () => {
+    beforeEach(() => {
+      process.env['OTEL_ENABLED'] = 'true';
+      delete process.env['OTEL_SAMPLING_PROBABILITY'];
+    });
+
+    const samplerOf = () =>
+      String((nodeSdkConstructor.mock.calls[0][0] as { sampler: unknown }).sampler);
+
+    it('is parentbased_traceidratio at 0.1 in production by default', () => {
+      process.env['DEPLOYMENT_ENV'] = 'production';
+      startOtel({ defaultServiceName: 'svc' });
+
+      expect(samplerOf()).toContain('ParentBased');
+      expect(samplerOf()).toContain('TraceIdRatioBased{0.1}');
+    });
+
+    it('is overridable with OTEL_SAMPLING_PROBABILITY', () => {
+      process.env['DEPLOYMENT_ENV'] = 'production';
+      process.env['OTEL_SAMPLING_PROBABILITY'] = '0.25';
+      startOtel({ defaultServiceName: 'svc' });
+
+      expect(samplerOf()).toContain('TraceIdRatioBased{0.25}');
+    });
+
+    // `TraceIdRatioBasedSampler` turns NaN into 0 — every trace dropped, no error.
+    it.each(['', 'ten-percent'])('falls back to the default for %o and says so', (value) => {
+      process.env['DEPLOYMENT_ENV'] = 'production';
+      process.env['OTEL_SAMPLING_PROBABILITY'] = value;
+      const warning = vi.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+
+      startOtel({ defaultServiceName: 'svc' });
+
+      expect(samplerOf()).toContain('TraceIdRatioBased{0.1}');
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining('OTEL_SAMPLING_PROBABILITY'),
+        'OtelSamplingWarning',
+      );
+      warning.mockRestore();
+    });
+  });
 });
+
+/** The `ignoreIncomingRequestHook` handed to the HTTP instrumentation. */
+function ignoreHook(): (req: { url?: string }) => boolean {
+  const http = instrumentations().find(
+    (i) => i.instrumentationName === '@opentelemetry/instrumentation-http',
+  );
+  const config = http?.getConfig() as {
+    ignoreIncomingRequestHook: (req: { url?: string }) => boolean;
+  };
+  return config.ignoreIncomingRequestHook;
+}
+
+function instrumentations(): {
+  instrumentationName: string;
+  getConfig(): unknown;
+}[] {
+  const { instrumentations: list } = nodeSdkConstructor.mock.calls[0][0] as {
+    instrumentations: ({ instrumentationName: string; getConfig(): unknown } | unknown[])[];
+  };
+  return list.flat() as { instrumentationName: string; getConfig(): unknown }[];
+}
+
+function instrumentationNames(): string[] {
+  return instrumentations().map((i) => i.instrumentationName);
+}
+
+function resourceAttributes(): Record<string, unknown> {
+  const { resource } = nodeSdkConstructor.mock.calls[0][0] as {
+    resource: { attributes: Record<string, unknown> };
+  };
+  return resource.attributes;
+}
 
 describe('shutdownOtel', () => {
   beforeEach(() => {
