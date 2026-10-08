@@ -1,6 +1,7 @@
 import 'reflect-metadata';
-import { Controller, Module, Post, type INestApplicationContext } from '@nestjs/common';
+import { Controller, Logger, Module, Post, type INestApplicationContext } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR, NestFactory } from '@nestjs/core';
+import { SecurityMetrics } from '@quynhonsemiconductor/observability';
 import { CacheModule, CacheService } from '@quynhonsemiconductor/platform-cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IdempotencyInterceptor, UseIdempotency } from './idempotency.interceptor';
@@ -101,6 +102,51 @@ describe('production startup without a cache', () => {
     const guard = context.get(RateLimitGuard);
 
     await expect(guard.canActivate({} as never)).resolves.toBe(true);
+  });
+
+  describe('RATE_LIMIT_MODE=disabled in production', () => {
+    it.each([
+      ['RATE_LIMIT_MODE=disabled', { RATE_LIMIT_MODE: 'disabled' }, false],
+      ['the deprecated DISABLE_RATE_LIMIT=true', { DISABLE_RATE_LIMIT: 'true' }, true],
+    ])(
+      'starts without a cache, warns with securityFailOpen and records a fail-open (%s)',
+      async (_label, env, deprecated) => {
+        for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+        const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        const record = vi.spyOn(SecurityMetrics.prototype, 'recordFailOpen');
+
+        await expect(boot(NO_CACHE, rateLimitGuard)).resolves.toBeDefined();
+
+        expect(record).toHaveBeenCalledWith('rate_limit');
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({ securityFailOpen: 'rate_limit' }),
+          expect.stringContaining('does not rate limit'),
+        );
+        const deprecations = warn.mock.calls.filter(([m]) =>
+          String(m).includes('DISABLE_RATE_LIMIT is deprecated'),
+        );
+        expect(deprecations).toHaveLength(deprecated ? 1 : 0);
+        warn.mockRestore();
+        record.mockRestore();
+      },
+    );
+
+    it('outside production it starts quietly: no fail-open warning, no metric', async () => {
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('RATE_LIMIT_MODE', 'disabled');
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const record = vi.spyOn(SecurityMetrics.prototype, 'recordFailOpen');
+
+      await boot(NO_CACHE, rateLimitGuard);
+
+      expect(record).not.toHaveBeenCalled();
+      // (CacheModule's own "cache disabled" warning is expected and unrelated.)
+      expect(
+        warn.mock.calls.filter(([m]) => /securityFailOpen|rate limit/.test(JSON.stringify(m))),
+      ).toEqual([]);
+      warn.mockRestore();
+      record.mockRestore();
+    });
   });
 
   it('starts with IDEMPOTENCY_MODE=disabled, and the interceptor passes requests through', async () => {

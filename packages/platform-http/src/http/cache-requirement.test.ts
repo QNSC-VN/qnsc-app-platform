@@ -3,6 +3,7 @@ import {
   assertCacheInProduction,
   readIdempotencyMode,
   readRateLimitMode,
+  usesDeprecatedDisableAlias,
 } from './cache-requirement';
 
 describe('readRateLimitMode', () => {
@@ -15,10 +16,39 @@ describe('readRateLimitMode', () => {
     expect(readRateLimitMode({ RATE_LIMIT_MODE: 'edge-only' })).toBe('edge-only');
   });
 
+  it('accepts disabled', () => {
+    expect(readRateLimitMode({ RATE_LIMIT_MODE: 'disabled' })).toBe('disabled');
+  });
+
+  describe('deprecated DISABLE_RATE_LIMIT alias', () => {
+    it('DISABLE_RATE_LIMIT=true means disabled when RATE_LIMIT_MODE is unset or blank', () => {
+      expect(readRateLimitMode({ DISABLE_RATE_LIMIT: 'true' })).toBe('disabled');
+      expect(readRateLimitMode({ DISABLE_RATE_LIMIT: 'true', RATE_LIMIT_MODE: ' ' })).toBe(
+        'disabled',
+      );
+      expect(usesDeprecatedDisableAlias({ DISABLE_RATE_LIMIT: 'true' })).toBe(true);
+    });
+
+    it('an explicit RATE_LIMIT_MODE wins over the alias', () => {
+      expect(readRateLimitMode({ DISABLE_RATE_LIMIT: 'true', RATE_LIMIT_MODE: 'cache' })).toBe(
+        'cache',
+      );
+      expect(readRateLimitMode({ DISABLE_RATE_LIMIT: 'true', RATE_LIMIT_MODE: 'edge-only' })).toBe(
+        'edge-only',
+      );
+    });
+
+    it('only the literal "true" counts, as before', () => {
+      expect(readRateLimitMode({ DISABLE_RATE_LIMIT: 'false' })).toBe('cache');
+      expect(readRateLimitMode({ DISABLE_RATE_LIMIT: '1' })).toBe('cache');
+      expect(usesDeprecatedDisableAlias({ DISABLE_RATE_LIMIT: '' })).toBe(false);
+    });
+  });
+
   // `edge_only` quietly meaning "cache" would crash a deploy for the wrong reason.
   it('rejects anything else, naming the setting and the allowed values', () => {
     expect(() => readRateLimitMode({ RATE_LIMIT_MODE: 'edge_only' })).toThrow(
-      /RATE_LIMIT_MODE="edge_only".*cache, edge-only/,
+      /RATE_LIMIT_MODE="edge_only".*cache, edge-only, disabled/,
     );
   });
 });

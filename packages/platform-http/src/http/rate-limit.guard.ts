@@ -10,12 +10,14 @@ import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { failOpenLog } from '@quynhonsemiconductor/observability';
+import { SecurityMetrics, failOpenLog } from '@quynhonsemiconductor/observability';
 import { RateLimitedException } from '../errors';
 import {
+  DISABLE_RATE_LIMIT_ENV,
   RATE_LIMIT_MODE_ENV,
   assertCacheInProduction,
   readRateLimitMode,
+  usesDeprecatedDisableAlias,
   type RateLimitMode,
 } from './cache-requirement';
 import { clientIp } from './client-ip';
@@ -63,16 +65,23 @@ import {
  * connection (optional mode, no url): a guard that quietly allows everything is the same
  * as no guard. `RATE_LIMIT_MODE=edge-only` declares that limits are enforced at the edge
  * (Cloudflare rules) only; the guard then allows every request without touching the cache.
- * A cache that exists but is unreachable at request time still fails open, and logs
- * `securityFailOpen=rate_limit` so the alert fires.
+ *
+ * `RATE_LIMIT_MODE=disabled` (dev / CI) switches the guard off; `DISABLE_RATE_LIMIT=true`
+ * is a deprecated alias for it. In production that is a security control turned off, so it
+ * is reported like any other fail-open: a warning at bootstrap tagged
+ * `securityFailOpen=rate_limit`, and `SecurityMetrics.recordFailOpen('rate_limit')` at
+ * bootstrap and on every request it lets through.
+ *
+ * A cache that exists but is unreachable at request time still fails open, and reports it
+ * the same two ways (the log field and the metric) so the alert fires.
  */
 @Injectable()
 export class RateLimitGuard implements CanActivate, OnApplicationBootstrap {
   private readonly logger = new Logger(RateLimitGuard.name);
-  /** Skip all rate-limiting when `DISABLE_RATE_LIMIT=true` (dev / CI only). */
-  private readonly disabled = process.env['DISABLE_RATE_LIMIT'] === 'true';
+  private readonly securityMetrics = new SecurityMetrics();
   /** Read once, at construction, so a typo in the setting fails at startup too. */
   private readonly mode: RateLimitMode = readRateLimitMode();
+  private readonly production = process.env['NODE_ENV'] === 'production';
 
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
@@ -80,7 +89,23 @@ export class RateLimitGuard implements CanActivate, OnApplicationBootstrap {
   ) {}
 
   onApplicationBootstrap(): void {
-    if (this.disabled) return;
+    if (usesDeprecatedDisableAlias()) {
+      this.logger.warn(
+        `${DISABLE_RATE_LIMIT_ENV} is deprecated; use ${RATE_LIMIT_MODE_ENV}=disabled`,
+      );
+    }
+    if (this.mode === 'disabled') {
+      if (this.production) {
+        // A control that is OFF in production is a fail-open like any other: say so in
+        // the form the alert on `securityFailOpen` matches.
+        this.logger.warn(
+          failOpenLog('rate_limit', { mode: 'disabled' }),
+          `${RATE_LIMIT_MODE_ENV}=disabled in production: the application does not rate limit`,
+        );
+        this.recordFailOpen();
+      }
+      return;
+    }
     if (this.mode === 'edge-only') {
       this.logger.warn(`${RATE_LIMIT_MODE_ENV}=edge-only: the application does not rate limit`);
       return;
@@ -89,8 +114,13 @@ export class RateLimitGuard implements CanActivate, OnApplicationBootstrap {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // ── Dev bypass: DISABLE_RATE_LIMIT=true ─────────────────────────────────
-    if (this.disabled) return true;
+    // ── Disabled: dev / CI bypass (RATE_LIMIT_MODE=disabled) ────────────────
+    if (this.mode === 'disabled') {
+      // Counted per request in production so the alert keeps firing while it stays off,
+      // instead of clearing minutes after the single bootstrap data point.
+      if (this.production) this.recordFailOpen();
+      return true;
+    }
     // ── Edge-only: limits live in Cloudflare, not here ──────────────────────
     if (this.mode === 'edge-only') return true;
 
@@ -156,6 +186,7 @@ export class RateLimitGuard implements CanActivate, OnApplicationBootstrap {
         failOpenLog('rate_limit', { err, key, tier, ip, userId: req.user?.sub }),
         'Rate limit backend unavailable; allowing request',
       );
+      this.recordFailOpen();
       return true;
     }
 
@@ -177,5 +208,14 @@ export class RateLimitGuard implements CanActivate, OnApplicationBootstrap {
     }
 
     return true;
+  }
+
+  /** Never throws: telemetry must not be able to fail a request. */
+  private recordFailOpen(): void {
+    try {
+      this.securityMetrics.recordFailOpen('rate_limit');
+    } catch {
+      // Dropping one data point is the correct failure here.
+    }
   }
 }

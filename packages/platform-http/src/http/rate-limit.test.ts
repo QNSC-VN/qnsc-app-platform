@@ -3,6 +3,7 @@ import type { CacheService } from '@quynhonsemiconductor/platform-cache';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SecurityMetrics } from '@quynhonsemiconductor/observability';
 import { RateLimitedException } from '../errors';
 import { RateLimitGuard } from './rate-limit.guard';
 import { RATE_LIMIT_METADATA_KEY, SKIP_RATE_LIMIT_KEY } from './rate-limit.constants';
@@ -59,6 +60,7 @@ describe('RateLimitGuard', () => {
   // tests exercise real limiting regardless of the ambient shell/CI env.
   beforeEach(() => {
     vi.stubEnv('DISABLE_RATE_LIMIT', '');
+    vi.stubEnv('RATE_LIMIT_MODE', '');
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -135,6 +137,73 @@ describe('RateLimitGuard', () => {
 
   // Fail-open must be visible to the alert that matches `securityFailOpen`; the shared
   // guard used to log it without the field, so a Valkey outage never reached the alert.
+  it('records the fail-open metric as well as the log', async () => {
+    const record = vi.spyOn(SecurityMetrics.prototype, 'recordFailOpen');
+    const { valkey } = makeValkey(new Error('valkey down'));
+    const guard = new RateLimitGuard(makeReflector({ tier: 'AUTH_LOGIN' }), valkey);
+    const { context } = makeContext({ ip: '1.2.3.4' });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+
+    expect(record).toHaveBeenCalledWith('rate_limit');
+    record.mockRestore();
+  });
+
+  it('still allows the request when recording the metric throws', async () => {
+    const record = vi.spyOn(SecurityMetrics.prototype, 'recordFailOpen').mockImplementation(() => {
+      throw new Error('meter exploded');
+    });
+    const { valkey } = makeValkey(new Error('valkey down'));
+    const guard = new RateLimitGuard(makeReflector({ tier: 'AUTH_LOGIN' }), valkey);
+    const { context } = makeContext({ ip: '1.2.3.4' });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    record.mockRestore();
+  });
+
+  it('does not record a fail-open for a normal allowed or rejected request', async () => {
+    const record = vi.spyOn(SecurityMetrics.prototype, 'recordFailOpen');
+    const { valkey } = makeValkey({ allowed: true, remaining: 4, resetAt: 1 });
+    const guard = new RateLimitGuard(makeReflector({}), valkey);
+    await guard.canActivate(makeContext({ ip: '1.2.3.4' }).context);
+
+    expect(record).not.toHaveBeenCalled();
+    record.mockRestore();
+  });
+
+  describe('RATE_LIMIT_MODE=disabled', () => {
+    it.each([
+      ['RATE_LIMIT_MODE=disabled', { RATE_LIMIT_MODE: 'disabled' }],
+      ['the deprecated DISABLE_RATE_LIMIT=true', { DISABLE_RATE_LIMIT: 'true' }],
+    ])('allows every request without touching the cache (%s)', async (_label, env) => {
+      for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+      const { valkey, spy } = makeValkey({ allowed: false, remaining: 0, resetAt: 1 });
+      const guard = new RateLimitGuard(makeReflector({ tier: 'AUTH_LOGIN' }), valkey);
+
+      await expect(guard.canActivate(makeContext({ ip: '1.2.3.4' }).context)).resolves.toBe(true);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('records a fail-open per request in production, and not outside it', async () => {
+      const record = vi.spyOn(SecurityMetrics.prototype, 'recordFailOpen');
+      vi.stubEnv('RATE_LIMIT_MODE', 'disabled');
+      const { valkey } = makeValkey({ allowed: true, remaining: 1, resetAt: 1 });
+      const { context } = makeContext({ ip: '1.2.3.4' });
+
+      vi.stubEnv('NODE_ENV', 'development');
+      await new RateLimitGuard(makeReflector({}), valkey).canActivate(context);
+      expect(record).not.toHaveBeenCalled();
+
+      vi.stubEnv('NODE_ENV', 'production');
+      const prod = new RateLimitGuard(makeReflector({}), valkey);
+      await prod.canActivate(context);
+      await prod.canActivate(context);
+      expect(record).toHaveBeenCalledTimes(2);
+      expect(record).toHaveBeenCalledWith('rate_limit');
+      record.mockRestore();
+    });
+  });
+
   it('tags the fail-open log with securityFailOpen=rate_limit', async () => {
     const { valkey } = makeValkey(new Error('valkey down'));
     const guard = new RateLimitGuard(makeReflector({ tier: 'AUTH_LOGIN' }), valkey);

@@ -35,11 +35,11 @@ function asIp(value: string | undefined): string | undefined {
  * chose to send. `cf-connecting-ip` is set by Cloudflare's edge, overwriting anything the
  * client supplied, so when it is present a forged `x-forwarded-for` is ignored.
  *
- * **Trust boundary.** `cf-connecting-ip` is only authoritative when the origin is
- * reachable *only* through Cloudflare (the Tunnel — no public listener, no `NodePort`).
- * A pod that something else can reach directly lets that caller choose its own address
- * and so pick its own rate-limit bucket. That is a property of the deployment, not of
- * this function; the platform contract requires Tunnel-only ingress.
+ * **Assumption.** `cf-connecting-ip` is only authoritative when the pods are reachable
+ * *only* through the Cloudflare Tunnel and the gateway behind it — no public listener, no
+ * `NodePort`, no other route in. A pod that something else can reach directly lets that
+ * caller choose its own address and so pick its own rate-limit bucket. That is a property
+ * of the deployment, not of this function, and nothing here can check it.
  *
  * A header value that is not a literal IP address is skipped, never used: it ends up in
  * Redis keys and log lines, and a header is attacker-controlled text.

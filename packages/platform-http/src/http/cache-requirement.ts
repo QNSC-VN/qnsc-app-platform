@@ -10,14 +10,25 @@ import type { CacheService } from '@quynhonsemiconductor/platform-cache';
  * out loud that it means it.
  */
 
-/** How the rate-limit guard gets its counters. */
-export type RateLimitMode = 'cache' | 'edge-only';
+/**
+ * How the rate-limit guard gets its counters.
+ *
+ * - `cache` (default): counters in Valkey.
+ * - `edge-only`: limits are enforced by Cloudflare rules; the application allows every
+ *   request. A deliberate posture.
+ * - `disabled`: no limiting at all (local development, CI). In production this is a
+ *   security control switched off, and is reported as one.
+ */
+export type RateLimitMode = 'cache' | 'edge-only' | 'disabled';
 
 /** How the idempotency interceptor gets its store. */
 export type IdempotencyMode = 'cache' | 'disabled';
 
-/** Opt-out variable for {@link RateLimitGuard}: `edge-only` = Cloudflare rules only. */
+/** Mode variable for {@link RateLimitGuard}. */
 export const RATE_LIMIT_MODE_ENV = 'RATE_LIMIT_MODE';
+
+/** @deprecated Spelled `RATE_LIMIT_MODE=disabled` now; `true` is still honoured as an alias. */
+export const DISABLE_RATE_LIMIT_ENV = 'DISABLE_RATE_LIMIT';
 
 /** Opt-out variable for {@link IdempotencyInterceptor}: `disabled`. */
 export const IDEMPOTENCY_MODE_ENV = 'IDEMPOTENCY_MODE';
@@ -38,9 +49,28 @@ function readMode<T extends string>(
   );
 }
 
-/** Read {@link RATE_LIMIT_MODE_ENV}. Unset means `cache`. Throws on an unknown value. */
+/**
+ * Read {@link RATE_LIMIT_MODE_ENV}. Throws on an unknown value.
+ *
+ * Unset means `cache`, except that the deprecated `DISABLE_RATE_LIMIT=true` still means
+ * `disabled`. An explicit `RATE_LIMIT_MODE` always wins over the alias, so the new
+ * variable is the one place to read the answer.
+ */
 export function readRateLimitMode(env: NodeJS.ProcessEnv = process.env): RateLimitMode {
-  return readMode<RateLimitMode>(env, RATE_LIMIT_MODE_ENV, ['cache', 'edge-only'], 'cache');
+  const explicit = env[RATE_LIMIT_MODE_ENV]?.trim();
+  const fallback: RateLimitMode = usesDeprecatedDisableAlias(env) ? 'disabled' : 'cache';
+  if (explicit === undefined || explicit === '') return fallback;
+  return readMode<RateLimitMode>(
+    env,
+    RATE_LIMIT_MODE_ENV,
+    ['cache', 'edge-only', 'disabled'],
+    fallback,
+  );
+}
+
+/** Whether the deprecated `DISABLE_RATE_LIMIT=true` is set (to be warned about). */
+export function usesDeprecatedDisableAlias(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[DISABLE_RATE_LIMIT_ENV] === 'true';
 }
 
 /** Read {@link IDEMPOTENCY_MODE_ENV}. Unset means `cache`. Throws on an unknown value. */

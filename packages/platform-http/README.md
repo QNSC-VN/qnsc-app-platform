@@ -33,9 +33,10 @@ entry is whatever the client chose to send; Cloudflare overwrites `cf-connecting
 forged `x-forwarded-for` is ignored whenever it is present. A header value that is not a
 literal IP address is skipped.
 
-> **Trust boundary.** `cf-connecting-ip` is authoritative only if the pod is reachable
-> **only** through Cloudflare (Tunnel — no public listener, no `NodePort`). Otherwise a
-> caller can choose its own address, and with it its own rate-limit bucket.
+> **Assumption.** `cf-connecting-ip` is authoritative only if the pods are reachable
+> **only** through the Cloudflare Tunnel and the gateway behind it (no public listener, no
+> `NodePort`). Otherwise a caller can choose its own address, and with it its own
+> rate-limit bucket.
 
 `HttpLoggingInterceptor` no longer reads `x-real-ip`.
 
@@ -50,15 +51,24 @@ production nothing changes (local development and CI run without Valkey).
 
 | Variable | Values | Effect |
 |---|---|---|
-| `RATE_LIMIT_MODE` | `cache` (default), `edge-only` | `edge-only`: limits are enforced by Cloudflare rules only; the guard allows every request without touching the cache and logs a warning at startup |
+| `RATE_LIMIT_MODE` | `cache` (default), `edge-only`, `disabled` | `edge-only`: limits are enforced by Cloudflare rules only; the guard allows every request without touching the cache and logs a warning at startup. `disabled`: no limiting (dev/CI) — see below |
 | `IDEMPOTENCY_MODE` | `cache` (default), `disabled` | `disabled`: `Idempotency-Key` is not honoured; the interceptor passes every request through |
 
 An unknown value fails at startup too — a typo never silently means the default.
-`DISABLE_RATE_LIMIT=true` (dev/CI) is unchanged.
 
-A cache that exists but is unreachable *at request time* still fails open, as before; the
-log line now carries `securityFailOpen: "rate_limit"` (`failOpenLog` from
-`@quynhonsemiconductor/observability`) so the alert on that field can see it.
+`RATE_LIMIT_MODE=disabled` replaces `DISABLE_RATE_LIMIT=true`, which still works as a
+**deprecated alias** (and logs a deprecation warning at startup); an explicit
+`RATE_LIMIT_MODE` wins over it. In production a disabled limiter is a security control
+turned off, so it is reported as a fail-open: a warning at startup carrying
+`securityFailOpen: "rate_limit"`, and `SecurityMetrics.recordFailOpen('rate_limit')` at
+startup and on every request it lets through, so an alert on either keeps firing while
+it stays off. Outside production it is silent, as before.
+
+A cache that exists but is unreachable *at request time* still fails open, as before; it is
+now reported both ways — the log line carries `securityFailOpen: "rate_limit"`
+(`failOpenLog`) and `SecurityMetrics.recordFailOpen('rate_limit')` is called, both from
+`@quynhonsemiconductor/observability` — so the alert on either can see it. Recording the
+metric can never fail the request.
 
 ### Upgrading
 
