@@ -31,7 +31,7 @@ overrides:
   # That is not hypothetical: it is the exact failure rova's own fast-uri entry records,
   # where an override written to close this parser's holes is what carried its tree into
   # an unpatched major and became the thing tripping its scanner.
-  "fast-uri@<3.1.6": ">=3.1.6 <4.0.0"
+  "fast-uri@<3.1.6": ">=4.1.5 <5.0.0"
   # GHSA-rgw5-rvv9-x895 (CVSS 7.5, DoS via unbounded intermediate arrays) and
   # GHSA-mh99-v99m-4gvg. The first explicitly BYPASSES the second's mitigation, so the
   # second's fixes are not safe floors — only newer ones.
