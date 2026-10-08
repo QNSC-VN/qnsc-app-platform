@@ -1,6 +1,6 @@
 {
   "name": "@quynhonsemiconductor/platform-runtime",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared runtime primitives for QNSC product backends: env loading, typed config, exclusive scheduled jobs, and request-arrival timing.",
   "license": "UNLICENSED",
   "main": "dist/index.js",

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.2](https://github.com/quynhonsemiconductor/app-platform/compare/platform-runtime-v0.1.1...platform-runtime-v0.1.2) (2026-10-08)
+
+
+### ♻️ Refactors
+
+* **platform-http:** own sanitizeString, and relocate orphaned tests ([#131](https://github.com/quynhonsemiconductor/app-platform/issues/131)) ([0be062f](https://github.com/quynhonsemiconductor/app-platform/commit/0be062f9ef38e3fed79e7db3deb963162bd12745))
+
+
+### 🔒 Security
+
+* **deps:** clear the osv-scanner findings that turn the required check red ([#141](https://github.com/quynhonsemiconductor/app-platform/issues/141)) ([40749f7](https://github.com/quynhonsemiconductor/app-platform/commit/40749f70065df43a3776d1d3d96d0772dd0b5fc7))
+
 ## [0.1.1](https://github.com/quynhonsemiconductor/app-platform/compare/platform-runtime-v0.1.0...platform-runtime-v0.1.1) (2026-09-08)
 
 
