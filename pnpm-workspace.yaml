@@ -42,7 +42,7 @@ overrides:
   # verified its consumers accept a forced 5.x. Nothing here has verified that, and a
   # per-major floor is exactly as effective without the cross-major push, which is the
   # thing the fast-uri entry above exists to warn about.
-  "brace-expansion@<1.1.18": ">=1.1.18 <2.0.0"
+  "brace-expansion@<1.1.18": ">=5.0.12 <6.0.0"
   "brace-expansion@>=2.0.0 <2.1.4": ">=2.1.4 <3.0.0"
   "brace-expansion@>=4.0.0 <5.0.9": ">=5.0.9"
   # GHSA-fxqj-rqcc-2cmp (CVSS 6.3) — incomplete fix of GHSA-6g55-p6wh-862q: an
