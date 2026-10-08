@@ -4,6 +4,10 @@
     "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
+    // TypeScript 6 deprecates `moduleResolution: node` (node10) and TypeScript 7 removes it.
+    // Silenced rather than migrated: moving the published CommonJS packages to node16/bundler
+    // resolution is a behaviour decision (extension rules, `exports` maps), not a toolchain bump.
+    "ignoreDeprecations": "6.0",
     "lib": ["ES2022"],
     "declaration": true,
     "declarationMap": true,

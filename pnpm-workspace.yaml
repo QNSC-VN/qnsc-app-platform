@@ -74,3 +74,15 @@ overrides:
   # 1.14.5 on the 1.x line. Reached only through the OTLP gRPC exporters that
   # `@opentelemetry/sdk-node` pulls in; nothing here opens a gRPC server. Capped below 2.0.0.
   "@grpc/grpc-js@<1.14.5": ">=1.14.5 <2.0.0"
+
+# pnpm 11 fails an install that ignores a dependency's build script unless the decision is
+# written down. These five were already being skipped (pnpm 10 only warned); recording them as
+# `false` keeps today's behaviour exactly. None is needed: esbuild and protobufjs ship their
+# binaries / generated code without the script, cpu-features and ssh2 fall back to pure JS
+# (via testcontainers), and @scarf/scarf is install-time analytics.
+allowBuilds:
+  "@scarf/scarf": false
+  cpu-features: false
+  esbuild: false
+  protobufjs: false
+  ssh2: false
