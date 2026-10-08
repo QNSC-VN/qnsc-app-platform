@@ -1,0 +1,16 @@
+# osv-scanner suppressions. Read by the shared security workflow from the directory of the
+# lockfile it scans. EVERY entry expires: ignoreUntil is at most 30 days out, so an ignore
+# cannot quietly become permanent -- when it lapses the check goes red again and somebody
+# has to look.
+
+[[IgnoredVulns]]
+id = "GHSA-hp3w-g68c-fv3c"
+ignoreUntil = 2026-11-08
+reason = """\
+sprintf-js <= 1.1.3 (CVSS 6.9, DoS via unbounded precision specifiers). NO fixed version exists:
+1.1.3 is the latest release and the advisory range is 0 .. last_affected 1.1.3. Reached only
+through ioredis-mock -> fengari-interop -> fengari, which is a devDependency of platform-cache
+and platform-http used by unit tests; it is not in any published package's runtime dependencies.
+Exploitation needs an attacker-controlled format string, and fengari only formats Lua scripts evaluated
+by ioredis-mock inside this repo's tests. Revisit by the expiry: drop this entry if sprintf-js ships a fix
+or ioredis-mock stops depending on fengari."""
