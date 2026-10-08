@@ -6,8 +6,22 @@
 # Breaking changes here affect both products; keep ownership scoped
 # to platform-infra until a package needs a dedicated owning team.
 packages/identity/          @quynhonsemiconductor/platform-infra
+packages/observability/     @quynhonsemiconductor/platform-infra
 packages/platform-cache/    @quynhonsemiconductor/platform-infra
 packages/platform-http/     @quynhonsemiconductor/platform-infra
+packages/platform-runtime/  @quynhonsemiconductor/platform-infra
+
+# Planned packages. Listed ahead of time so the code-owner rule covers the first PR that creates
+# the directory, not only the ones after it.
+packages/platform-db/       @quynhonsemiconductor/platform-infra
+packages/platform-jobs/     @quynhonsemiconductor/platform-infra
+packages/platform-mail/     @quynhonsemiconductor/platform-infra
+
+# Private (never published) test harness shared by every package's tests.
+packages/testing/           @quynhonsemiconductor/platform-infra
+
+# Decision records and the plan they implement.
+docs/adr/                   @quynhonsemiconductor/platform-infra
 
 # Release/publish config — controls what gets published to GitHub Packages
 release-please-config.json  @quynhonsemiconductor/platform-infra
