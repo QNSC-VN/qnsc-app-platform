@@ -170,6 +170,9 @@ importers:
       '@nestjs/swagger':
         specifier: ^11.4.5
         version: 11.4.5(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.27(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)
+      '@quynhonsemiconductor/observability':
+        specifier: workspace:^
+        version: link:../observability
       '@quynhonsemiconductor/platform-cache':
         specifier: workspace:^
         version: link:../platform-cache

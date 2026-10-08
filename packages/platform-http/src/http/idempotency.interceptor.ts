@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   type NestInterceptor,
+  type OnApplicationBootstrap,
   UseInterceptors,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
@@ -12,6 +13,13 @@ import type { FastifyRequest } from 'fastify';
 import { type Observable, from, of } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
+import {
+  IDEMPOTENCY_MODE_ENV,
+  assertCacheInProduction,
+  readIdempotencyMode,
+  type IdempotencyMode,
+} from './cache-requirement';
+import { clientIp } from './client-ip';
 
 /** TTL for cached idempotent responses (24 hours). */
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
@@ -30,14 +38,34 @@ const IDEMPOTENCY_METHODS = new Set(['POST', 'PUT']);
  *
  * Usage (opt-in per route): `@UseIdempotency()`
  * Usage (global):           register as `APP_INTERCEPTOR`.
+ *
+ * Cache requirement: with `NODE_ENV=production` the application FAILS AT STARTUP if
+ * `CacheModule` has no connection, because a retry-safe endpoint that is not retry-safe
+ * is worse than one that never claimed to be. `IDEMPOTENCY_MODE=disabled` declares that
+ * on purpose; the interceptor then passes every request straight through.
  */
 @Injectable()
-export class IdempotencyInterceptor implements NestInterceptor {
+export class IdempotencyInterceptor implements NestInterceptor, OnApplicationBootstrap {
   private readonly logger = new Logger(IdempotencyInterceptor.name);
+  /** Read once, at construction, so a typo in the setting fails at startup too. */
+  private readonly mode: IdempotencyMode = readIdempotencyMode();
 
   constructor(@Inject(CacheService) private readonly cache: CacheService) {}
 
+  onApplicationBootstrap(): void {
+    if (this.mode === 'disabled') {
+      this.logger.warn(`${IDEMPOTENCY_MODE_ENV}=disabled: Idempotency-Key is not honoured`);
+      return;
+    }
+    assertCacheInProduction(
+      this.cache,
+      'IdempotencyInterceptor',
+      `${IDEMPOTENCY_MODE_ENV}=disabled`,
+    );
+  }
+
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    if (this.mode === 'disabled') return next.handle();
     if (context.getType() !== 'http') return next.handle();
 
     const req = context
@@ -53,7 +81,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const userId =
       req.user?.sub ??
       createHash('sha256')
-        .update(`${req.ip ?? ''}:${req.headers['user-agent'] ?? ''}`)
+        .update(`${clientIp(req)}:${req.headers['user-agent'] ?? ''}`)
         .digest('hex')
         .slice(0, 16);
     const redisKey = `idem:${userId}:${req.method}:${req.url}:${idempotencyKey}`;

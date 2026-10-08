@@ -7,9 +7,11 @@ import {
   type NestInterceptor,
   Optional,
 } from '@nestjs/common';
+import { isIgnoredRequestPath } from '@quynhonsemiconductor/observability';
 import type { FastifyRequest } from 'fastify';
 import type { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { clientIp } from './client-ip';
 
 /**
  * Options for {@link HttpLoggingInterceptor}. Supplied by the product so the
@@ -18,15 +20,16 @@ import { tap } from 'rxjs/operators';
 export interface HttpLoggingOptions {
   /** Include the (redacted) request body for POST/PUT/PATCH. Default `false`. */
   logBodies?: boolean;
-  /** Exact paths whose access logs are suppressed. Default: health probes + favicon. */
+  /**
+   * Exact paths whose access logs are suppressed. Default: the shared probe list
+   * (`PROBE_PATHS` from `@quynhonsemiconductor/observability`, which tracing skips too)
+   * plus favicon, matched ignoring the query string. Passing this REPLACES that default.
+   */
   skipPaths?: readonly string[];
 }
 
 /** DI token for {@link HttpLoggingOptions}. */
 export const HTTP_LOGGING_OPTIONS = Symbol('HTTP_LOGGING_OPTIONS');
-
-/** Routes whose access logs are suppressed by default (probes + favicon spam). */
-const DEFAULT_SKIP_PATHS = ['/v1/healthz', '/v1/readyz', '/favicon.ico'] as const;
 
 /** Body fields that must never appear in logs. */
 const REDACTED_BODY_FIELDS = new Set([
@@ -86,11 +89,12 @@ function sanitizeValue(value: unknown, key?: string): unknown {
 export class HttpLoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
   private readonly logBodies: boolean;
-  private readonly skipPaths: Set<string>;
+  /** `undefined` means "use the shared default" (`isIgnoredRequestPath`). */
+  private readonly skipPaths: Set<string> | undefined;
 
   constructor(@Optional() @Inject(HTTP_LOGGING_OPTIONS) options?: HttpLoggingOptions) {
     this.logBodies = options?.logBodies ?? false;
-    this.skipPaths = new Set(options?.skipPaths ?? DEFAULT_SKIP_PATHS);
+    this.skipPaths = options?.skipPaths ? new Set(options.skipPaths) : undefined;
   }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
@@ -103,17 +107,13 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     const url =
       ((req as unknown as Record<string, unknown>)['originalUrl'] as string | undefined) ?? req.url;
 
-    if (this.skipPaths.has(url)) {
+    if (this.skipPaths ? this.skipPaths.has(url) : isIgnoredRequestPath(url)) {
       return next.handle();
     }
 
     const startTime = Date.now();
     const correlationId = req.headers['x-correlation-id'] as string | undefined;
-    const ip =
-      (req.headers['x-real-ip'] as string) ||
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      req.ip ||
-      'unknown';
+    const ip = clientIp(req);
 
     return next.handle().pipe(
       tap({
