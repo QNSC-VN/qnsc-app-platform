@@ -146,12 +146,12 @@ importers:
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
+      '@quynhonsemiconductor/testing':
+        specifier: workspace:^
+        version: link:../testing
       ioredis:
         specifier: ^5.4.1
         version: 5.11.1(supports-color@7.2.0)
-      ioredis-mock:
-        specifier: ^8.9.0
-        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@5.11.1(supports-color@7.2.0)))(ioredis@5.11.1(supports-color@7.2.0))
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -179,9 +179,6 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.11.1(supports-color@7.2.0)
-      ioredis-mock:
-        specifier: ^8.9.0
-        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@5.11.1(supports-color@7.2.0)))(ioredis@5.11.1(supports-color@7.2.0))
       nestjs-zod:
         specifier: ^5.4.0
         version: 5.4.0(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/swagger@11.4.5(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@11.1.27(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3)
@@ -588,9 +585,6 @@ packages:
   '@humanwhocodes/retry@0.4.3':
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
-
-  '@ioredis/as-callback@3.0.0':
-    resolution: {integrity: sha512-Kqv1rZ3WbgOrS+hgzJ5xG5WQuhvzzSTRYvNeyPMLOAM78MHSnuKI20JeJGbpuAt//LCuP0vsexZcorqW7kWhJg==}
 
   '@ioredis/commands@1.10.0':
     resolution: {integrity: sha512-UmeW7z4LfctwoQ5wkhVzgq8tXkreED2xZGpX+Bg+zA+WJFZCT6c062AfCK/Dfk81xZnnwdhJCUMkitihRaoC2Q==}
@@ -1452,11 +1446,6 @@ packages:
   '@types/http-errors@2.0.5':
     resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
 
-  '@types/ioredis-mock@8.2.7':
-    resolution: {integrity: sha512-YsGiaOIYBKeVvu/7GYziAD8qX3LJem5LK00d5PKykzsQJMLysAqXA61AkNuYWCekYl64tbMTqVOMF4SYoCPbQg==}
-    peerDependencies:
-      ioredis: '>=5'
-
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -2124,14 +2113,6 @@ packages:
       picomatch:
         optional: true
 
-  fengari-interop@0.1.4:
-    resolution: {integrity: sha512-4/CW/3PJUo3ebD4ACgE1g/3NGEYSq7OQAyETyypsAl/WeySDBbxExikkayNkZzbpgyC9GyJp8v1DU2VOXxNq7Q==}
-    peerDependencies:
-      fengari: ^0.1.0
-
-  fengari@0.1.5:
-    resolution: {integrity: sha512-0DS4Nn4rV8qyFlQCpKK8brT61EUtswynrpfFTcgLErcilBIBskSMQ86fO2WVuybr14ywyKdRjv91FiRZwnEuvQ==}
-
   fetch-blob@3.2.0:
     resolution: {integrity: sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ==}
     engines: {node: ^12.20 || >= 14.13}
@@ -2271,13 +2252,6 @@ packages:
   ini@4.1.1:
     resolution: {integrity: sha512-QQnnxNyfvmHFIsj7gkPcYymR8Jdw/o7mp5ZFihxn6h8Ci6fh3Dx4E1gPjpQEpIuPo9XVNY/ZUwh4BPMjGyL01g==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
-
-  ioredis-mock@8.13.1:
-    resolution: {integrity: sha512-Wsi50AU+cMiI32nAgfwpUaJVBtb4iQdVsOHl9M6R3tePCO/8vGsToCVIG82XWAxN4Se55TZoOzVseu+QngFLyw==}
-    engines: {node: '>=12.22'}
-    peerDependencies:
-      '@types/ioredis-mock': ^8
-      ioredis: ^5
 
   ioredis@5.11.1:
     resolution: {integrity: sha512-ehuGcf94bQXhfagULNXrJdfnWO38v070jxSx/qE87Kjzmu2fU7ro5EFAb+OPituLqgfyuQaym5DlrNydW2sJ9A==}
@@ -2790,10 +2764,6 @@ packages:
   readdir-glob@1.1.3:
     resolution: {integrity: sha512-v05I2k7xN8zXvPD9N+z/uhXPaj0sUFCe2rcWZIpBsqxfP7xXFQ0tipAd/wjj1YxWyWtUS5IDJpOG82JKt2EAVA==}
 
-  readline-sync@1.4.10:
-    resolution: {integrity: sha512-gNva8/6UAe8QYepIQH/jQ2qn91Qj0B9sYjMBBs3QOB8F2CXcKgLxQaJRP76sWVRQt+QU+8fAkCbCvjjMFu7Ycw==}
-    engines: {node: '>= 0.8.0'}
-
   real-require@0.2.0:
     resolution: {integrity: sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==}
     engines: {node: '>= 12.13.0'}
@@ -2918,9 +2888,6 @@ packages:
   split2@4.2.0:
     resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
     engines: {node: '>= 10.x'}
-
-  sprintf-js@1.1.3:
-    resolution: {integrity: sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==}
 
   ssh-remote-port-forward@1.0.4:
     resolution: {integrity: sha512-x0LV1eVDwjf1gmG7TTnfqIzf+3VPRz7vrNIjX6oYLbeCrf/PeVY6hkT68Mg+q02qXxQhrLjB0jfgvhevoCRmLQ==}
@@ -3583,8 +3550,6 @@ snapshots:
   '@humanwhocodes/module-importer@1.0.1': {}
 
   '@humanwhocodes/retry@0.4.3': {}
-
-  '@ioredis/as-callback@3.0.0': {}
 
   '@ioredis/commands@1.10.0': {}
 
@@ -4633,10 +4598,6 @@ snapshots:
 
   '@types/http-errors@2.0.5': {}
 
-  '@types/ioredis-mock@8.2.7(ioredis@5.11.1(supports-color@7.2.0))':
-    dependencies:
-      ioredis: 5.11.1(supports-color@7.2.0)
-
   '@types/json-schema@7.0.15': {}
 
   '@types/jsonwebtoken@9.0.10':
@@ -5420,16 +5381,6 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.5
 
-  fengari-interop@0.1.4(fengari@0.1.5):
-    dependencies:
-      fengari: 0.1.5
-
-  fengari@0.1.5:
-    dependencies:
-      readline-sync: 1.4.10
-      sprintf-js: 1.1.3
-      tmp: 0.2.7
-
   fetch-blob@3.2.0:
     dependencies:
       node-domexception: 1.0.0
@@ -5573,16 +5524,6 @@ snapshots:
   inherits@2.0.4: {}
 
   ini@4.1.1: {}
-
-  ioredis-mock@8.13.1(@types/ioredis-mock@8.2.7(ioredis@5.11.1(supports-color@7.2.0)))(ioredis@5.11.1(supports-color@7.2.0)):
-    dependencies:
-      '@ioredis/as-callback': 3.0.0
-      '@ioredis/commands': 1.10.0
-      '@types/ioredis-mock': 8.2.7(ioredis@5.11.1(supports-color@7.2.0))
-      fengari: 0.1.5
-      fengari-interop: 0.1.4(fengari@0.1.5)
-      ioredis: 5.11.1(supports-color@7.2.0)
-      semver: 7.8.5
 
   ioredis@5.11.1(supports-color@7.2.0):
     dependencies:
@@ -6085,8 +6026,6 @@ snapshots:
     dependencies:
       minimatch: 5.1.9
 
-  readline-sync@1.4.10: {}
-
   real-require@0.2.0: {}
 
   real-require@1.0.0: {}
@@ -6200,8 +6139,6 @@ snapshots:
   split-ca@1.0.1: {}
 
   split2@4.2.0: {}
-
-  sprintf-js@1.1.3: {}
 
   ssh-remote-port-forward@1.0.4:
     dependencies:

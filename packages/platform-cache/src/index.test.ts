@@ -1,35 +1,57 @@
 import 'reflect-metadata';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-// Back the ioredis client with an in-memory mock so the service under test
-// exercises real command semantics (multi/incr/expire, SET NX PX, EX) without a
-// live server.
-vi.mock('ioredis', async () => {
-  const RedisMock = (await import('ioredis-mock')).default;
-  return { default: RedisMock };
-});
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { dockerTestsEnabled, startValkey, type ValkeyHarness } from '@quynhonsemiconductor/testing';
 
 import { CacheModule } from './cache.module';
 import { CacheService } from './cache.service';
 import { CACHE_OPTIONS } from './cache.types';
 
-function makeService(): CacheService {
-  const service = new CacheService({ url: 'redis://localhost:6379', keyPrefix: 'test:' });
-  service.onModuleInit();
-  return service;
-}
+// The service runs against a REAL Valkey (packages/testing), not an in-memory double: the
+// rate limiter is a Lua script and the lock is `SET NX PX`, so what is under test is the
+// server's behaviour. Skipped without Docker locally; on CI a missing Docker fails the run.
+const dockerEnabled = await dockerTestsEnabled();
 
-describe('CacheService', () => {
+const PREFIX = 'test:';
+
+describe.skipIf(!dockerEnabled)('CacheService (real Valkey)', () => {
+  let valkey: ValkeyHarness;
   let service: CacheService;
 
-  beforeEach(() => {
-    service = makeService();
+  beforeAll(async () => {
+    valkey = await startValkey();
+  }, 120_000);
+
+  afterAll(async () => {
+    await valkey?.stop();
+  }, 60_000);
+
+  beforeEach(async () => {
+    await valkey.flush();
+    service = new CacheService({ url: valkey.url, keyPrefix: PREFIX });
+    service.onModuleInit();
+  });
+
+  afterEach(async () => {
+    await service.onModuleDestroy();
   });
 
   it('stores and reads a string value with TTL', async () => {
     expect(await service.get('k')).toBeNull();
     await service.set('k', 'v', 60);
     expect(await service.get('k')).toBe('v');
+  });
+
+  it('applies the key prefix and the TTL on the server', async () => {
+    await service.set('k', 'v', 60);
+    expect(await valkey.command('GET', `${PREFIX}k`)).toBe('v');
+    const ttl = Number(await valkey.command('TTL', `${PREFIX}k`));
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(60);
+  });
+
+  it('stores no expiry when no TTL is given', async () => {
+    await service.set('forever', 'v');
+    expect(await valkey.command('TTL', `${PREFIX}forever`)).toBe('-1');
   });
 
   it('stores and reads a JSON value', async () => {
@@ -49,9 +71,11 @@ describe('CacheService', () => {
     expect(await service.get('d')).toBeNull();
   });
 
-  it('reports availability and exposes the raw client', () => {
+  it('reports availability and exposes the raw client', async () => {
     expect(service.redis).not.toBeNull();
     expect(() => service.instance).not.toThrow();
+    await service.get('warm-up'); // a command resolves only once the connection is ready
+    expect(service.isAvailable).toBe(true);
   });
 
   it('allows requests up to the limit then blocks', async () => {
@@ -67,11 +91,34 @@ describe('CacheService', () => {
     expect(third.resetAt).toBeGreaterThan(0);
   });
 
+  it('admits exactly `limit` of many concurrent requests (the Lua script is atomic)', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 12 }, () => service.consumeRateLimit('burst', 3, 60)),
+    );
+    expect(results.filter((r) => r.allowed)).toHaveLength(3);
+  });
+
+  it('frees a slot once the window has passed', async () => {
+    expect((await service.consumeRateLimit('slide', 1, 1)).allowed).toBe(true);
+    expect((await service.consumeRateLimit('slide', 1, 1)).allowed).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect((await service.consumeRateLimit('slide', 1, 1)).allowed).toBe(true);
+  });
+
   it('grants a lock once and refuses a second holder until released', async () => {
     expect(await service.acquireLock('k', 1000)).toBe(true);
     expect(await service.acquireLock('k', 1000)).toBe(false);
     await service.releaseLock('k');
     expect(await service.acquireLock('k', 1000)).toBe(true);
+  });
+
+  it('expires a lock on its own so a crashed holder cannot deadlock it', async () => {
+    expect(await service.acquireLock('ttl', 300)).toBe(true);
+    const pttl = Number(await valkey.command('PTTL', `${PREFIX}lock:ttl`));
+    expect(pttl).toBeGreaterThan(0);
+    expect(pttl).toBeLessThanOrEqual(300);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(await service.acquireLock('ttl', 300)).toBe(true);
   });
 });
 
