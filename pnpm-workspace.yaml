@@ -42,9 +42,18 @@ overrides:
   # verified its consumers accept a forced 5.x. Nothing here has verified that, and a
   # per-major floor is exactly as effective without the cross-major push, which is the
   # thing the fast-uri entry above exists to warn about.
-  "brace-expansion@<1.1.18": ">=1.1.18 <2.0.0"
-  "brace-expansion@>=2.0.0 <2.1.4": ">=2.1.4 <3.0.0"
-  "brace-expansion@>=4.0.0 <5.0.9": ">=5.0.9"
+  #
+  # RAISED AGAIN for three further advisories against the same package, each patched per
+  # major: GHSA-6j4f-fj2g-mc7p (7.5) and GHSA-qhr7-859c-m2p7 (7.5) and GHSA-q2hr-2g5m-vwhr
+  # (5.3). The newest fix across the three is 1.1.21, 2.1.7 and 5.0.12 respectively, so those
+  # are the floors. Still one entry per major, still no cross-major push.
+  "brace-expansion@<1.1.21": ">=1.1.21 <2.0.0"
+  "brace-expansion@>=2.0.0 <2.1.7": ">=2.1.7 <3.0.0"
+  "brace-expansion@>=4.0.0 <5.0.12": ">=5.0.12"
+  # GHSA-68fv-2mgg-jv7q (CVSS 8.7) — fixed in 1.2.2. Reached through magicast (vitest coverage),
+  # which resolves it at 1.2.1 while postcss already resolves 1.2.2: the lockfile simply had
+  # not been moved. Build/test toolchain only; capped below 2.0.0 like the entries above.
+  "source-map-js@<1.2.2": ">=1.2.2 <2.0.0"
   # GHSA-fxqj-rqcc-2cmp (CVSS 6.3) — incomplete fix of GHSA-6g55-p6wh-862q: an
   # attacker-controlled `sourceMappingURL` is still read. Fixed in 8.5.23. Build
   # toolchain only.
@@ -54,3 +63,7 @@ overrides:
   # the zero-size path is not reachable here; floored anyway so the scanner stays clean.
   # NOT forced across majors: postcss declares ^3.3.11 and nanoid 4.x+ is ESM-only.
   "nanoid@>=3.0.0 <3.3.18": "3.3.18"
+  # GHSA-m9gg-hp2v-232j (CVSS 7.4) and GHSA-f596-whhp-79r4 (CVSS 3.7) — both fixed in
+  # 1.14.5 on the 1.x line. Reached only through the OTLP gRPC exporters that
+  # `@opentelemetry/sdk-node` pulls in; nothing here opens a gRPC server. Capped below 2.0.0.
+  "@grpc/grpc-js@<1.14.5": ">=1.14.5 <2.0.0"
