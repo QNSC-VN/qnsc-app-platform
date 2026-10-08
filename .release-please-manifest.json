@@ -2,6 +2,6 @@
   "packages/identity": "7.1.0",
   "packages/platform-cache": "3.1.0",
   "packages/platform-http": "4.0.1",
-  "packages/observability": "0.2.0",
+  "packages/observability": "0.2.1",
   "packages/platform-runtime": "0.1.1"
 }

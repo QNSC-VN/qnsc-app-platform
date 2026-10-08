@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/quynhonsemiconductor/app-platform/compare/observability-v0.2.0...observability-v0.2.1) (2026-10-08)
+
+
+### 🔒 Security
+
+* **deps:** clear the osv-scanner findings that turn the required check red ([#141](https://github.com/quynhonsemiconductor/app-platform/issues/141)) ([40749f7](https://github.com/quynhonsemiconductor/app-platform/commit/40749f70065df43a3776d1d3d96d0772dd0b5fc7))
+
 ## [0.2.0](https://github.com/quynhonsemiconductor/app-platform/compare/observability-v0.1.6...observability-v0.2.0) (2026-09-05)
 
 
