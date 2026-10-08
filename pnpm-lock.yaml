@@ -231,7 +231,7 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
       reflect-metadata:
-        specifier: ^0.2.2
+        specifier: 0.2.2
         version: 0.2.2
       testcontainers:
         specifier: 12.2.0

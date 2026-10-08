@@ -20,6 +20,13 @@ describe.skipIf(!enabled)('startPostgres (plain)', () => {
     expect(Number(rows[0].server_version_num)).toBeGreaterThanOrEqual(180000);
   });
 
+  it('is the glibc (Debian) build, the family CloudNativePG runs, not musl', async () => {
+    const { rows } = await pg.createPool().query('SELECT version() AS v');
+    expect(rows[0].v).toMatch(/Debian/);
+    expect(rows[0].v).toMatch(/linux-gnu/);
+    expect(rows[0].v).not.toMatch(/musl/);
+  });
+
   it('generates its own credentials', () => {
     expect(pg.password.length).toBeGreaterThanOrEqual(32);
   });
