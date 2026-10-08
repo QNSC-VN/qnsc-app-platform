@@ -1,0 +1,21 @@
+{
+  "name": "@quynhonsemiconductor/testing",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Workspace-internal testcontainers harness (PostgreSQL 18, Valkey) for tests in this repo. Never published.",
+  "license": "UNLICENSED",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@peculiar/x509": "2.1.0",
+    "pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
+    "testcontainers": "12.2.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

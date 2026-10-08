@@ -69,6 +69,10 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      # packages/testing starts PostgreSQL 18 and Valkey through the runner's Docker daemon.
+      # Fail here, loudly, if the runner image ever stops providing it; the harness itself
+      # also throws when CI is set rather than skipping.
+      - run: docker version
       # Build first so workspace packages resolve their cross-package imports.
       - run: pnpm build
       - run: pnpm test
