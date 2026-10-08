@@ -63,7 +63,7 @@
     "@quynhonsemiconductor/observability": "workspace:^",
     "@quynhonsemiconductor/testing": "workspace:*",
     "@types/pg": "8.23.1",
-    "drizzle-orm": "0.45.4",
+    "drizzle-orm": "0.45.3",
     "pg": "8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
