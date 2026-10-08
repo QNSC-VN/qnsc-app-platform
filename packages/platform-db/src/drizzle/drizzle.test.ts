@@ -13,6 +13,7 @@ import {
   withTransaction,
   type Database,
   type DbExecutor,
+  type ReplicatedDatabase,
   type Transaction,
 } from './index';
 
@@ -178,5 +179,40 @@ describe.skipIf(!enabled)('platform-db/drizzle', () => {
         await read.end();
       }
     });
+  });
+});
+
+/**
+ * COMPILE-TIME CONTRACT. `platform-jobs` and `identity` v8 accept the bare `DbExecutor` (no
+ * schema argument) and are handed a product's database or transaction, whose schema is the
+ * product's own. If these stop being assignable, those packages cannot take a `tx` and the whole
+ * point of the shared transaction contract is lost. `pnpm typecheck` compiles this file
+ * (tsconfig.test.json); vitest only strips types and would never notice.
+ */
+describe('DbExecutor type contract', () => {
+  it('a real-schema database and transaction are assignable to the bare DbExecutor', () => {
+    expectTypeOf<Database<Schema>>().toExtend<DbExecutor>();
+    expectTypeOf<Transaction<Schema>>().toExtend<DbExecutor>();
+    expectTypeOf<ReplicatedDatabase<Schema>>().toExtend<DbExecutor>();
+
+    // The shape a consumer actually writes:
+    const takesBare = (executor: DbExecutor): DbExecutor => executor;
+    const fromDb = (db: Database<Schema>) => takesBare(db);
+    const fromTx = (tx: Transaction<Schema>) => takesBare(tx);
+    expect([fromDb, fromTx]).toHaveLength(2);
+
+    // and withTransaction hands the callback something the bare type accepts
+    const inTx = (db: Database<Schema>) =>
+      withTransaction(db, (tx) => Promise.resolve(takesBare(tx)));
+    expect(inTx).toBeTypeOf('function');
+  });
+
+  it('$primary is in the return type exactly when a read pool is given', () => {
+    const pool = {} as Pool;
+    const withRead = createDatabase(pool, { schema, readPool: pool });
+    const without = createDatabase(pool, { schema });
+    expectTypeOf(withRead).toHaveProperty('$primary');
+    expectTypeOf(without).not.toHaveProperty('$primary');
+    expectTypeOf(withRead.$primary).toExtend<DbExecutor<Schema>>();
   });
 });

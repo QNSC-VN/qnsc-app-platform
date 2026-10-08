@@ -1,3 +1,4 @@
+import './require-peers';
 import { Inject } from '@nestjs/common';
 import { DATABASE_POOL_TOKEN, DATABASE_READ_POOL_TOKEN, DATABASE_TOKEN } from '../tokens';
 

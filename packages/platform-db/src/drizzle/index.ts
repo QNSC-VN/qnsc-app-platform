@@ -11,11 +11,11 @@ import type { Pool } from 'pg';
  */
 
 /** A Drizzle database over the primary pool, with `$client` the pg `Pool`. */
-export type Database<TSchema extends Record<string, unknown> = Record<string, never>> =
+export type Database<TSchema extends Record<string, unknown> = Record<string, unknown>> =
   NodePgDatabase<TSchema> & { $client: Pool };
 
 /** The object Drizzle hands to a `db.transaction(async (tx) => …)` callback. */
-export type Transaction<TSchema extends Record<string, unknown> = Record<string, never>> =
+export type Transaction<TSchema extends Record<string, unknown> = Record<string, unknown>> =
   Parameters<Parameters<NodePgDatabase<TSchema>['transaction']>[0]>[0];
 
 /**
@@ -38,33 +38,49 @@ export type Transaction<TSchema extends Record<string, unknown> = Record<string,
  * It names no Drizzle internals beyond the two types above, so it stays assignable even
  * when a consumer's tree holds a second copy of `drizzle-orm`.
  */
-export type DbExecutor<TSchema extends Record<string, unknown> = Record<string, never>> =
+export type DbExecutor<TSchema extends Record<string, unknown> = Record<string, unknown>> =
   Database<TSchema> | Transaction<TSchema>;
 
 export interface CreateDatabaseOptions<TSchema extends Record<string, unknown>> {
   schema: TSchema;
   /**
    * Read pool from `createReadPool()`. When present, reads are spread across it and writes and
-   * transactions go to the primary (Drizzle `withReplicas`). Use `db.$primary` for a read that
-   * must see your own write. Omit it until a replica exists.
+   * transactions go to the primary (Drizzle `withReplicas`), and the result gains `$primary` for
+   * a read that must see your own write. Omit it until a replica exists.
    */
   readPool?: Pool | undefined;
 }
 
+/** What `createDatabase` returns when a read pool is routing reads: the database plus `$primary`. */
+export type ReplicatedDatabase<TSchema extends Record<string, unknown> = Record<string, unknown>> =
+  Database<TSchema> & { $primary: Database<TSchema> };
+
 /**
  * Build the Drizzle instance over a pool from `createPool()`.
  *
- * Returns the primary database, or — when `readPool` is given — one that routes reads to the
- * replica and exposes `$primary`.
+ * With a `readPool` the result also exposes `$primary` (typed), so `db.$primary` compiles only
+ * where a replica is actually in play.
  */
 export function createDatabase<TSchema extends Record<string, unknown>>(
   pool: Pool,
+  options: CreateDatabaseOptions<TSchema> & { readPool: Pool },
+): ReplicatedDatabase<TSchema>;
+export function createDatabase<TSchema extends Record<string, unknown>>(
+  pool: Pool,
+  options: CreateDatabaseOptions<TSchema> & { readPool?: undefined },
+): Database<TSchema>;
+export function createDatabase<TSchema extends Record<string, unknown>>(
+  pool: Pool,
   options: CreateDatabaseOptions<TSchema>,
-): Database<TSchema> {
+): Database<TSchema> | ReplicatedDatabase<TSchema>;
+export function createDatabase<TSchema extends Record<string, unknown>>(
+  pool: Pool,
+  options: CreateDatabaseOptions<TSchema>,
+): Database<TSchema> | ReplicatedDatabase<TSchema> {
   const primary = drizzle(pool, { schema: options.schema }) as Database<TSchema>;
   if (!options.readPool) return primary;
   const replica = drizzle(options.readPool, { schema: options.schema }) as Database<TSchema>;
-  return withReplicas(primary, [replica]) as unknown as Database<TSchema>;
+  return withReplicas(primary, [replica]) as unknown as ReplicatedDatabase<TSchema>;
 }
 
 /** A transaction is the only executor that can be rolled back from inside. */

@@ -38,12 +38,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "peerDependencies": {
     "@nestjs/common": ">=11",
     "@quynhonsemiconductor/observability": ">=0.2.0",
-    "drizzle-orm": ">=0.45",
+    "drizzle-orm": ">=0.45 <1",
     "pg": ">=8.11"
   },
   "peerDependenciesMeta": {

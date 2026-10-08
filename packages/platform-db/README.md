@@ -29,8 +29,16 @@ pnpm add drizzle-orm                          # for /drizzle and /nest
 pnpm add @quynhonsemiconductor/observability  # for /nest (pool saturation metrics)
 ```
 
-Peer dependencies: `pg` (always); `drizzle-orm` (optional — `/drizzle`, `/nest`); `@nestjs/common` and
-`@quynhonsemiconductor/observability` (optional — `/nest`, pool metrics).
+Peer dependencies, by entry point (all but `pg` are marked optional because no single one is needed
+by every entry point):
+
+| entry point | needs                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| core        | `pg`                                                                                           |
+| `/drizzle`  | `pg`, `drizzle-orm` (`>=0.45 <1`)                                                              |
+| `/nest`     | `pg`, `drizzle-orm`, `@nestjs/common`, **`@quynhonsemiconductor/observability`** (pool gauges) |
+
+Importing `/nest` without one of them throws a message naming the missing package.
 
 ## Subpaths
 
@@ -102,8 +110,12 @@ The module is global and provides `DATABASE_TOKEN` (Drizzle), `DATABASE_POOL_TOK
 `DATABASE_READ_POOL_TOKEN` (`Pool | null`). It pings the database once at boot and **logs the named
 cause** of a failure without crashing — `/readyz` is what gates traffic — while a configuration error
 (missing secret, unreadable CA, `DATABASE_SSL=disable` in production) **fails the boot** with the
-variable's name. It registers pool saturation gauges (`inUse`, `waiting`) and ends the pools on
-`app.close()`.
+variable's name. It registers pool saturation gauges (`inUse`, `waiting`) and ends the pools in
+`onApplicationShutdown` (see below).
+
+**Why `onApplicationShutdown`.** Nest's `close()` runs destroy hooks, then closes the HTTP server
+(waiting for in-flight requests), then runs shutdown hooks. Ending the pool in a destroy hook would pull
+it out from under requests still running queries; in a shutdown hook the server has already drained.
 
 `/readyz` (see `platform-runtime`) finds the pool by `DATABASE_POOL_TOKEN`, which is a
 `Symbol.for(...)` registry symbol, so it works even when two copies of this package are installed.

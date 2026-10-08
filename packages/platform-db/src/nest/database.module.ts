@@ -5,7 +5,7 @@ import {
   Logger,
   Module,
   type DynamicModule,
-  type OnModuleDestroy,
+  type OnApplicationShutdown,
   type OnModuleInit,
 } from '@nestjs/common';
 import { DbPoolMetrics } from '@quynhonsemiconductor/observability';
@@ -33,12 +33,14 @@ export interface DatabaseModuleOptions<TSchema extends Record<string, unknown>> 
  *   (a failover, a DNS blip) should leave the pod not-ready, not crash-looping. A
  *   configuration error is different — it is thrown while the pool is built, so a missing
  *   secret or a bad CA fails the boot with its name.
- * - On destroy it ends the pools. `pool.end()` waits for checked-out clients to be
- *   returned, so in-flight work finishes first. `enableGracefulShutdown()` drains HTTP
- *   before the Nest app is closed, so nothing is still querying by then.
+ * - It ends the pools in `onApplicationShutdown`, NOT `onModuleDestroy`. Nest's `close()` runs
+ *   the destroy hooks first, then closes the HTTP server (waiting for in-flight requests), and
+ *   the shutdown hooks last. Ending the pool in a destroy hook would pull it out from under
+ *   requests that are still running queries; in a shutdown hook the HTTP server has already
+ *   drained. `pool.end()` also waits for checked-out clients to be returned.
  */
 @Injectable()
-class DatabaseLifecycle implements OnModuleInit, OnModuleDestroy {
+class DatabaseLifecycle implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger('Database');
 
   constructor(
@@ -58,7 +60,7 @@ class DatabaseLifecycle implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  async onApplicationShutdown(): Promise<void> {
     await Promise.allSettled([this.pool.end(), this.readPool?.end()]);
   }
 }

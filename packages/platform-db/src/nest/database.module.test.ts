@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Module } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -149,4 +149,41 @@ describe('DatabaseModule configuration errors fail the boot, naming the variable
       NestFactory.createApplicationContext(Broken, { logger: false, abortOnError: false }),
     ).rejects.toThrow(/refused when NODE_ENV=production/);
   });
+});
+
+describe.skipIf(!enabled)('shutdown order', () => {
+  it('ends the pool in onApplicationShutdown, after the destroy hooks, without cutting off a running query', async () => {
+    const pg = await startPostgres({ tls: true });
+    try {
+      const order: string[] = [];
+      @Injectable()
+      class Observer implements OnModuleDestroy {
+        onModuleDestroy() {
+          order.push('destroy-hook');
+        }
+      }
+      @Module({
+        imports: [DatabaseModule.forRootAsync({ schema, env: pg.env() })],
+        providers: [Consumer, Observer],
+      })
+      class App {}
+      const app = await NestFactory.createApplicationContext(App, { logger: false });
+      const { pool } = app.get(Consumer);
+      const originalEnd = pool.end.bind(pool);
+      pool.end = (() => {
+        order.push('pool-end');
+        return originalEnd();
+      }) as typeof pool.end;
+
+      // A query that is already running when close() starts must still complete.
+      const running = pool.query('SELECT pg_sleep(0.4), 1 AS ok');
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await app.close();
+
+      expect((await running).rows[0]).toMatchObject({ ok: 1 });
+      expect(order).toEqual(['destroy-hook', 'pool-end']);
+    } finally {
+      await pg.stop();
+    }
+  }, 180_000);
 });
