@@ -22,6 +22,7 @@ on:
       - 'platform-http-v*'
       - 'observability-v*'
       - 'platform-runtime-v*'
+      - 'platform-db-v*'
 
 permissions:
   contents: read

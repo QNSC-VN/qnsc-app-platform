@@ -1,0 +1,71 @@
+{
+  "name": "@quynhonsemiconductor/platform-db",
+  "version": "0.1.0",
+  "description": "Shared PostgreSQL connection layer for QNSC product backends: password auth from the CloudNativePG secret, verified TLS, pool, readiness ping, advisory lock and the transaction contract. Drizzle at /drizzle, NestJS at /nest.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./drizzle": {
+      "types": "./dist/drizzle/index.d.ts",
+      "default": "./dist/drizzle/index.js"
+    },
+    "./nest": {
+      "types": "./dist/nest/index.d.ts",
+      "default": "./dist/nest/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle.js",
+    "drizzle.d.ts",
+    "nest.js",
+    "nest.d.ts"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quynhonsemiconductor/app-platform.git",
+    "directory": "packages/platform-db"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@nestjs/common": ">=11",
+    "@quynhonsemiconductor/observability": ">=0.2.0",
+    "drizzle-orm": ">=0.45",
+    "pg": ">=8.11"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/common": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "@quynhonsemiconductor/observability": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@quynhonsemiconductor/observability": "workspace:^",
+    "@quynhonsemiconductor/testing": "workspace:*",
+    "@types/pg": "8.23.1",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  }
+}

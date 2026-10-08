@@ -20,6 +20,7 @@ product's `libs/`.
 | [`@quynhonsemiconductor/platform-http`](packages/platform-http)   | Error taxonomy + HTTP status mapping, global exception filter, pagination                                                                                             | `platform-http-v*`  |
 | [`@quynhonsemiconductor/observability`](packages/observability)   | OTel bootstrap, logger factory, ALS request/job context, metric instruments, fail-open contract                                                                       | `observability-v*`  |
 | [`@quynhonsemiconductor/platform-runtime`](packages/platform-runtime) | `.env` loading (subpath, pre-OTel), env validation + typed config, leader-elected scheduled jobs, request-arrival timing | `platform-runtime-v*` |
+| [`@quynhonsemiconductor/platform-db`](packages/platform-db) | PostgreSQL connection layer: password auth from the CloudNativePG secret, TLS verified against the cluster CA, pool, readiness ping, advisory lock, `DbExecutor` + `withTransaction`. Drizzle at `/drizzle`, NestJS at `/nest` | `platform-db-v*` |
 
 Each package is versioned and released **independently** via release-please
 (Conventional Commits), mirroring the per-module tag model of `tf-modules`.
@@ -77,6 +78,7 @@ packages/
   identity/         @quynhonsemiconductor/identity
   platform-cache/   @quynhonsemiconductor/platform-cache
   platform-http/    @quynhonsemiconductor/platform-http
+  platform-db/      @quynhonsemiconductor/platform-db
 .github/workflows/
   ci.yml            lint · typecheck · test · build (PRs + main)
   release-please.yml  per-package release PRs (calls ci reusable)
