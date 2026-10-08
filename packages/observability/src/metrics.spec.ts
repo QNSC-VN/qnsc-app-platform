@@ -396,3 +396,97 @@ describe('recorders apply the label guard', () => {
     expect(seen.has(OVERFLOW_LABEL_VALUE)).toBe(true);
   });
 });
+
+/**
+ * Metrics are recorded from the request path. They must be total: no argument and no
+ * failing instrument may turn into an exception in the caller (fail-open contract).
+ */
+describe('metrics never throw into the request path', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  describe('LabelCardinalityGuard.bound is total', () => {
+    const guard = new LabelCardinalityGuard();
+
+    it.each([
+      ['undefined', undefined, 'UNKNOWN'],
+      ['null', null, 'UNKNOWN'],
+      ['a number', 42, '42'],
+      ['an object', { a: 1 }, '[object Object]'],
+    ])('coerces %s', (_label, value, expected) => {
+      expect(guard.bound('t', 'route', value)).toBe(expected);
+    });
+
+    it('returns the overflow label instead of throwing on a hostile value', () => {
+      const hostile = {
+        toString() {
+          throw new Error('boom');
+        },
+      };
+      expect(guard.bound('t', 'route', hostile)).toBe(OVERFLOW_LABEL_VALUE);
+    });
+  });
+
+  it('HttpMetrics.record survives an undefined route (an unmatched request)', () => {
+    expect(() =>
+      new HttpMetrics().record({
+        route: undefined as unknown as string,
+        method: 'GET',
+        statusCode: 404,
+        durationMs: 1,
+      }),
+    ).not.toThrow();
+    // A string label (`UNKNOWN`, or the overflow bucket if an earlier test filled the shared
+    // guard) — never `undefined`, which the backend would reject.
+    expect(add).toHaveBeenCalledWith(1, expect.objectContaining({ route: expect.any(String) }));
+  });
+
+  it('HttpMetrics.record survives an undefined method and errorCode', () => {
+    expect(() =>
+      new HttpMetrics().record({
+        route: '/r',
+        method: undefined as unknown as string,
+        statusCode: 500,
+        durationMs: 1,
+      }),
+    ).not.toThrow();
+  });
+
+  it('JobMetrics.record survives an undefined job name', () => {
+    expect(() =>
+      new JobMetrics().record(undefined as unknown as string, 1, 'success'),
+    ).not.toThrow();
+  });
+
+  it('QueueMetrics survives an undefined queue name on every recorder', () => {
+    const queues = new QueueMetrics();
+    const none = undefined as unknown as string;
+    expect(() => {
+      queues.recordProcessed(none);
+      queues.recordFailure(none);
+      queues.recordLag(none, 1);
+    }).not.toThrow();
+  });
+
+  it('a failing instrument costs a data point, not the caller', () => {
+    add.mockImplementationOnce(() => {
+      throw new Error('instrument exploded');
+    });
+    expect(() =>
+      new HttpMetrics().record({ route: '/r', method: 'GET', statusCode: 200, durationMs: 1 }),
+    ).not.toThrow();
+  });
+
+  it('JobMetrics.time still re-throws the job error when recording itself fails', async () => {
+    add.mockImplementation(() => {
+      throw new Error('instrument exploded');
+    });
+    try {
+      await expect(
+        new JobMetrics().time('job', () => Promise.reject(new Error('job failed'))),
+      ).rejects.toThrow('job failed');
+      await expect(new JobMetrics().time('job', async () => 7)).resolves.toBe(7);
+    } finally {
+      add.mockReset();
+    }
+  });
+});

@@ -64,7 +64,7 @@ export function statusClassOf(statusCode: number): StatusClass {
 
 /** Collapse an arbitrary method string onto the bounded label set. */
 export function methodLabelOf(method: string): HttpMethodLabel {
-  const upper = method.toUpperCase();
+  const upper = String(method ?? '').toUpperCase();
   return (KNOWN_METHODS.has(upper) ? upper : 'OTHER') as HttpMethodLabel;
 }
 
@@ -147,39 +147,77 @@ export class LabelCardinalityGuard {
     private readonly defaultLimit = DEFAULT_LABEL_LIMIT,
   ) {}
 
-  /** `scope` names the recorder (`http.server`), `label` the label key. */
-  bound(scope: string, label: string, value: string): string {
-    const bounded =
-      value.length > MAX_LABEL_VALUE_LENGTH ? value.slice(0, MAX_LABEL_VALUE_LENGTH) : value;
-    const key = `${scope}/${label}`;
+  /**
+   * `scope` names the recorder (`http.server`), `label` the label key.
+   *
+   * TOTAL: it never throws and always returns a string, whatever it is given — a metric
+   * is recorded from the request path, and telemetry must not be able to fail a request.
+   * `undefined`/`null` become `UNKNOWN`, other non-strings are stringified, and anything
+   * that still goes wrong (a hostile `toString`, say) is recorded as the overflow label.
+   */
+  bound(scope: string, label: string, value: unknown): string {
+    try {
+      const text = String(value ?? 'UNKNOWN');
+      const bounded =
+        text.length > MAX_LABEL_VALUE_LENGTH ? text.slice(0, MAX_LABEL_VALUE_LENGTH) : text;
+      const key = `${scope}/${label}`;
 
-    let values = this.seen.get(key);
-    if (!values) {
-      values = new Set();
-      this.seen.set(key, values);
-    }
-    if (values.has(bounded)) return bounded;
+      let values = this.seen.get(key);
+      if (!values) {
+        values = new Set();
+        this.seen.set(key, values);
+      }
+      if (values.has(bounded)) return bounded;
 
-    const limit = this.limits[label] ?? this.defaultLimit;
-    if (values.size < limit) {
-      values.add(bounded);
-      return bounded;
-    }
+      const limit = this.limits[label] ?? this.defaultLimit;
+      if (values.size < limit) {
+        values.add(bounded);
+        return bounded;
+      }
 
-    if (!this.warned.has(key)) {
-      this.warned.add(key);
-      this.logger.warn(
-        `Metric label "${label}" on ${scope} passed ${limit} distinct values; ` +
-          `further new values are recorded as "${OVERFLOW_LABEL_VALUE}". ` +
-          'An id or a raw path is probably being used as a label — pass a template or a code.',
-      );
+      if (!this.warned.has(key)) {
+        this.warned.add(key);
+        this.logger.warn(
+          `Metric label "${label}" on ${scope} passed ${limit} distinct values; ` +
+            `further new values are recorded as "${OVERFLOW_LABEL_VALUE}". ` +
+            'An id or a raw path is probably being used as a label — pass a template or a code.',
+        );
+      }
+      return OVERFLOW_LABEL_VALUE;
+    } catch {
+      return OVERFLOW_LABEL_VALUE;
     }
-    return OVERFLOW_LABEL_VALUE;
   }
 }
 
 /** One guard per process: recorders are constructed many times (DI and `new`). */
 const labelGuard = new LabelCardinalityGuard();
+
+const recorderLogger = new Logger('Metrics');
+const failedRecorders = new Set<string>();
+
+/**
+ * Run a recorder body so that it cannot throw into the caller. Recorders are called from
+ * request and job paths; a bad argument (an `undefined` route from an unmatched request, a
+ * misbehaving OTel instrument) must cost a data point, never a response. This is the same
+ * fail-open contract as the rest of the package. The first failure per recorder is logged,
+ * the rest are not, so a systematic bug is visible without flooding the log.
+ */
+function safely(recorder: string, body: () => void): void {
+  try {
+    body();
+  } catch (err) {
+    if (failedRecorders.has(recorder)) return;
+    failedRecorders.add(recorder);
+    try {
+      recorderLogger.warn(
+        `${recorder} failed to record a metric (further failures not logged): ${String(err)}`,
+      );
+    } catch {
+      // Logging must not throw either.
+    }
+  }
+}
 
 /** Shared meter. Named per service via the OTel resource, so no name is needed here. */
 export function getMeter(name = 'qnsc'): Meter {
@@ -220,19 +258,21 @@ export class HttpMetrics {
     durationMs: number;
     errorCode?: string;
   }): void {
-    const labels = {
-      route: labelGuard.bound('http.server', 'route', input.route),
-      method: methodLabelOf(input.method),
-      status_class: statusClassOf(input.statusCode),
-    };
-    this.duration.record(input.durationMs, labels);
-    this.requests.add(1, labels);
-    if (input.statusCode >= 400) {
-      this.errors.add(1, {
-        route: labels.route,
-        error_code: labelGuard.bound('http.server', 'error_code', input.errorCode ?? 'UNKNOWN'),
-      });
-    }
+    safely('HttpMetrics.record', () => {
+      const labels = {
+        route: labelGuard.bound('http.server', 'route', input.route),
+        method: methodLabelOf(input.method),
+        status_class: statusClassOf(input.statusCode),
+      };
+      this.duration.record(input.durationMs, labels);
+      this.requests.add(1, labels);
+      if (input.statusCode >= 400) {
+        this.errors.add(1, {
+          route: labels.route,
+          error_code: labelGuard.bound('http.server', 'error_code', input.errorCode),
+        });
+      }
+    });
   }
 }
 
@@ -256,10 +296,12 @@ export class JobMetrics {
 
   /** `job` is a fixed name from the schedule, so its cardinality is the job count. */
   record(job: string, durationMs: number, outcome: 'success' | 'failure'): void {
-    const name = labelGuard.bound('job', 'job', job);
-    this.duration.record(durationMs, { job: name, outcome });
-    this.runs.add(1, { job: name, outcome });
-    if (outcome === 'failure') this.failures.add(1, { job: name });
+    safely('JobMetrics.record', () => {
+      const name = labelGuard.bound('job', 'job', job);
+      this.duration.record(durationMs, { job: name, outcome });
+      this.runs.add(1, { job: name, outcome });
+      if (outcome === 'failure') this.failures.add(1, { job: name });
+    });
   }
 
   /** Time `fn`, record the outcome, and re-throw so callers see failures. */
@@ -295,11 +337,16 @@ export class QueueMetrics {
   });
 
   recordProcessed(queue: string, count = 1): void {
-    if (count > 0) this.processed.add(count, { queue: labelGuard.bound('queue', 'queue', queue) });
+    safely('QueueMetrics.recordProcessed', () => {
+      if (count > 0)
+        this.processed.add(count, { queue: labelGuard.bound('queue', 'queue', queue) });
+    });
   }
 
   recordFailure(queue: string, count = 1): void {
-    if (count > 0) this.failures.add(count, { queue: labelGuard.bound('queue', 'queue', queue) });
+    safely('QueueMetrics.recordFailure', () => {
+      if (count > 0) this.failures.add(count, { queue: labelGuard.bound('queue', 'queue', queue) });
+    });
   }
 
   /**
@@ -307,9 +354,11 @@ export class QueueMetrics {
    * healthy while a backlog grows.
    */
   recordLag(queue: string, seconds: number): void {
-    if (Number.isFinite(seconds) && seconds >= 0) {
-      this.lag.record(seconds, { queue: labelGuard.bound('queue', 'queue', queue) });
-    }
+    safely('QueueMetrics.recordLag', () => {
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        this.lag.record(seconds, { queue: labelGuard.bound('queue', 'queue', queue) });
+      }
+    });
   }
 }
 

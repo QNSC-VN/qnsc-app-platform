@@ -74,6 +74,10 @@ The `K8S_*` variables are added to the resource only when set and non-blank, so 
 or CI run carries no empty `k8s.*` attributes. If the collector's Kubernetes attributes
 processor adds the same attributes, the values are identical.
 
+**Standard sampler variables are ignored.** `OTEL_TRACES_SAMPLER` and
+`OTEL_TRACES_SAMPLER_ARG` have no effect: `startOtel` passes its own sampler to the SDK,
+which takes precedence over them. `OTEL_SAMPLING_PROBABILITY` is the only override.
+
 **Sampling caveat.** Head sampling is all the SDK can do alone, and a prod ratio
 below `1.0` drops most **error** traces, which are the ones you need. Prefer
 collector-side *tail* sampling (100% of errors and slow traces, a fraction of the
@@ -259,6 +263,20 @@ once per label, so the leak is visible without becoming a log flood.
 | `route` | 500 |
 | `error_code` | 200 |
 | `job`, `queue` | 100 |
+
+**Label unmatched requests with a constant.** A request that matches no route (every 404
+from a scanner or a typo) has no template. If the product then labels it with the raw URL,
+each probed path becomes a new `route` value and scanner traffic alone spends the whole
+route budget, after which real routes added later would be recorded as `__other__`. Pass a
+fixed value such as `route: 'unmatched'` (or `normalizeRoute()` at the very least) for
+those requests.
+
+**Recording never throws.** `LabelCardinalityGuard.bound` accepts any value (`undefined`
+becomes `UNKNOWN`, other types are stringified) and returns the overflow label rather than
+fail, and `HttpMetrics.record`, `JobMetrics.record` and the `QueueMetrics` recorders catch
+anything thrown while recording and log it once. A metric can cost a data point, never a
+response — the same fail-open contract as the rest of the package. (`JobMetrics.time` still
+re-throws the *job's* error.)
 
 These are tripwires, not budgets: reaching one means an id or a raw path is being used as
 a label, and the fix is at the call site. Values longer than 128 characters are cut. The
