@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "node20",
+    "moduleResolution": "node16",
+    "ignoreDeprecations": "6.0",
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "test/**/*.d.ts", "vitest.config.ts"],
+  "exclude": ["test/support/global-setup.ts"]
+}

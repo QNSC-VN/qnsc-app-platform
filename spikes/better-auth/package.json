@@ -1,0 +1,47 @@
+{
+  "name": "qnsc-spike-better-auth",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WP-9 throwaway spike: Better Auth on NestJS 11 + Fastify 5 + Drizzle. Not part of the workspace, never published. See docs/adr/0002-identity-v8-better-auth.md.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json",
+    "boot:cjs": "node dist/boot-check.js"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.7",
+    "@better-auth/sso": "1.7.7",
+    "@nestjs/common": "11.2.7",
+    "@nestjs/core": "11.2.7",
+    "@nestjs/platform-fastify": "11.2.7",
+    "@node-rs/argon2": "2.2.2",
+    "@quynhonsemiconductor/observability": "file:../../packages/observability",
+    "@quynhonsemiconductor/platform-cache": "file:../../packages/platform-cache",
+    "@quynhonsemiconductor/platform-db": "file:../../packages/platform-db",
+    "@quynhonsemiconductor/platform-http": "file:../../packages/platform-http",
+    "@nestjs/swagger": "11.4.5",
+    "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.3",
+    "fastify": "5.12.5",
+    "ioredis": "5.11.1",
+    "nestjs-zod": "5.4.0",
+    "pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "uuidv7": "1.2.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "@types/pg": "8.23.1",
+    "argon2": "0.45.1",
+    "auth": "1.7.7",
+    "drizzle-kit": "0.31.11",
+    "jose": "6.2.4",
+    "testcontainers": "12.2.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}
