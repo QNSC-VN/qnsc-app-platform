@@ -6,6 +6,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # Manual run. Like a push, it is not a pull request, so the consumer jobs skip and the gate
+  # must stay green -- this is how that branch of the gate is exercised without touching main.
+  workflow_dispatch:
   pull_request:
     # NO `branches:` filter here, deliberately — see `push` above, which keeps one.
     #
@@ -223,19 +226,34 @@ jobs:
   # `needs` MUST list every job that is expected to run. A job outside `needs` is a job
   # outside the gate.
   #
-  # `consumer` is deliberately NOT in `needs` yet: it joins after it has been green on three
-  # consecutive pull requests. Two things to settle first. The gate asserts a positive `success`
-  # from every dependency, so a SKIPPED job fails it -- and `tarballs`/`consumer` skip on pushes
-  # to main and on fork PRs (no App credentials there). Either give the gate an
-  # `if: github.event_name == 'pull_request'` variant of that list, or run the consumers on
-  # push as well, before adding them.
+  # The consumer jobs are in the gate, with ONE exception to "skipped fails". `tarballs` and
+  # `consumer` need the read-only App's credentials, which a fork's pull request does not get, and
+  # they are not meant to run on a push to main. So:
+  #
+  #   * lint and test -- always strict: only `success` passes;
+  #   * tarballs and consumer -- strict on a same-repo pull request (a skip there means the `if:`
+  #     or the App credentials broke, which is exactly the silent hole this gate exists to
+  #     close), and `skipped` is accepted only on a push or a fork pull request. A FAILURE is
+  #     never accepted anywhere.
+  #
+  # Two calls of the shared action rather than one with `allow-skipped`, because that input is
+  # all-or-nothing and would loosen lint and test too.
   ci-required:
     name: CI required
     if: always()
-    needs: [lint, test]
+    needs: [lint, test, tarballs, consumer]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@v1
+      - name: lint and test must succeed
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@v1
         with:
-          results: ${{ join(needs.*.result, ',') }}
+          results: ${{ needs.lint.result }},${{ needs.test.result }}
+
+      # `always()`: report this too when the step above failed, so one red run shows both.
+      - name: consumer jobs must succeed (skipped only off same-repo pull requests)
+        if: always()
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@v1
+        with:
+          results: ${{ needs.tarballs.result }},${{ needs.consumer.result }}
+          allow-skipped: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
