@@ -1,0 +1,4 @@
+# docs/PLAN.md is a verbatim copy of APP-PLATFORM-PLAN.md, the planning document it is copied
+# from. It is kept byte-identical so the two can be diffed; reformatting it would make every
+# future sync a noisy diff. (Prettier reads .prettierignore from the repo root.)
+docs/PLAN.md
