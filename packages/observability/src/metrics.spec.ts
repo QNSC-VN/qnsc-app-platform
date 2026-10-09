@@ -20,7 +20,9 @@ import {
   DbPoolMetrics,
   HttpMetrics,
   JobMetrics,
+  LabelCardinalityGuard,
   METRIC_NAMES,
+  OVERFLOW_LABEL_VALUE,
   QueueMetrics,
   SecurityMetrics,
   methodLabelOf,
@@ -287,5 +289,204 @@ describe('METRIC_NAMES', () => {
     ].map((call) => call[0]);
 
     expect(new Set(created)).toEqual(new Set(Object.values(METRIC_NAMES)));
+  });
+});
+
+describe('LabelCardinalityGuard', () => {
+  it('passes values through untouched while under the limit', () => {
+    const guard = new LabelCardinalityGuard({ route: 3 });
+    expect(guard.bound('http.server', 'route', '/a')).toBe('/a');
+    expect(guard.bound('http.server', 'route', '/b')).toBe('/b');
+    expect(guard.bound('http.server', 'route', '/c')).toBe('/c');
+  });
+
+  it('merges every NEW value past the limit into one overflow bucket', () => {
+    // The failure this guards against: an id in a label mints a series per value.
+    const guard = new LabelCardinalityGuard({ route: 2 });
+    guard.bound('http.server', 'route', '/a');
+    guard.bound('http.server', 'route', '/b');
+
+    expect(guard.bound('http.server', 'route', '/c')).toBe(OVERFLOW_LABEL_VALUE);
+    expect(guard.bound('http.server', 'route', '/d')).toBe(OVERFLOW_LABEL_VALUE);
+  });
+
+  it('keeps recording values it already admitted after the limit is hit', () => {
+    // Counts that were right must stay right; only the unbounded tail is merged.
+    const guard = new LabelCardinalityGuard({ route: 1 });
+    guard.bound('http.server', 'route', '/a');
+    guard.bound('http.server', 'route', '/leak/1');
+
+    expect(guard.bound('http.server', 'route', '/a')).toBe('/a');
+  });
+
+  it('counts each (scope, label) separately', () => {
+    const guard = new LabelCardinalityGuard({}, 1);
+    guard.bound('job', 'job', 'nightly');
+    // A different recorder has its own budget.
+    expect(guard.bound('queue', 'queue', 'outbox')).toBe('outbox');
+  });
+
+  it('falls back to the default limit for a label with no specific limit', () => {
+    const guard = new LabelCardinalityGuard({}, 1);
+    guard.bound('x', 'other', 'one');
+    expect(guard.bound('x', 'other', 'two')).toBe(OVERFLOW_LABEL_VALUE);
+  });
+
+  it('cuts an over-long value instead of storing it whole', () => {
+    const guard = new LabelCardinalityGuard();
+    expect(guard.bound('x', 'route', 'a'.repeat(500))).toHaveLength(128);
+  });
+
+  it('warns once per label, not once per overflowing value', () => {
+    const guard = new LabelCardinalityGuard({ route: 1 });
+    const warn = vi.spyOn(
+      (guard as unknown as { logger: { warn: (m: string) => void } }).logger,
+      'warn',
+    );
+    guard.bound('http.server', 'route', '/a');
+    for (let i = 0; i < 50; i += 1) guard.bound('http.server', 'route', `/leak/${i}`);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('"route"');
+  });
+});
+
+describe('recorders apply the label guard', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // The recorders share one process-wide guard, so these use names no other test uses.
+  it('HttpMetrics stops a per-id route from minting a series per request', () => {
+    const http = new HttpMetrics();
+    for (let i = 0; i < 520; i += 1) {
+      http.record({ route: `/leak/${i}`, method: 'GET', statusCode: 200, durationMs: 1 });
+    }
+    const routes = new Set(add.mock.calls.map(([, labels]) => (labels as { route: string }).route));
+
+    // At most the 500 admitted routes plus the overflow bucket — never all 520. (Other
+    // specs in this file share the process-wide guard, so the exact count would depend
+    // on test order.)
+    expect(routes.size).toBeLessThanOrEqual(501);
+    expect(routes.size).toBeGreaterThan(400);
+    expect(routes.has(OVERFLOW_LABEL_VALUE)).toBe(true);
+  });
+
+  it('JobMetrics stops a per-tenant job name from minting a series per tenant', () => {
+    const jobs = new JobMetrics();
+    for (let i = 0; i < 120; i += 1) jobs.record(`sync-tenant-${i}`, 1, 'success');
+    const names = new Set(add.mock.calls.map(([, labels]) => (labels as { job: string }).job));
+
+    expect(names.size).toBeLessThanOrEqual(101);
+    expect(names.size).toBeGreaterThan(90);
+    expect(names.has(OVERFLOW_LABEL_VALUE)).toBe(true);
+  });
+
+  it('QueueMetrics bounds the queue label on every instrument', () => {
+    const queues = new QueueMetrics();
+    for (let i = 0; i < 120; i += 1) {
+      queues.recordProcessed(`q-${i}`);
+      queues.recordFailure(`q-${i}`);
+      queues.recordLag(`q-${i}`, 1);
+    }
+    const seen = new Set(
+      [...add.mock.calls, ...record.mock.calls].map(
+        ([, labels]) => (labels as { queue: string }).queue,
+      ),
+    );
+    expect(seen.size).toBeLessThanOrEqual(101);
+    expect(seen.has(OVERFLOW_LABEL_VALUE)).toBe(true);
+  });
+});
+
+/**
+ * Metrics are recorded from the request path. They must be total: no argument and no
+ * failing instrument may turn into an exception in the caller (fail-open contract).
+ */
+describe('metrics never throw into the request path', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  describe('LabelCardinalityGuard.bound is total', () => {
+    const guard = new LabelCardinalityGuard();
+
+    it.each([
+      ['undefined', undefined, 'UNKNOWN'],
+      ['null', null, 'UNKNOWN'],
+      ['a number', 42, '42'],
+      ['an object', { a: 1 }, '[object Object]'],
+    ])('coerces %s', (_label, value, expected) => {
+      expect(guard.bound('t', 'route', value)).toBe(expected);
+    });
+
+    it('returns the overflow label instead of throwing on a hostile value', () => {
+      const hostile = {
+        toString() {
+          throw new Error('boom');
+        },
+      };
+      expect(guard.bound('t', 'route', hostile)).toBe(OVERFLOW_LABEL_VALUE);
+    });
+  });
+
+  it('HttpMetrics.record survives an undefined route (an unmatched request)', () => {
+    expect(() =>
+      new HttpMetrics().record({
+        route: undefined as unknown as string,
+        method: 'GET',
+        statusCode: 404,
+        durationMs: 1,
+      }),
+    ).not.toThrow();
+    // A string label (`UNKNOWN`, or the overflow bucket if an earlier test filled the shared
+    // guard) — never `undefined`, which the backend would reject.
+    expect(add).toHaveBeenCalledWith(1, expect.objectContaining({ route: expect.any(String) }));
+  });
+
+  it('HttpMetrics.record survives an undefined method and errorCode', () => {
+    expect(() =>
+      new HttpMetrics().record({
+        route: '/r',
+        method: undefined as unknown as string,
+        statusCode: 500,
+        durationMs: 1,
+      }),
+    ).not.toThrow();
+  });
+
+  it('JobMetrics.record survives an undefined job name', () => {
+    expect(() =>
+      new JobMetrics().record(undefined as unknown as string, 1, 'success'),
+    ).not.toThrow();
+  });
+
+  it('QueueMetrics survives an undefined queue name on every recorder', () => {
+    const queues = new QueueMetrics();
+    const none = undefined as unknown as string;
+    expect(() => {
+      queues.recordProcessed(none);
+      queues.recordFailure(none);
+      queues.recordLag(none, 1);
+    }).not.toThrow();
+  });
+
+  it('a failing instrument costs a data point, not the caller', () => {
+    add.mockImplementationOnce(() => {
+      throw new Error('instrument exploded');
+    });
+    expect(() =>
+      new HttpMetrics().record({ route: '/r', method: 'GET', statusCode: 200, durationMs: 1 }),
+    ).not.toThrow();
+  });
+
+  it('JobMetrics.time still re-throws the job error when recording itself fails', async () => {
+    add.mockImplementation(() => {
+      throw new Error('instrument exploded');
+    });
+    try {
+      await expect(
+        new JobMetrics().time('job', () => Promise.reject(new Error('job failed'))),
+      ).rejects.toThrow('job failed');
+      await expect(new JobMetrics().time('job', async () => 7)).resolves.toBe(7);
+    } finally {
+      add.mockReset();
+    }
   });
 });

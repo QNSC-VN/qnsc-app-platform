@@ -32,7 +32,7 @@ import {
   TraceIdRatioBasedSampler,
 } from '@opentelemetry/sdk-trace-base';
 import { resourceFromAttributes } from '@opentelemetry/resources';
-import { IGNORED_REQUEST_PATHS } from './ignored-paths';
+import { IGNORED_REQUEST_PATHS, isIgnoredRequestPath } from './ignored-paths';
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
@@ -149,6 +149,50 @@ function validateHttpDurationBoundaries(boundaries: number[]): void {
   }
 }
 
+/**
+ * Resolve the root sampling ratio. An unparseable override must not silently turn
+ * tracing off: `TraceIdRatioBasedSampler` normalises NaN to 0, so
+ * `OTEL_SAMPLING_PROBABILITY=ten-percent` would drop every trace with no error anywhere.
+ * Fall back to the environment default and say so instead. Out-of-range numbers keep the
+ * sampler's own clamping to [0, 1]. (Telemetry config never crashes the process — only a
+ * bad `httpDurationBoundaries` option does, because that is code, not deployment.)
+ */
+function resolveSamplingProbability(raw: string | undefined, isProd: boolean): number {
+  const fallback = isProd ? 0.1 : 1.0;
+  if (raw === undefined) return fallback;
+
+  const parsed = Number.parseFloat(raw);
+  if (Number.isNaN(parsed)) {
+    process.emitWarning(
+      `OTEL_SAMPLING_PROBABILITY=${JSON.stringify(raw)} is not a number; using ${fallback}.`,
+      'OtelSamplingWarning',
+    );
+    return fallback;
+  }
+  return parsed;
+}
+
+/**
+ * Kubernetes identity for the resource, from the downward API variables the chart
+ * injects (`K8S_POD_NAME`, `K8S_NAMESPACE`, `K8S_NODE_NAME`). An attribute is added only
+ * when its variable is non-empty, so a non-Kubernetes run (local, CI) emits none rather
+ * than three empty strings. If the collector's Kubernetes attributes processor also adds
+ * them the values are identical, so there is nothing to reconcile.
+ */
+function k8sResourceAttributes(env: NodeJS.ProcessEnv): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  const mapping: ReadonlyArray<readonly [string, string]> = [
+    ['k8s.pod.name', 'K8S_POD_NAME'],
+    ['k8s.namespace.name', 'K8S_NAMESPACE'],
+    ['k8s.node.name', 'K8S_NODE_NAME'],
+  ];
+  for (const [attribute, variable] of mapping) {
+    const value = env[variable]?.trim();
+    if (value) attributes[attribute] = value;
+  }
+  return attributes;
+}
+
 let sdk: NodeSDK | undefined;
 
 /**
@@ -191,12 +235,15 @@ export function startOtel(options: OtelBootstrapOptions): boolean {
     process.env[options.serviceNameEnvVar ?? 'OTEL_SERVICE_NAME'] ?? options.defaultServiceName;
   const endpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://localhost:4318';
 
-  // Head-sampling ratio. This is all the SDK can do alone: keeping 100% of errors
-  // and slow traces requires a collector-side TAIL sampler, because the decision
-  // needs the finished trace. Until a gateway exists, a prod ratio below 1.0 drops
-  // most error traces — prefer tail sampling over lowering this.
-  const samplingProbability = Number.parseFloat(
-    process.env['OTEL_SAMPLING_PROBABILITY'] ?? (isProd ? '0.1' : '1.0'),
+  // Head-sampling ratio: `parentbased_traceidratio`, default 0.1 in production and 1.0
+  // elsewhere, overridable with OTEL_SAMPLING_PROBABILITY (the variable the products'
+  // infrastructure already sets). This is all the SDK can do alone: keeping 100% of
+  // errors and slow traces requires a collector-side TAIL sampler, because the decision
+  // needs the finished trace. Until a gateway exists, a prod ratio below 1.0 drops most
+  // error traces — prefer tail sampling over lowering this.
+  const samplingProbability = resolveSamplingProbability(
+    process.env['OTEL_SAMPLING_PROBABILITY'],
+    isProd,
   );
 
   // NOTE ON THE API SHAPE: `@opentelemetry/sdk-metrics` v2 removed the 1.x
@@ -235,6 +282,7 @@ export function startOtel(options: OtelBootstrapOptions): boolean {
       'service.namespace': process.env['OTEL_SERVICE_NAMESPACE'] ?? 'qnsc',
       // Unique per task/container — correlates a trace to one instance.
       'service.instance.id': randomUUID(),
+      ...k8sResourceAttributes(process.env),
     }),
 
     // ParentBased respects an upstream sampling decision, so a trace that starts
@@ -268,11 +316,15 @@ export function startOtel(options: OtelBootstrapOptions): boolean {
       getNodeAutoInstrumentations({
         '@opentelemetry/instrumentation-http': {
           enabled: true,
-          ignoreIncomingRequestHook: (req) => IGNORED_REQUEST_PATHS.has(req.url ?? ''),
+          ignoreIncomingRequestHook: (req) => isIgnoredRequestPath(req.url),
         },
         '@opentelemetry/instrumentation-pg': { enabled: true },
         '@opentelemetry/instrumentation-ioredis': { enabled: true },
-        '@opentelemetry/instrumentation-aws-sdk': { enabled: true },
+        // OFF. AWS is leaving the estate; the products' S3 client now talks to R2 and
+        // every call is already a span from the http instrumentation. This one adds a
+        // second span per SDK call (and the SDK's own retry spans) for no extra signal,
+        // inside the span budget of the Grafana Cloud free tier.
+        '@opentelemetry/instrumentation-aws-sdk': { enabled: false },
         // High-volume, low-value: these bury the spans that matter.
         '@opentelemetry/instrumentation-fs': { enabled: false },
         '@opentelemetry/instrumentation-dns': { enabled: false },

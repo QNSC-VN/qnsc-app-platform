@@ -26,10 +26,12 @@
 export type FailOpenControl = 'denylist' | 'rate_limit' | 'authz_epoch' | 'authz_epoch_bump';
 
 /**
- * The log field the alarm matches: `{ $.securityFailOpen = "*" }`.
+ * The log field the alarm matches. On Grafana (Loki) that is
+ * `{namespace=~".+"} | json | securityFailOpen != ""`; on the ECS/EKS estate being
+ * retired it is the CloudWatch filter `{ $.securityFailOpen = "*" }`.
  *
  * Renaming this breaks the alarm silently, so it lives here as a named constant
- * and is referenced by the metric filter's comment in the Terraform.
+ * and the literal MUST NOT change: both alert definitions match it by value.
  */
 export const FAIL_OPEN_FIELD = 'securityFailOpen';
 

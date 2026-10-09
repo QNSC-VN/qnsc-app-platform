@@ -63,8 +63,20 @@ actually started — worth logging, since it is the cheapest way to tell
 | `OTEL_SERVICE_NAME` | `defaultServiceName` | Overridable per env var name |
 | `OTEL_SERVICE_NAMESPACE` | `qnsc` | Groups products for cross-product queries |
 | `SERVICE_VERSION` | `dev` | Set from the release tag in CI, or telemetry is unattributable |
-| `OTEL_SAMPLING_PROBABILITY` | `1.0` dev / `0.1` prod | Head sampling — see the caveat below |
-| `NODE_ENV` | `development` | Batching/export tuning and `deployment.environment` |
+| `OTEL_SAMPLING_PROBABILITY` | `1.0` dev / `0.1` prod | Head sampling (`parentbased_traceidratio`) — see the caveat below. A value that is not a number falls back to the default with a process warning, instead of dropping every trace |
+| `DEPLOYMENT_ENV` | `NODE_ENV` | Deployment identity and the sampling default (`production` ⇒ `0.1`) |
+| `NODE_ENV` | `development` | Batching/export tuning |
+| `K8S_POD_NAME` | — | `k8s.pod.name` resource attribute (downward API) |
+| `K8S_NAMESPACE` | — | `k8s.namespace.name` resource attribute (downward API) |
+| `K8S_NODE_NAME` | — | `k8s.node.name` resource attribute (downward API) |
+
+The `K8S_*` variables are added to the resource only when set and non-blank, so a local
+or CI run carries no empty `k8s.*` attributes. If the collector's Kubernetes attributes
+processor adds the same attributes, the values are identical.
+
+**Standard sampler variables are ignored.** `OTEL_TRACES_SAMPLER` and
+`OTEL_TRACES_SAMPLER_ARG` have no effect: `startOtel` passes its own sampler to the SDK,
+which takes precedence over them. `OTEL_SAMPLING_PROBABILITY` is the only override.
 
 **Sampling caveat.** Head sampling is all the SDK can do alone, and a prod ratio
 below `1.0` drops most **error** traces, which are the ones you need. Prefer
@@ -73,6 +85,25 @@ rest) and leave this at `1.0`.
 
 Health, readiness and favicon requests are skipped outright — no span is created, so
 they consume no sampling budget and no quota.
+
+### Probe paths
+
+`PROBE_PATHS` (`/livez`, `/readyz`, `/v1/readyz`, `/healthz`, `/v1/healthz`) is the one
+list. The tracing ignore hook and the request-log skip list in
+`@quynhonsemiconductor/platform-http` are both derived from it, so a path added here is
+dropped from spans **and** access logs at once. `isIgnoredRequestPath(url)` is the shared
+matcher: whole-path match, query string ignored, never a prefix.
+
+```ts
+import { PROBE_PATHS, isIgnoredRequestPath } from '@quynhonsemiconductor/observability';
+```
+
+### Instrumentations
+
+Auto-instrumentation is on for HTTP, `pg` and `ioredis`, and off for `fs`, `dns`, `net`
+and the **AWS SDK**. The products' object-storage client talks to R2 over HTTP, which the
+HTTP instrumentation already traces; the AWS SDK instrumentation only added a second
+span per call.
 
 ### Latency histogram buckets (`httpDurationBoundaries`)
 
@@ -220,10 +251,42 @@ methods to a fixed set plus `OTHER`, error labels take a domain code. Passing an
 a type error. IDs belong on spans and logs. `normalizeRoute()` is the safety net for
 when a framework cannot supply a route template.
 
+**…and by a runtime guard where the type cannot help.** `route`, `error_code`, `job` and
+`queue` are plain strings — the vocabulary is the product's — so a per-id route or a job
+named after a tenant type-checks and mints a series per value. `LabelCardinalityGuard`
+remembers the distinct values each recorder has seen per label and, past a limit, records
+new ones as `__other__` instead (values already admitted keep their own series). It logs
+once per label, so the leak is visible without becoming a log flood.
+
+| Label | Limit (distinct values) |
+|---|---|
+| `route` | 500 |
+| `error_code` | 200 |
+| `job`, `queue` | 100 |
+
+**Label unmatched requests with a constant.** A request that matches no route (every 404
+from a scanner or a typo) has no template. If the product then labels it with the raw URL,
+each probed path becomes a new `route` value and scanner traffic alone spends the whole
+route budget, after which real routes added later would be recorded as `__other__`. Pass a
+fixed value such as `route: 'unmatched'` (or `normalizeRoute()` at the very least) for
+those requests.
+
+**Recording never throws.** `LabelCardinalityGuard.bound` accepts any value (`undefined`
+becomes `UNKNOWN`, other types are stringified) and returns the overflow label rather than
+fail, and `HttpMetrics.record`, `JobMetrics.record` and the `QueueMetrics` recorders catch
+anything thrown while recording and log it once. A metric can cost a data point, never a
+response — the same fail-open contract as the rest of the package. (`JobMetrics.time` still
+re-throws the *job's* error.)
+
+These are tripwires, not budgets: reaching one means an id or a raw path is being used as
+a label, and the fix is at the call site. Values longer than 128 characters are cut. The
+limits are fixed — there is deliberately no setting to raise them per product.
+
 ## `@Span` policy
 
-Auto-instrumentation already spans every HTTP request, database query, cache call and
-AWS SDK call. `@Span` is for **deliberate** additions on top of that:
+Auto-instrumentation already spans every HTTP request (including outbound ones, such as
+object-storage calls), database query and cache call. `@Span` is for **deliberate**
+additions on top of that:
 
 - a method with meaningful internal fan-out, where one flat span hides the shape
 - a hot path whose duration you would want to see separately
