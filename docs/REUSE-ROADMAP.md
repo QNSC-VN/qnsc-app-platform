@@ -11,11 +11,11 @@
 
 v1 was written from file-path overlap. Measuring the files changed three conclusions. They are recorded here because the corrections matter more than the original claims.
 
-| v1 claimed | Measurement | Corrected |
-|---|---|---|
-| `email/email-delivery.service.ts` is a clean promotion (6 diff) | It imports `emailOutbox` from `db/schema/messaging` | **Fails admission condition 3.** Needs table parameterisation like every other schema-bound adapter. |
-| Five duplicate JWT guards | rova 241 lines, opshub 182, **201 diff lines**; solodesk 31 | **Not duplicates.** They genuinely diverged — rova carries API-token auth, opshub carries policy/authz. The only real issue is the *unused* guard shipped in `identity`. |
-| `libs/platform` is ~55 duplicated files | Many already import `@quynhonsemiconductor/*` and are thin adapters | **Roughly a third is genuine duplication.** `http/`, `errors/`, `cache/`, `rate-limit.guard` already consume the packages correctly. |
+| v1 claimed                                                      | Measurement                                                         | Corrected                                                                                                                                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `email/email-delivery.service.ts` is a clean promotion (6 diff) | It imports `emailOutbox` from `db/schema/messaging`                 | **Fails admission condition 3.** Needs table parameterisation like every other schema-bound adapter.                                                                     |
+| Five duplicate JWT guards                                       | rova 241 lines, opshub 182, **201 diff lines**; solodesk 31         | **Not duplicates.** They genuinely diverged — rova carries API-token auth, opshub carries policy/authz. The only real issue is the _unused_ guard shipped in `identity`. |
+| `libs/platform` is ~55 duplicated files                         | Many already import `@quynhonsemiconductor/*` and are thin adapters | **Roughly a third is genuine duplication.** `http/`, `errors/`, `cache/`, `rate-limit.guard` already consume the packages correctly.                                     |
 
 The headline is smaller and more honest than v1 implied: **about 370 lines are pure-win extraction today.** The rest is a convergence programme, not a promotion.
 
@@ -29,32 +29,32 @@ the same instinct will recur.
 
 **What went wrong.** Making one adapter serve three products meant parameterising
 everything that differed: `table`, `columns`, `toDomain`, `toInsert`,
-`toProviderValue` — five knobs. The result was *generic*, and that cost exactly what
+`toProviderValue` — five knobs. The result was _generic_, and that cost exactly what
 genericity costs:
 
-| | hand-written | the factory |
-|---|---|---|
-| Columns | `typeof authSessions.$inferSelect` | `unknown` |
-| Rows | fully typed | `Record<string, unknown>` |
-| Predicates | typed | `as never` casts |
-| solodesk's file | 71 lines | 79 lines |
+|                 | hand-written                       | the factory               |
+| --------------- | ---------------------------------- | ------------------------- |
+| Columns         | `typeof authSessions.$inferSelect` | `unknown`                 |
+| Rows            | fully typed                        | `Record<string, unknown>` |
+| Predicates      | typed                              | `as never` casts          |
+| solodesk's file | 71 lines                           | 79 lines                  |
 
 **Less type-safe than the code it replaced, and longer.** It bought one thing: the
 rotation compare-and-swap in a single place.
 
-**The heuristic that falls out.** *If making something shareable requires adding
-configuration, it probably should not be shared as code.* Compare what actually
+**The heuristic that falls out.** _If making something shareable requires adding
+configuration, it probably should not be shared as code._ Compare what actually
 earned its place:
 
-| Shared thing | Config knobs | Verdict |
-|---|---|---|
-| `ExclusiveJob` | 0 | genuinely shared |
-| `request-timing` | 0 | genuinely shared |
-| `load-env` | 0 | genuinely shared |
-| `createAuthSessionRepository` | 5 | the smell |
+| Shared thing                  | Config knobs | Verdict          |
+| ----------------------------- | ------------ | ---------------- |
+| `ExclusiveJob`                | 0            | genuinely shared |
+| `request-timing`              | 0            | genuinely shared |
+| `load-env`                    | 0            | genuinely shared |
+| `createAuthSessionRepository` | 5            | the smell        |
 
 The four `platform-runtime` extractions were byte-identical across two products
-*before* anyone touched them. Nothing to parameterise, because there was nothing to
+_before_ anyone touched them. Nothing to parameterise, because there was nothing to
 disagree about. That is what a real shared decision looks like.
 
 **Three tiers, and only one of them is shared code:**
@@ -86,13 +86,13 @@ it works whatever ORM a future product picks.
 
 ## 0.1 Implementation status (2026-09-07)
 
-| WP | State | What landed |
-|---|---|---|
-| **WP-0** | **Done** | `enableAutoPipelining` in `platform-cache`; argon2 parameters pinned in `solodesk` with rehash-on-login; timing equalisation; per-IP login limit; reset now revokes live access tokens |
-| **WP-1** | **Done** | `@quynhonsemiconductor/platform-runtime@0.1.0` — published-ready, builds clean, tests green |
-| **WP-2** | **Withdrawn** | `identity-drizzle` was built, adopted into `solodesk`, then **deleted**. The package no longer exists. Replaced by the port-conformance kit in `identity` 7.1.0 — §0.0 |
-| **WP-3** | **Not needed** | `platform-email` — measured, and the duplication is not there. §0.2 |
-| WP-4 / WP-5 / WP-6 | Not started | Convergence; audit/notifications; the guard decision |
+| WP                 | State          | What landed                                                                                                                                                                            |
+| ------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WP-0**           | **Done**       | `enableAutoPipelining` in `platform-cache`; argon2 parameters pinned in `solodesk` with rehash-on-login; timing equalisation; per-IP login limit; reset now revokes live access tokens |
+| **WP-1**           | **Done**       | `@quynhonsemiconductor/platform-runtime@0.1.0` — published-ready, builds clean, tests green                                                                                            |
+| **WP-2**           | **Withdrawn**  | `identity-drizzle` was built, adopted into `solodesk`, then **deleted**. The package no longer exists. Replaced by the port-conformance kit in `identity` 7.1.0 — §0.0                 |
+| **WP-3**           | **Not needed** | `platform-email` — measured, and the duplication is not there. §0.2                                                                                                                    |
+| WP-4 / WP-5 / WP-6 | Not started    | Convergence; audit/notifications; the guard decision                                                                                                                                   |
 
 **Adoption HAS happened, as of 2026-09-08.** `rova` and `opshub` both consume
 `platform-runtime@0.1.1` — `load-env`, `registerRequestTiming`, `ExclusiveJob`
@@ -154,7 +154,7 @@ Two consequences worth carrying forward:
    with DI boilerplate and the larger copies. If it does not appear there either, the
    criterion should be replaced rather than the code contorted to satisfy it.
 2. **Do not treat a line increase as a signal to abandon an adoption.** The revised
-   test is: does this delete a duplicated *decision*? For the CAS, yes.
+   test is: does this delete a duplicated _decision_? For the CAS, yes.
 
 ### Two design defects the adoption exposed, both fixed
 
@@ -176,13 +176,13 @@ against it.
 The three implementations genuinely DISAGREE, and the disagreements are policy rather
 than drift — sharing it would impose one product's decision on another:
 
-| | `rova` | `solodesk` |
-|---|---|---|
-| Changed `providerEmail` | updates it | ignores it |
-| Linking to an unverified account | leaves `emailVerified` | **sets it true** — documented: the link is itself proof of ownership |
-| Email normalisation | lowercases and trims | matches raw |
-| Row ids | client-side `uuidv7` | column defaults |
-| `findByEmail` / `findById` | filters `isNull(deletedAt)` | does not |
+|                                  | `rova`                      | `solodesk`                                                           |
+| -------------------------------- | --------------------------- | -------------------------------------------------------------------- |
+| Changed `providerEmail`          | updates it                  | ignores it                                                           |
+| Linking to an unverified account | leaves `emailVerified`      | **sets it true** — documented: the link is itself proof of ownership |
+| Email normalisation              | lowercases and trims        | matches raw                                                          |
+| Row ids                          | client-side `uuidv7`        | column defaults                                                      |
+| `findByEmail` / `findById`       | filters `isNull(deletedAt)` | does not                                                             |
 
 That method is also the account-LINKING path, a well-known takeover vector, so the
 divergence deserves a deliberate decision rather than a quiet merge — and that
@@ -208,17 +208,17 @@ the same measurement error that produced WP-2, made once more.
 
 Diffed file by file, rova against opshub:
 
-| File | rova lines | differing |
-|---|---|---|
-| `email-delivery.service.ts` | 85 | **6** |
-| `email.provider.ts` | 69 | 61 |
-| `providers/dev.provider.ts` | 40 | 40 |
-| `providers/ses.provider.ts` | 96 | 115 |
-| `providers/resend.provider.ts` | 100 | 121 |
-| `email.service.ts` | 95 | 119 |
-| `email-scheduler.service.ts` | 82 | 125 |
-| `templates/index.ts` | 239 | 422 |
-| `providers/shared.ts` | — | rova only |
+| File                           | rova lines | differing |
+| ------------------------------ | ---------- | --------- |
+| `email-delivery.service.ts`    | 85         | **6**     |
+| `email.provider.ts`            | 69         | 61        |
+| `providers/dev.provider.ts`    | 40         | 40        |
+| `providers/ses.provider.ts`    | 96         | 115       |
+| `providers/resend.provider.ts` | 100        | 121       |
+| `email.service.ts`             | 95         | 119       |
+| `email-scheduler.service.ts`   | 82         | 125       |
+| `templates/index.ts`           | 239        | 422       |
+| `providers/shared.ts`          | —          | rova only |
 
 **Exactly one file is duplicated.** Everything else diverges by as much as or more
 than its own length — a diff larger than the file means the two share a name and
@@ -264,28 +264,28 @@ Nothing is proposed because it "looks reusable". The repo's own history records 
 
 These consume the shared packages and extend them locally. This is the intended pattern, not duplication.
 
-| File | Why it is correct |
-|---|---|
-| `cache/index.ts` | One-line re-export of `platform-cache` so product code imports from `@platform` |
-| `errors/exceptions.ts` | Extends the shared `DomainException` so package-thrown and product-thrown errors share **one class identity** |
-| `http/index.ts`, `http/pagination.ts` | Explicitly sourced from `platform-http` — opshub's file says so in a comment |
-| `http/http-logging.interceptor.ts`, `idempotency.interceptor.ts` | Import `platform-http` and extend |
-| `rate-limit/rate-limit.guard.ts` | Package-sourced |
-| `rate-limit/rate-limit.constants.ts` | 114 diff on 84 lines — per-route limits are **product vocabulary**, correctly divergent |
+| File                                                             | Why it is correct                                                                                             |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `cache/index.ts`                                                 | One-line re-export of `platform-cache` so product code imports from `@platform`                               |
+| `errors/exceptions.ts`                                           | Extends the shared `DomainException` so package-thrown and product-thrown errors share **one class identity** |
+| `http/index.ts`, `http/pagination.ts`                            | Explicitly sourced from `platform-http` — opshub's file says so in a comment                                  |
+| `http/http-logging.interceptor.ts`, `idempotency.interceptor.ts` | Import `platform-http` and extend                                                                             |
+| `rate-limit/rate-limit.guard.ts`                                 | Package-sourced                                                                                               |
+| `rate-limit/rate-limit.constants.ts`                             | 114 diff on 84 lines — per-route limits are **product vocabulary**, correctly divergent                       |
 
 `platform-http` already ships `global-exception.filter`, `pagination/{cursor,offset}`, `http-logging.interceptor`, `idempotency.interceptor`, `rate-limit.{constants,decorator,guard}`, and `request-context`. Check it before proposing anything HTTP-shaped.
 
 ### 2.2 Promote now — measured, clean
 
-| File | Lines | Diff | Package imports | Product schema |
-|---|---|---|---|---|
-| `scheduling/exclusive-job.service.ts` | 104 | **0** | `platform-cache`, `observability` | none |
-| `http/request-timing.ts` | 108 | **0** | none (fastify only) | none |
-| `config/load-env.ts` | 35 | **0** | none (`node:process` only) | none |
-| `config/app-config.service.ts` | 16 | **0** | none | none — generic over `Env` |
-| `config/config.module.ts` | 26 | 2 | none | none |
-| `utils/sanitize.util.ts` | 42 | 37 | none | none |
-| `context/als.middleware.ts` | 37 | 39 | none | none |
+| File                                  | Lines | Diff  | Package imports                   | Product schema            |
+| ------------------------------------- | ----- | ----- | --------------------------------- | ------------------------- |
+| `scheduling/exclusive-job.service.ts` | 104   | **0** | `platform-cache`, `observability` | none                      |
+| `http/request-timing.ts`              | 108   | **0** | none (fastify only)               | none                      |
+| `config/load-env.ts`                  | 35    | **0** | none (`node:process` only)        | none                      |
+| `config/app-config.service.ts`        | 16    | **0** | none                              | none — generic over `Env` |
+| `config/config.module.ts`             | 26    | 2     | none                              | none                      |
+| `utils/sanitize.util.ts`              | 42    | 37    | none                              | none                      |
+| `context/als.middleware.ts`           | 37    | 39    | none                              | none                      |
 
 ≈ 368 lines. The first four are byte-identical: extraction is deletion, not reconciliation.
 
@@ -295,26 +295,26 @@ These consume the shared packages and extend them locally. This is the intended 
 
 Same treatment as §4: the product passes its table objects, the package supplies behaviour.
 
-| Subsystem | Scope | Note |
-|---|---|---|
-| `email/*` | ~700 lines across 9 files in rova | The largest coherent duplicated subsystem. `email-delivery.service.ts` is 6-diff but schema-bound; providers (`dev`, `resend`, `ses`) are 34–115 diff. **Answers Learning's transport question — do not pick a transport, consume this.** |
-| Identity Drizzle adapters | 3 copies | See §3 |
+| Subsystem                 | Scope                             | Note                                                                                                                                                                                                                                      |
+| ------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `email/*`                 | ~700 lines across 9 files in rova | The largest coherent duplicated subsystem. `email-delivery.service.ts` is 6-diff but schema-bound; providers (`dev`, `resend`, `ses`) are 34–115 diff. **Answers Learning's transport question — do not pick a transport, consume this.** |
+| Identity Drizzle adapters | 3 copies                          | See §3                                                                                                                                                                                                                                    |
 
 ### 2.4 Converge first — these are projects, not promotions
 
 Divergence is too large for extraction. Same concept, different implementations; reconciling them carries regression risk in live products.
 
-| File | Lines | Diff |
-|---|---|---|
-| `storage/storage.service.ts` | 314 | **588** |
-| `resilience/resilience.service.ts` | 245 | **389** |
-| `notifications/notification.templates.ts` | 174 | 343 |
-| `email/templates/index.ts` | 239 | 416 |
-| `http/pagination.ts` | 247 | 260 |
-| `outbox/abstract-outbox-relay.ts` | 332 | 258 |
-| `notifications/notification-scheduler.service.ts` | 114 | 124 |
-| `observability/health.controller.ts` | 93 | 66 |
-| `http/csrf.ts` | 74 | 49 |
+| File                                              | Lines | Diff    |
+| ------------------------------------------------- | ----- | ------- |
+| `storage/storage.service.ts`                      | 314   | **588** |
+| `resilience/resilience.service.ts`                | 245   | **389** |
+| `notifications/notification.templates.ts`         | 174   | 343     |
+| `email/templates/index.ts`                        | 239   | 416     |
+| `http/pagination.ts`                              | 247   | 260     |
+| `outbox/abstract-outbox-relay.ts`                 | 332   | 258     |
+| `notifications/notification-scheduler.service.ts` | 114   | 124     |
+| `observability/health.controller.ts`              | 93    | 66      |
+| `http/csrf.ts`                                    | 74    | 49      |
 
 Do not attempt these before §2.2 and §3 have shipped and proved the model.
 
@@ -333,12 +333,12 @@ Domain modules (`projects`, `assets`, `qms`, `catalog-inventory`, …) · author
 
 Three products independently wrote adapters against `identity`'s own ports.
 
-| Adapter | Evidence |
-|---|---|
-| `ITransactionRunner` | 3 copies. rova and opshub byte-identical apart from the doc comment; solodesk differs only in module-scope `db` vs DI. Body is `db.transaction(fn)`. |
+| Adapter                  | Evidence                                                                                                                                                   |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITransactionRunner`     | 3 copies. rova and opshub byte-identical apart from the doc comment; solodesk differs only in module-scope `db` vs DI. Body is `db.transaction(fn)`.       |
 | `IAuthSessionRepository` | 3 copies, **identical surface** — `create`, `findByTokenHash`, `revokeAllForUser`, `revokeById`, `revokeByIdIfActive`, `revokeFamily`. 85 / 91 / 71 lines. |
-| `IUserRepository` | rova's 7 methods; solodesk the same 7 **plus** `findPasswordHashByEmail`. A clean superset, not divergence. |
-| BFF session resolver | 2 copies, 27 vs 30 lines, one `resolve()`, differ in class-name prefix |
+| `IUserRepository`        | rova's 7 methods; solodesk the same 7 **plus** `findPasswordHashByEmail`. A clean superset, not divergence.                                                |
+| BFF session resolver     | 2 copies, 27 vs 30 lines, one `resolve()`, differ in class-name prefix                                                                                     |
 
 **`revokeByIdIfActive` is the compare-and-swap that makes refresh rotation single-use, and it exists in all three.** That security-critical query has been hand-propagated three times. Three hand-maintained copies of a concurrency-critical write is how atomicity quietly breaks.
 
@@ -351,13 +351,15 @@ Three products independently wrote adapters against `identity`'s own ports.
 Shared code must import no product schema. So the product passes its tables:
 
 ```ts
-import { createAuthSessionRepository, createDrizzleTransactionRunner }
-  from '@quynhonsemiconductor/identity-drizzle';
+import {
+  createAuthSessionRepository,
+  createDrizzleTransactionRunner,
+} from '@quynhonsemiconductor/identity-drizzle';
 import { authSessions } from './db/schema';
 
 const AuthSessionRepository = createAuthSessionRepository({
   table: authSessions,
-  columns: { contextId: 'tenant_id' },   // only when names diverge
+  columns: { contextId: 'tenant_id' }, // only when names diverge
 });
 ```
 
@@ -379,12 +381,12 @@ Learning gets a correct schema on day one instead of writing its own adapters an
 
 ### 3.5 Admission case
 
-| Condition | Verdict |
-|---|---|
-| Divergence is a security defect | **Yes** — `revokeByIdIfActive` is a CAS |
-| Byte-identical modulo product name | **Yes** for runner and resolver; identical surface for repositories, table binding parameterised |
-| Same edit twice | **Three times** |
-| Imports product schema or permission types | **No**, by construction |
+| Condition                                  | Verdict                                                                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Divergence is a security defect            | **Yes** — `revokeByIdIfActive` is a CAS                                                          |
+| Byte-identical modulo product name         | **Yes** for runner and resolver; identical surface for repositories, table binding parameterised |
+| Same edit twice                            | **Three times**                                                                                  |
+| Imports product schema or permission types | **No**, by construction                                                                          |
 
 All four hold. No exception needed.
 
@@ -396,11 +398,11 @@ Each work package is independently shippable and independently revertable.
 
 ### WP-0 — Performance fixes (do first, unblocks nothing, costs nothing)
 
-| Fix | Where | Detail |
-|---|---|---|
-| Enable auto-pipelining | `platform-cache/src/cache.service.ts` | `new Redis(url, { … })` has no `enableAutoPipelining`. `JwtAuthGuard` runs `Promise.all([isTokenDenied, isUserRevoked])` — concurrency, not batching, so **two Redis round trips on every authenticated request in all four products**. Set `enableAutoPipelining: true`. |
-| Pin argon2 parameters | `solodesk/.../password.service.ts` | `argon2.hash(plain, { type: argon2id })` takes library defaults — 64 MiB, parallelism 4. Under concurrent logins that is real memory pressure on a Fargate task, and `p=4` oversubscribes a 2-vCPU task. Pin `memoryCost`, `timeCost`, `parallelism`; benchmark to 50–100 ms. Store algorithm + parameters beside the hash to enable rehash-on-login. |
-| Deduplicate within solodesk | `internal-service.guard.ts` | Two copies (backend-api, connector-hub), 19 diff lines. Intra-repo duplication — fix locally, no package needed. |
+| Fix                         | Where                                 | Detail                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable auto-pipelining      | `platform-cache/src/cache.service.ts` | `new Redis(url, { … })` has no `enableAutoPipelining`. `JwtAuthGuard` runs `Promise.all([isTokenDenied, isUserRevoked])` — concurrency, not batching, so **two Redis round trips on every authenticated request in all four products**. Set `enableAutoPipelining: true`.                                                                             |
+| Pin argon2 parameters       | `solodesk/.../password.service.ts`    | `argon2.hash(plain, { type: argon2id })` takes library defaults — 64 MiB, parallelism 4. Under concurrent logins that is real memory pressure on a Fargate task, and `p=4` oversubscribes a 2-vCPU task. Pin `memoryCost`, `timeCost`, `parallelism`; benchmark to 50–100 ms. Store algorithm + parameters beside the hash to enable rehash-on-login. |
+| Deduplicate within solodesk | `internal-service.guard.ts`           | Two copies (backend-api, connector-hub), 19 diff lines. Intra-repo duplication — fix locally, no package needed.                                                                                                                                                                                                                                      |
 
 **Acceptance:** p50 authenticated request latency measured before and after the pipelining change; argon2 verify time benchmarked on the real task size.
 
@@ -409,6 +411,7 @@ Each work package is independently shippable and independently revertable.
 **New package** `@quynhonsemiconductor/platform-runtime`, 0.1.0. Contents from §2.2.
 
 Steps:
+
 1. Extract the four zero-diff files verbatim: `exclusive-job.service`, `request-timing`, `load-env`, `app-config.service`.
 2. Add `config.module` (2 diff — reconcile trivially).
 3. Reconcile `sanitize.util` (37 diff) and `als.middleware` (39 diff). Read both, take the superset, write tests covering both behaviours.
@@ -431,6 +434,7 @@ Steps:
 **New package** `@quynhonsemiconductor/identity-drizzle`, 0.1.0. Contents from §3.4.
 
 Steps:
+
 1. Extract from the most complete implementation (rova's, which has the SSO connection repository).
 2. Implement the §3.2 column-contract parameterisation.
 3. Add the §3.3 table builders.
@@ -457,6 +461,7 @@ Steps:
 **New package**, 0.1.0. The ~700-line email subsystem from §2.3.
 
 Steps:
+
 1. Extract the provider abstraction — `email.provider.ts` plus `dev`, `resend`, `ses` providers. **This resolves the Learning transport question: consume this, do not choose a transport.**
 2. Parameterise `email-delivery.service` over the outbox table (§3.2 pattern), since it imports `emailOutbox` today.
 3. Leave `email/templates/index.ts` in the products — 416 diff lines, and templates are product vocabulary.
@@ -502,14 +507,14 @@ Learning consumes `platform-runtime` and the `identity` package (including its p
 
 ## 6. Versioning
 
-| Package | Change | Version |
-|---|---|---|
-| `platform-runtime` | New | 0.1.0 → 1.0.0 at three consumers |
-| ~~`identity-drizzle`~~ | **Withdrawn** | never published; §0.0 |
-| ~~`platform-email`~~ | **Not needed** | not built; §0.2 |
-| `identity` | port-conformance kit | 7.1.0 |
-| `platform-cache` | `enableAutoPipelining` | patch |
-| `identity`, `platform-http`, `observability` | none required | unchanged |
+| Package                                      | Change                 | Version                          |
+| -------------------------------------------- | ---------------------- | -------------------------------- |
+| `platform-runtime`                           | New                    | 0.1.0 → 1.0.0 at three consumers |
+| ~~`identity-drizzle`~~                       | **Withdrawn**          | never published; §0.0            |
+| ~~`platform-email`~~                         | **Not needed**         | not built; §0.2                  |
+| `identity`                                   | port-conformance kit   | 7.1.0                            |
+| `platform-cache`                             | `enableAutoPipelining` | patch                            |
+| `identity`, `platform-http`, `observability` | none required          | unchanged                        |
 
 ---
 

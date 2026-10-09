@@ -15,13 +15,13 @@ v1 of this document was written on a false premise. It claimed there was no cred
 
 Consequences:
 
-| v1 said | v2 says |
-|---|---|
-| No TypeScript product has credentials | **SoloDesk does**, and it is well built |
-| Write a new module in `identity` | **Reuse SoloDesk's implementation**; the work is extraction and hardening, not greenfield |
-| Learning would be the first consumer | Learning is the **second**, which makes the promotion checklist properly evaluable |
+| v1 said                                                     | v2 says                                                                                               |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| No TypeScript product has credentials                       | **SoloDesk does**, and it is well built                                                               |
+| Write a new module in `identity`                            | **Reuse SoloDesk's implementation**; the work is extraction and hardening, not greenfield             |
+| Learning would be the first consumer                        | Learning is the **second**, which makes the promotion checklist properly evaluable                    |
 | Admit as a declared single-consumer exception, like `oidc/` | **No exception needed.** Converge two real implementations, then promote on the checklist's own terms |
-| Effort 2–4 weeks | Materially less for Learning; the design questions are already answered |
+| Effort 2–4 weeks                                            | Materially less for Learning; the design questions are already answered                               |
 
 The rejection of Cognito, Keycloak, and the other vendors (§4) survives unchanged and is in fact strengthened: the organisation has already demonstrated it can build this well.
 
@@ -63,7 +63,7 @@ Provider-agnostic OIDC broker with mandatory discovery, PKCE S256, nonce, single
 
 ### 2.5 The seam for passwords
 
-`authMethod: 'password' | 'sso'` runs through the token claims, session model, and rotation path. `AuthSession.ssoProvider` is documented as *"null for password sessions"*. `User.emailVerified` and `User.locale` already exist. `devLogin` is this exact path minus credential verification, hard-disabled in production.
+`authMethod: 'password' | 'sso'` runs through the token claims, session model, and rotation path. `AuthSession.ssoProvider` is documented as _"null for password sessions"_. `User.emailVerified` and `User.locale` already exist. `devLogin` is this exact path minus credential verification, hard-disabled in production.
 
 The package was designed with a password path in mind. SoloDesk filled it in the product, which is where the checklist says the first implementation belongs.
 
@@ -73,16 +73,16 @@ The package was designed with a password path in mind. SoloDesk filled it in the
 
 `solodesk/services/backend-api` — NestJS + Fastify + Drizzle, consuming all four `@quynhonsemiconductor/*` packages.
 
-| Area | Implementation |
-|---|---|
-| Hashing | `platform/auth/password.service.ts` — argon2id via `argon2` ^0.45.1 |
-| Tokens | `db/schema/auth-tokens.ts` — one table, `purpose` discriminator (`email_verify` \| `password_reset`), `token_hash` unique, `used_at`, `expires_at`. Reuses the package's `hashToken`. |
-| Audit | `db/schema/auth-audit-log.ts`, `infrastructure/auth-audit.service.ts` |
+| Area          | Implementation                                                                                                                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hashing       | `platform/auth/password.service.ts` — argon2id via `argon2` ^0.45.1                                                                                                                                          |
+| Tokens        | `db/schema/auth-tokens.ts` — one table, `purpose` discriminator (`email_verify` \| `password_reset`), `token_hash` unique, `used_at`, `expires_at`. Reuses the package's `hashToken`.                        |
+| Audit         | `db/schema/auth-audit-log.ts`, `infrastructure/auth-audit.service.ts`                                                                                                                                        |
 | Rate limiting | `CacheService.consumeRateLimit` — an atomic Lua sliding window on Valkey, already in `platform-cache`. Login 5 per 15 min per email; forgot-password 3/hr; signup 10/hr per IP; slot redemption 8/hr per IP. |
-| Routes | `signup`, `verify-email`, `login`, `redeem-slot`, **`google`**, `refresh`, `logout`, `logout-all`, `me`, `update-me`, `forgot-password`, `reset-password` |
-| Services | `login.service.ts`, `signup.service.ts`, `session-minter.ts`, `slot-redemption.service.ts` |
+| Routes        | `signup`, `verify-email`, `login`, `redeem-slot`, **`google`**, `refresh`, `logout`, `logout-all`, `me`, `update-me`, `forgot-password`, `reset-password`                                                    |
+| Services      | `login.service.ts`, `signup.service.ts`, `session-minter.ts`, `slot-redemption.service.ts`                                                                                                                   |
 
-**Quality is high.** The reset path burns *every* outstanding reset token for the user, not only the redeemed one, with a written explanation of the takeover it prevents — an attacker's reset request is precisely what prompts the owner to reset, so older live tokens are a real path back in. Email-verify tokens are deliberately *not* swept, with the reasoning stated. Session revocation follows.
+**Quality is high.** The reset path burns _every_ outstanding reset token for the user, not only the redeemed one, with a written explanation of the takeover it prevents — an attacker's reset request is precisely what prompts the owner to reset, so older live tokens are a real path back in. Email-verify tokens are deliberately _not_ swept, with the reasoning stated. Session revocation follows.
 
 That is a better-reasoned implementation than the one v1 of this document proposed.
 
@@ -94,19 +94,19 @@ That is a better-reasoned implementation than the one v1 of this document propos
 
 Every managed or self-hosted identity product supplies a directory **and** duplicates the broker and session layer already owned.
 
-| Shape | Examples | Credentials live | New runtime service | New PII processor |
-|---|---|---|---|---|
-| **A — in-product or in-package** | current approach; Better Auth; Auth.js v6 | Own PostgreSQL | No | **No** |
-| **B — self-hosted IdP** | Keycloak, Zitadel, Logto, Ory, Authentik | Its own database | Yes, on the critical login path | No |
-| **C — managed IdP** | Cognito, Auth0, Clerk, WorkOS, Descope | Vendor-held | No | **Yes** |
+| Shape                            | Examples                                  | Credentials live | New runtime service             | New PII processor |
+| -------------------------------- | ----------------------------------------- | ---------------- | ------------------------------- | ----------------- |
+| **A — in-product or in-package** | current approach; Better Auth; Auth.js v6 | Own PostgreSQL   | No                              | **No**            |
+| **B — self-hosted IdP**          | Keycloak, Zitadel, Logto, Ory, Authentik  | Its own database | Yes, on the critical login path | No                |
+| **C — managed IdP**              | Cognito, Auth0, Clerk, WorkOS, Descope    | Vendor-held      | No                              | **Yes**           |
 
-| Option | Rejected because |
-|---|---|
-| **Amazon Cognito** | A second store of personal data to reconcile against `users`; a second processor to declare under Decree 13/2023; two-phase deletion on every erasure request; an immutable user-pool attribute schema; and password hashes that cannot be exported, so migration would force a reset for every user. It also buys operational relief the org has already demonstrated it does not need — SoloDesk ships this today. |
-| **Keycloak** | Rejected by ADR-17 on self-host burden. A Java service plus its own PostgreSQL plus HA plus CVE cadence, duplicating ~70% of `identity`. |
-| **Zitadel / Logto / Ory / Authentik** | Same Shape-B objection. Zitadel is the strongest and would be right if a standalone IdP were needed; it is not. |
-| **Better Auth** | MIT, TypeScript-native, credentials in your own database — genuinely attractive. Rejected because it is designed to **own session management**, which would sit on top of a mature session layer that already exists and is already relied on by three services. |
-| **Auth0 / Clerk / Descope** | Per-MAU pricing at consumer scale, higher lock-in, no AWS-native offset. |
+| Option                                | Rejected because                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Amazon Cognito**                    | A second store of personal data to reconcile against `users`; a second processor to declare under Decree 13/2023; two-phase deletion on every erasure request; an immutable user-pool attribute schema; and password hashes that cannot be exported, so migration would force a reset for every user. It also buys operational relief the org has already demonstrated it does not need — SoloDesk ships this today. |
+| **Keycloak**                          | Rejected by ADR-17 on self-host burden. A Java service plus its own PostgreSQL plus HA plus CVE cadence, duplicating ~70% of `identity`.                                                                                                                                                                                                                                                                             |
+| **Zitadel / Logto / Ory / Authentik** | Same Shape-B objection. Zitadel is the strongest and would be right if a standalone IdP were needed; it is not.                                                                                                                                                                                                                                                                                                      |
+| **Better Auth**                       | MIT, TypeScript-native, credentials in your own database — genuinely attractive. Rejected because it is designed to **own session management**, which would sit on top of a mature session layer that already exists and is already relied on by three services.                                                                                                                                                     |
+| **Auth0 / Clerk / Descope**           | Per-MAU pricing at consumer scale, higher lock-in, no AWS-native offset.                                                                                                                                                                                                                                                                                                                                             |
 
 **The case rests on architecture and law, not cost.** Cognito at a few thousand users is inexpensive. The argument is that mechanism belongs inside the boundary `identity` already draws, and that holding personal data in one store with one deletion path is simpler to operate and to defend under audit.
 
@@ -124,24 +124,24 @@ Two divergent copies of password verification are two security postures, bug cla
 
 > Promote when all three hold: byte-identical between products; the same edit twice; imports no product schema or permission type.
 
-| Condition | Status |
-|---|---|
-| Byte-identical between products | **Not yet** — Learning has not been built |
-| Same edit twice | **Not yet** |
-| No product schema or permission type imported | `PasswordService` already satisfies this. The token *table* is Drizzle + product schema and stays product-side behind a repository port. |
+| Condition                                     | Status                                                                                                                                   |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Byte-identical between products               | **Not yet** — Learning has not been built                                                                                                |
+| Same edit twice                               | **Not yet**                                                                                                                              |
+| No product schema or permission type imported | `PasswordService` already satisfies this. The token _table_ is Drizzle + product schema and stays product-side behind a repository port. |
 
 **So the answer is: not yet, and that is the correct answer.** v1 of this document argued for a declared exception on the `oidc/` precedent. That argument is no longer needed and should not be used — with SoloDesk plus Learning there is a real path to satisfying the checklist honestly, and taking a second exception when the ordinary route is available would erode the rule.
 
 ### 5.3 Consumer reality
 
-| Product | Local credentials? |
-|---|---|
-| `rova` | No — Entra-only |
-| `opshub` | No — Entra-only |
-| **SoloDesk** | **Yes — the reference implementation** |
-| **Learning** | Yes — the second consumer |
-| Knowledge Base | Yes, but **in Python** — `qnsc-kb-backend/src/core/security.py`, bcrypt |
-| Hospital Camera AI | Unknown |
+| Product            | Local credentials?                                                      |
+| ------------------ | ----------------------------------------------------------------------- |
+| `rova`             | No — Entra-only                                                         |
+| `opshub`           | No — Entra-only                                                         |
+| **SoloDesk**       | **Yes — the reference implementation**                                  |
+| **Learning**       | Yes — the second consumer                                               |
+| Knowledge Base     | Yes, but **in Python** — `qnsc-kb-backend/src/core/security.py`, bcrypt |
+| Hospital Camera AI | Unknown                                                                 |
 
 ### 5.4 The divergence this repo cannot fix
 
@@ -176,7 +176,7 @@ This is a genuine usability-versus-disclosure trade-off, and many products accep
 ### 6.3 argon2 parameters unpinned, and no rehash path
 
 ```ts
-argon2.hash(plain, { type: argon2.argon2id })
+argon2.hash(plain, { type: argon2.argon2id });
 ```
 
 Cost parameters come from the library's defaults, so they shift silently on upgrade. There is no `algo`/parameters column stored beside the hash, so **transparent rehash-on-login is impossible** when parameters are later raised.

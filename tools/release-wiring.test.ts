@@ -20,9 +20,9 @@ import { describe, expect, it } from 'vitest';
 const root = join(import.meta.dirname, '..');
 
 describe('release wiring', () => {
-  const config = JSON.parse(
-    readFileSync(join(root, 'release-please-config.json'), 'utf8'),
-  ) as { packages: Record<string, { component: string }> };
+  const config = JSON.parse(readFileSync(join(root, 'release-please-config.json'), 'utf8')) as {
+    packages: Record<string, { component: string }>;
+  };
   const manifest = JSON.parse(
     readFileSync(join(root, '.release-please-manifest.json'), 'utf8'),
   ) as Record<string, string>;
