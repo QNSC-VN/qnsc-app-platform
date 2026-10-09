@@ -2,3 +2,7 @@
 # from. It is kept byte-identical so the two can be diffed; reformatting it would make every
 # future sync a noisy diff. (Prettier reads .prettierignore from the repo root.)
 docs/PLAN.md
+
+# release-please writes these on every release PR in its own style. Formatting them would make the
+# release PR fail `format:check` (it did), and the next release would rewrite them anyway.
+**/CHANGELOG.md
