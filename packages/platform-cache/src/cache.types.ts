@@ -14,6 +14,8 @@ export type CacheMode = 'optional' | 'required';
  * Options for the shared Valkey/Redis cache primitive used across QNSC product backends.
  */
 export interface CacheModuleOptions {
+  /** THROWAWAY: a new required field, to break every consumer that builds these options. */
+  region: string;
   /**
    * Valkey/Redis connection URL, e.g. `redis://localhost:6379`. May be omitted only
    * in `optional` mode, in which case the cache is disabled.
