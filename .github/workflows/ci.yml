@@ -141,12 +141,16 @@ jobs:
       # Read-only App (contents: read), never the write-capable automation App in a pull-request
       # workflow. The token is used by the checkout below and is not exported to any later step;
       # the action revokes it when the job ends.
+      #
+      # Scoped to THIS job's product, not to all three: the job needs one repository, and a
+      # request naming a repository the App is not installed on fails outright, so the broad form
+      # would turn one missing installation into three red jobs with the same message.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         id: token
         with:
           app-id: ${{ vars.QNSC_REPO_READER_APP_ID }}
           private-key: ${{ secrets.QNSC_REPO_READER_PRIVATE_KEY }}
-          repositories: rova,opshub,solodesk
+          repositories: ${{ matrix.product }}
           permission-contents: read
 
       # Both checkouts go into subdirectories so the workspace root has no package.json: the pnpm
