@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  SignJWT,
-  exportJWK,
-  generateKeyPair,
-  createLocalJWKSet,
-  type JWTVerifyGetKey,
-} from 'jose';
+import { SignJWT, exportJWK, generateKeyPair, createLocalJWKSet, type JWTVerifyGetKey } from 'jose';
 import { OidcTokenVerifier } from './oidc-verifier';
 import type { ResolvedConnection } from './oidc-connection';
 
@@ -84,9 +78,9 @@ describe('OidcTokenVerifier', () => {
   it('rejects a nonce mismatch', async () => {
     const { resolver, sign } = await setup();
     const token = await sign({ oid: 'o1', email: 'a@x.com', nonce: 'good' });
-    await expect(
-      new OidcTokenVerifier(resolver).verify(token, conn, 'expected'),
-    ).rejects.toThrow(/nonce mismatch/);
+    await expect(new OidcTokenVerifier(resolver).verify(token, conn, 'expected')).rejects.toThrow(
+      /nonce mismatch/,
+    );
   });
 
   it('rejects missing subject/email', async () => {

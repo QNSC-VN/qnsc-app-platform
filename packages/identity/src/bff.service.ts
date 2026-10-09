@@ -109,7 +109,10 @@ export class BffService {
    * powers a one-click "Sign in with <home IdP>" shortcut. The caller resolves
    * which connection (e.g. the home directory connection) and passes its id.
    */
-  async beginLoginById(rawReturnTo: string | undefined, connectionId: string): Promise<BffLoginStart> {
+  async beginLoginById(
+    rawReturnTo: string | undefined,
+    connectionId: string,
+  ): Promise<BffLoginStart> {
     const returnTo = isSafeReturnTo(rawReturnTo) ? rawReturnTo : this.options.postLoginRedirect;
     const conn = await this.requireRegistry().resolveById(connectionId);
     if (!conn) {

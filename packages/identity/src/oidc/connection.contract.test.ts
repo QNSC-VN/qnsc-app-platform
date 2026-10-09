@@ -6,7 +6,8 @@ import {
   type DbColumn,
 } from './connection.contract';
 
-const cols = (names: readonly string[]): DbColumn[] => names.map((column_name) => ({ column_name }));
+const cols = (names: readonly string[]): DbColumn[] =>
+  names.map((column_name) => ({ column_name }));
 
 /** A fetcher backed by a table→columns map. */
 function fetcher(map: Record<string, readonly string[]>) {

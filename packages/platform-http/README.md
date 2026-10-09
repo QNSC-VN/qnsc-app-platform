@@ -18,7 +18,6 @@ wiring.
 pnpm add @quynhonsemiconductor/platform-http
 ```
 
-
 ## Client address
 
 ```ts
@@ -49,10 +48,10 @@ then do nothing — silently, which on EKS meant no application rate limiting at
 With `NODE_ENV=production` the application **fails at startup** in that state. Outside
 production nothing changes (local development and CI run without Valkey).
 
-| Variable | Values | Effect |
-|---|---|---|
-| `RATE_LIMIT_MODE` | `cache` (default), `edge-only`, `disabled` | `edge-only`: limits are enforced by Cloudflare rules only; the guard allows every request without touching the cache and logs a warning at startup. `disabled`: no limiting (dev/CI) — see below |
-| `IDEMPOTENCY_MODE` | `cache` (default), `disabled` | `disabled`: `Idempotency-Key` is not honoured; the interceptor passes every request through |
+| Variable           | Values                                     | Effect                                                                                                                                                                                           |
+| ------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RATE_LIMIT_MODE`  | `cache` (default), `edge-only`, `disabled` | `edge-only`: limits are enforced by Cloudflare rules only; the guard allows every request without touching the cache and logs a warning at startup. `disabled`: no limiting (dev/CI) — see below |
+| `IDEMPOTENCY_MODE` | `cache` (default), `disabled`              | `disabled`: `Idempotency-Key` is not honoured; the interceptor passes every request through                                                                                                      |
 
 An unknown value fails at startup too — a typo never silently means the default.
 
@@ -66,7 +65,7 @@ turned off, so it is reported as a fail-open: a warning at startup carrying
 startup and on every request it lets through, so an alert on either keeps firing while
 it stays off. Outside production it is silent, as before.
 
-A cache that exists but is unreachable *at request time* still fails open, as before; it is
+A cache that exists but is unreachable _at request time_ still fails open, as before; it is
 now reported both ways — the log line carries `securityFailOpen: "rate_limit"`
 (`failOpenLog`) and `SecurityMetrics.recordFailOpen('rate_limit')` is called, both from
 `@quynhonsemiconductor/observability` — so the alert on either can see it. Recording the

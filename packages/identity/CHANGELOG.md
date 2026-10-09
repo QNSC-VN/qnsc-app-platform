@@ -2,142 +2,126 @@
 
 ## [7.1.0](https://github.com/quynhonsemiconductor/app-platform/compare/identity-v7.0.0...identity-v7.1.0) (2026-09-08)
 
-
 ### ✨ Features
 
-* add platform-runtime, make the conformance kit runnable against real adapters ([#98](https://github.com/quynhonsemiconductor/app-platform/issues/98)) ([486783f](https://github.com/quynhonsemiconductor/app-platform/commit/486783f69edd0090a8251626bd7b032909945c10))
+- add platform-runtime, make the conformance kit runnable against real adapters ([#98](https://github.com/quynhonsemiconductor/app-platform/issues/98)) ([486783f](https://github.com/quynhonsemiconductor/app-platform/commit/486783f69edd0090a8251626bd7b032909945c10))
 
 ## [7.0.0](https://github.com/quynhonsemiconductor/app-platform/compare/identity-v6.0.0...identity-v7.0.0) (2026-09-05)
 
-
 ### ⚠ BREAKING CHANGES
 
-* package scope changed; update dependency names to the new scope.
+- package scope changed; update dependency names to the new scope.
 
 ### ✨ Features
 
-* publish packages under the organization scope ([#91](https://github.com/quynhonsemiconductor/app-platform/issues/91)) ([cd3af62](https://github.com/quynhonsemiconductor/app-platform/commit/cd3af62cde67a78dda2798a4896cf902cf3c0a2a))
+- publish packages under the organization scope ([#91](https://github.com/quynhonsemiconductor/app-platform/issues/91)) ([cd3af62](https://github.com/quynhonsemiconductor/app-platform/commit/cd3af62cde67a78dda2798a4896cf902cf3c0a2a))
 
 ## [6.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.6.0...identity-v6.0.0) (2026-07-28)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **identity:** `AuthController`, `AuthModule`, the auth DTOs, `PermissionGuard`, `permissionGrants`, `WORKSPACE_ALL`, `PERMISSION_CHECKER`, `PermissionChecker`, `Public`, `Auth`, `RequirePermission`, `CurrentUser`, `ApiCommonErrors`, `IS_PUBLIC_KEY`, `PERMISSION_KEY` and `BffModule` are no longer exported. Neither QNSC product imports any of them, so both upgrade with no code change; a consumer outside this org must move its authorization guard, route decorators and auth controller into the product, where the equivalents already live in both apps.
+- **identity:** `AuthController`, `AuthModule`, the auth DTOs, `PermissionGuard`, `permissionGrants`, `WORKSPACE_ALL`, `PERMISSION_CHECKER`, `PermissionChecker`, `Public`, `Auth`, `RequirePermission`, `CurrentUser`, `ApiCommonErrors`, `IS_PUBLIC_KEY`, `PERMISSION_KEY` and `BffModule` are no longer exported. Neither QNSC product imports any of them, so both upgrade with no code change; a consumer outside this org must move its authorization guard, route decorators and auth controller into the product, where the equivalents already live in both apps.
 
 ### ✨ Features
 
-* **identity:** drop the surface no product consumes ([13eca99](https://github.com/QNSC-VN/qnsc-app-platform/commit/13eca996619c92734b39013cdcc0dabe2471ef3d))
-* **identity:** reference consumer + port conformance kit ([0430aa9](https://github.com/QNSC-VN/qnsc-app-platform/commit/0430aa9ef4892ba15f02adc0adb2f922caffd748))
-* **identity:** reference consumer + port conformance kit ([db4448a](https://github.com/QNSC-VN/qnsc-app-platform/commit/db4448af0c989fd28918e233d2e29c6d7896dc7a))
+- **identity:** drop the surface no product consumes ([13eca99](https://github.com/QNSC-VN/qnsc-app-platform/commit/13eca996619c92734b39013cdcc0dabe2471ef3d))
+- **identity:** reference consumer + port conformance kit ([0430aa9](https://github.com/QNSC-VN/qnsc-app-platform/commit/0430aa9ef4892ba15f02adc0adb2f922caffd748))
+- **identity:** reference consumer + port conformance kit ([db4448a](https://github.com/QNSC-VN/qnsc-app-platform/commit/db4448af0c989fd28918e233d2e29c6d7896dc7a))
 
 ## [5.6.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.5.1...identity-v5.6.0) (2026-07-24)
 
-
 ### ✨ Features
 
-* **identity:** broker login_hint + home-login shortcut + invite-aware JIT-off ([#60](https://github.com/QNSC-VN/qnsc-app-platform/issues/60)) ([b25ceef](https://github.com/QNSC-VN/qnsc-app-platform/commit/b25ceef828109512e7f44a1d05d5e3a2f612c6fa))
+- **identity:** broker login_hint + home-login shortcut + invite-aware JIT-off ([#60](https://github.com/QNSC-VN/qnsc-app-platform/issues/60)) ([b25ceef](https://github.com/QNSC-VN/qnsc-app-platform/commit/b25ceef828109512e7f44a1d05d5e3a2f612c6fa))
 
 ## [5.5.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.5.0...identity-v5.5.1) (2026-07-24)
 
-
 ### ♻️ Refactors
 
-* **identity:** collapse legacy provisioning into provisionIntoConnection ([#58](https://github.com/QNSC-VN/qnsc-app-platform/issues/58)) ([6baf68d](https://github.com/QNSC-VN/qnsc-app-platform/commit/6baf68d72c043b0e218120728c71f0beec874508))
+- **identity:** collapse legacy provisioning into provisionIntoConnection ([#58](https://github.com/QNSC-VN/qnsc-app-platform/issues/58)) ([6baf68d](https://github.com/QNSC-VN/qnsc-app-platform/commit/6baf68d72c043b0e218120728c71f0beec874508))
 
 ## [5.5.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.4.0...identity-v5.5.0) (2026-07-23)
 
-
 ### ✨ Features
 
-* **identity:** break-glass for JIT-disabled connections ([#55](https://github.com/QNSC-VN/qnsc-app-platform/issues/55)) ([092b57e](https://github.com/QNSC-VN/qnsc-app-platform/commit/092b57e7a6696bf705735830350eb2d112e5776a))
-* **identity:** provider-agnostic multi-IdP OIDC broker ([#56](https://github.com/QNSC-VN/qnsc-app-platform/issues/56)) ([6b2b30f](https://github.com/QNSC-VN/qnsc-app-platform/commit/6b2b30f1f4dff2bf0926955e0afed5fbfadaec2c))
+- **identity:** break-glass for JIT-disabled connections ([#55](https://github.com/QNSC-VN/qnsc-app-platform/issues/55)) ([092b57e](https://github.com/QNSC-VN/qnsc-app-platform/commit/092b57e7a6696bf705735830350eb2d112e5776a))
+- **identity:** provider-agnostic multi-IdP OIDC broker ([#56](https://github.com/QNSC-VN/qnsc-app-platform/issues/56)) ([6b2b30f](https://github.com/QNSC-VN/qnsc-app-platform/commit/6b2b30f1f4dff2bf0926955e0afed5fbfadaec2c))
 
 ## [5.4.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.3.0...identity-v5.4.0) (2026-07-18)
 
-
 ### ✨ Features
 
-* **identity:** add optional phone field to user profile contract ([#49](https://github.com/QNSC-VN/qnsc-app-platform/issues/49)) ([db8b841](https://github.com/QNSC-VN/qnsc-app-platform/commit/db8b841181d7acbd00be87edad96c4318e2d7105))
+- **identity:** add optional phone field to user profile contract ([#49](https://github.com/QNSC-VN/qnsc-app-platform/issues/49)) ([db8b841](https://github.com/QNSC-VN/qnsc-app-platform/commit/db8b841181d7acbd00be87edad96c4318e2d7105))
 
 ## [5.3.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.2.0...identity-v5.3.0) (2026-07-14)
 
-
 ### ✨ Features
 
-* **identity:** add OIDC authority override + always assign JIT default role ([#47](https://github.com/QNSC-VN/qnsc-app-platform/issues/47)) ([3c06f1c](https://github.com/QNSC-VN/qnsc-app-platform/commit/3c06f1c3050d4091d3ba94f3bb55b6140042e69e))
+- **identity:** add OIDC authority override + always assign JIT default role ([#47](https://github.com/QNSC-VN/qnsc-app-platform/issues/47)) ([3c06f1c](https://github.com/QNSC-VN/qnsc-app-platform/commit/3c06f1c3050d4091d3ba94f3bb55b6140042e69e))
 
 ## [5.2.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.1.0...identity-v5.2.0) (2026-07-14)
 
-
 ### ✨ Features
 
-* **identity:** hoist BFF Entra OIDC login mechanism into shared package ([#43](https://github.com/QNSC-VN/qnsc-app-platform/issues/43)) ([e04204e](https://github.com/QNSC-VN/qnsc-app-platform/commit/e04204ea2cd08ded8a33ba3b5c981b023141fd16))
+- **identity:** hoist BFF Entra OIDC login mechanism into shared package ([#43](https://github.com/QNSC-VN/qnsc-app-platform/issues/43)) ([e04204e](https://github.com/QNSC-VN/qnsc-app-platform/commit/e04204ea2cd08ded8a33ba3b5c981b023141fd16))
 
 ## [5.1.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v5.0.0...identity-v5.1.0) (2026-07-11)
 
-
 ### ✨ Features
 
-* **identity:** add unrevokeUser to AuthTokenCache ([9587f0c](https://github.com/QNSC-VN/qnsc-app-platform/commit/9587f0cbf244bc10114b3d093d7bc659736d2286))
-* unify cache/auth primitives (sliding-window rate limit + AuthTokenCache.unrevokeUser) ([8308ced](https://github.com/QNSC-VN/qnsc-app-platform/commit/8308cedab55a506c59a029cad416a7695db5c177))
+- **identity:** add unrevokeUser to AuthTokenCache ([9587f0c](https://github.com/QNSC-VN/qnsc-app-platform/commit/9587f0cbf244bc10114b3d093d7bc659736d2286))
+- unify cache/auth primitives (sliding-window rate limit + AuthTokenCache.unrevokeUser) ([8308ced](https://github.com/QNSC-VN/qnsc-app-platform/commit/8308cedab55a506c59a029cad416a7695db5c177))
 
 ## [5.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v4.0.0...identity-v5.0.0) (2026-07-11)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **identity:** requires @quynhonsemiconductor/platform-cache >=2.0.0. The denylist/rotation/ revocation methods previously reached through ValkeyService are now provided by the exported AuthTokenCache (registered by AuthModule).
+- **identity:** requires @quynhonsemiconductor/platform-cache >=2.0.0. The denylist/rotation/ revocation methods previously reached through ValkeyService are now provided by the exported AuthTokenCache (registered by AuthModule).
 
 ### ✨ Features
 
-* **identity:** own auth-token cache via AuthTokenCache over CacheService ([b968535](https://github.com/QNSC-VN/qnsc-app-platform/commit/b968535fe6c80d993e5caf81e11bd0e4b025e5a6))
+- **identity:** own auth-token cache via AuthTokenCache over CacheService ([b968535](https://github.com/QNSC-VN/qnsc-app-platform/commit/b968535fe6c80d993e5caf81e11bd0e4b025e5a6))
 
 ## [4.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v3.0.0...identity-v4.0.0) (2026-07-10)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **identity:** consumers must install @quynhonsemiconductor/platform-http (>=2.0.0) and @quynhonsemiconductor/platform-cache (>=1.0.0) directly.
+- **identity:** consumers must install @quynhonsemiconductor/platform-http (>=2.0.0) and @quynhonsemiconductor/platform-cache (>=1.0.0) directly.
 
 ### ✨ Features
 
-* **identity:** make platform-http and platform-cache peer dependencies ([1741221](https://github.com/QNSC-VN/qnsc-app-platform/commit/1741221417e6d9ef49af892717e20bc2c84188e9))
+- **identity:** make platform-http and platform-cache peer dependencies ([1741221](https://github.com/QNSC-VN/qnsc-app-platform/commit/1741221417e6d9ef49af892717e20bc2c84188e9))
 
 ## [3.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v2.0.0...identity-v3.0.0) (2026-07-10)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **identity:** WORKSPACE_SERVICE, ACCESS_SERVICE and SSO_CONNECTION_REPOSITORY are now @Optional(). When unbound, ssoLogin/devLogin mint a null-context session with no membership list, enabling single-tenant products (opshub) to adopt the shared AuthService. Adds ISsoProvisioningHook seam (SSO_PROVISIONING_HOOK) called after user resolution so products can reconcile Entra App Roles onto their RBAC, and exposes roles[] on EntraClaims. LoginResult.memberships is now optional.
+- **identity:** WORKSPACE_SERVICE, ACCESS_SERVICE and SSO_CONNECTION_REPOSITORY are now @Optional(). When unbound, ssoLogin/devLogin mint a null-context session with no membership list, enabling single-tenant products (opshub) to adopt the shared AuthService. Adds ISsoProvisioningHook seam (SSO_PROVISIONING_HOOK) called after user resolution so products can reconcile Entra App Roles onto their RBAC, and exposes roles[] on EntraClaims. LoginResult.memberships is now optional.
 
 ### ✨ Features
 
-* **identity:** make workspace/access services optional for single-tenant products ([c5eb996](https://github.com/QNSC-VN/qnsc-app-platform/commit/c5eb996591b33959efc68033f43d0b355f5537e5))
+- **identity:** make workspace/access services optional for single-tenant products ([c5eb996](https://github.com/QNSC-VN/qnsc-app-platform/commit/c5eb996591b33959efc68033f43d0b355f5537e5))
 
 ## [2.0.0](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v1.0.1...identity-v2.0.0) (2026-07-10)
 
-
 ### ⚠ BREAKING CHANGES
 
-* **identity:** JwtPayload.workspaceId, SignAccessTokenParams.workspaceId, AuthSession.workspaceId, CreateSessionInput.workspaceId and AuthContextSetter.setAuthContext's first parameter are renamed to contextId and typed `string | null`. Consumers must rename these fields and handle null.
-* **identity:** JwtPayload.permissions is replaced by JwtPayload.claims; AuthService now requires a CLAIMS_PROVIDER binding; PermissionGuard reads claims.permissions.
+- **identity:** JwtPayload.workspaceId, SignAccessTokenParams.workspaceId, AuthSession.workspaceId, CreateSessionInput.workspaceId and AuthContextSetter.setAuthContext's first parameter are renamed to contextId and typed `string | null`. Consumers must rename these fields and handle null.
+- **identity:** JwtPayload.permissions is replaced by JwtPayload.claims; AuthService now requires a CLAIMS_PROVIDER binding; PermissionGuard reads claims.permissions.
 
 ### ✨ Features
 
-* **identity:** add IClaimsProvider port for product-defined authz claims ([#26](https://github.com/QNSC-VN/qnsc-app-platform/issues/26)) ([c7cf7d3](https://github.com/QNSC-VN/qnsc-app-platform/commit/c7cf7d3be97957ed5dbb1a78d95cd03db9bf2f81))
-
+- **identity:** add IClaimsProvider port for product-defined authz claims ([#26](https://github.com/QNSC-VN/qnsc-app-platform/issues/26)) ([c7cf7d3](https://github.com/QNSC-VN/qnsc-app-platform/commit/c7cf7d3be97957ed5dbb1a78d95cd03db9bf2f81))
 
 ### ♻️ Refactors
 
-* **identity:** rename session/token workspaceId to nullable contextId ([#28](https://github.com/QNSC-VN/qnsc-app-platform/issues/28)) ([0efbbb3](https://github.com/QNSC-VN/qnsc-app-platform/commit/0efbbb32e7ce552bd0ba003f4000e503ec1253ae))
+- **identity:** rename session/token workspaceId to nullable contextId ([#28](https://github.com/QNSC-VN/qnsc-app-platform/issues/28)) ([0efbbb3](https://github.com/QNSC-VN/qnsc-app-platform/commit/0efbbb32e7ce552bd0ba003f4000e503ec1253ae))
 
 ## [1.0.1](https://github.com/QNSC-VN/qnsc-app-platform/compare/identity-v1.0.0...identity-v1.0.1) (2026-07-10)
 
-
 ### 🐛 Bug Fixes
 
-* **release:** rename npm scope [@qnsc](https://github.com/qnsc) to [@qnsc-vn](https://github.com/qnsc-vn) to match GitHub Packages org ([#20](https://github.com/QNSC-VN/qnsc-app-platform/issues/20)) ([7c82f2c](https://github.com/QNSC-VN/qnsc-app-platform/commit/7c82f2c94f26efd02f232d5a3c7784b88fab154c))
+- **release:** rename npm scope [@qnsc](https://github.com/qnsc) to [@qnsc-vn](https://github.com/qnsc-vn) to match GitHub Packages org ([#20](https://github.com/QNSC-VN/qnsc-app-platform/issues/20)) ([7c82f2c](https://github.com/QNSC-VN/qnsc-app-platform/commit/7c82f2c94f26efd02f232d5a3c7784b88fab154c))
 
 ## 1.0.0 (2026-07-10)
 

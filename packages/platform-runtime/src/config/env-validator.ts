@@ -21,7 +21,11 @@ export interface EnvValidationIssue {
 
 /** The subset of a schema's surface required to validate an environment. */
 export interface EnvSchemaLike<TEnv> {
-  safeParse(data: unknown): { success: true; data: TEnv } | { success: false; error: { issues: ReadonlyArray<EnvValidationIssue> } };
+  safeParse(
+    data: unknown,
+  ):
+    | { success: true; data: TEnv }
+    | { success: false; error: { issues: ReadonlyArray<EnvValidationIssue> } };
 }
 
 /**

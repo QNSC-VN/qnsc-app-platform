@@ -49,8 +49,7 @@ export class OidcTokenVerifier {
 
     const subject = (payload.oid ?? payload.sub) as string | undefined;
     const rawEmail = (payload.email ?? payload.preferred_username ?? payload.upn) as
-      | string
-      | undefined;
+      string | undefined;
     const email = rawEmail?.toLowerCase().trim();
     if (!subject || !email) {
       throw new SsoVerificationError('SSO_CLAIMS_MISSING', 'Token missing subject/email');

@@ -71,9 +71,9 @@ describe('label bounding', () => {
     });
 
     it('handles several ids in one path', () => {
-      expect(
-        normalizeRoute('/v1/work-items/019f8a11-2b3c-7d4e-8f90-a1b2c3d4e5f6/comments/7'),
-      ).toBe('/v1/work-items/:id/comments/:id');
+      expect(normalizeRoute('/v1/work-items/019f8a11-2b3c-7d4e-8f90-a1b2c3d4e5f6/comments/7')).toBe(
+        '/v1/work-items/:id/comments/:id',
+      );
     });
 
     it('drops the query string, which is the worst cardinality offender', () => {

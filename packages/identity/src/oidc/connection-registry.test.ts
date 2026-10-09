@@ -31,7 +31,10 @@ const endpoints = {
   jwks_uri: 'https://idp/x/keys',
 };
 
-function make(repo: Partial<ISsoConnectionRepository>, secretsGet = vi.fn().mockResolvedValue('SEC')) {
+function make(
+  repo: Partial<ISsoConnectionRepository>,
+  secretsGet = vi.fn().mockResolvedValue('SEC'),
+) {
   const fetchFn = vi.fn().mockResolvedValue({ ok: true, json: async () => endpoints });
   const discovery = new OidcDiscovery(3_600_000, fetchFn as unknown as typeof fetch);
   const secrets: ISecretResolver = { get: secretsGet };

@@ -832,7 +832,11 @@ describe('AuthService.ssoLoginFromConnection', () => {
   it('provisions a new identity into the resolved connection workspace + role', async () => {
     const user = makeUser({ id: 'u-9', email: 'x@vendor.com' });
     const h = buildService({ existingIdentity: null, user });
-    const conn = makeConn({ workspaceId: 'ws-9', provider: 'google', defaultRoleSlug: 'developer' });
+    const conn = makeConn({
+      workspaceId: 'ws-9',
+      provider: 'google',
+      defaultRoleSlug: 'developer',
+    });
 
     const result = await h.service.ssoLoginFromConnection(conn, brokerClaims(), '1.2.3.4');
 
@@ -850,7 +854,11 @@ describe('AuthService.ssoLoginFromConnection', () => {
 
   it('logs in an existing identity without re-provisioning', async () => {
     const user = makeUser({ id: 'u-9' });
-    const h = buildService({ existingIdentity: { userId: 'u-9' }, user, memberships: [{ workspaceId: 'ws-9' }] });
+    const h = buildService({
+      existingIdentity: { userId: 'u-9' },
+      user,
+      memberships: [{ workspaceId: 'ws-9' }],
+    });
 
     await h.service.ssoLoginFromConnection(makeConn(), brokerClaims(), '1.2.3.4');
 
@@ -878,9 +886,16 @@ describe('AuthService.ssoLoginFromConnection', () => {
   it('skips the domain gate for a shared (consumer IdP) connection', async () => {
     const user = makeUser({ id: 'u-9' });
     const h = buildService({ existingIdentity: null, user });
-    const conn = makeConn({ kind: 'shared', provider: 'google', allowedEmailDomains: ['other.com'] });
+    const conn = makeConn({
+      kind: 'shared',
+      provider: 'google',
+      allowedEmailDomains: ['other.com'],
+    });
 
-    const result = await h.service.ssoLoginFromConnection(conn, brokerClaims({ email: 'guest@gmail.com' }));
+    const result = await h.service.ssoLoginFromConnection(
+      conn,
+      brokerClaims({ email: 'guest@gmail.com' }),
+    );
     expect(result.accessToken).toBe('signed.jwt');
   });
 

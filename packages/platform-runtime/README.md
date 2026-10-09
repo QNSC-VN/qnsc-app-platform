@@ -3,15 +3,15 @@
 Runtime primitives every QNSC product backend needs, and none of them should own a
 private copy of.
 
-| in this package | in your product |
-| --- | --- |
-| `.env` loading, ordered before the OTel bootstrap | your `env.schema.ts` — the variable set is product vocabulary |
-| environment validation with a multi-error message | your `AppConfigService` subclass (one line) |
-| typed `ConfigService` access | your own module, if you need providers beyond config |
-| `/livez` and `/readyz`, with the database and cache checked for you | your own readiness checks (passed in) |
-| graceful shutdown for pod drains (`enableGracefulShutdown`) | nothing: delete your `SIGTERM` handler |
-| leader-elected scheduled jobs (`ExclusiveJob`, **deprecated** for `platform-jobs`) | the jobs themselves, and their TTLs |
-| request-arrival timing (ALB → app → handler) | your logging interceptor's field names |
+| in this package                                                                    | in your product                                               |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `.env` loading, ordered before the OTel bootstrap                                  | your `env.schema.ts` — the variable set is product vocabulary |
+| environment validation with a multi-error message                                  | your `AppConfigService` subclass (one line)                   |
+| typed `ConfigService` access                                                       | your own module, if you need providers beyond config          |
+| `/livez` and `/readyz`, with the database and cache checked for you                | your own readiness checks (passed in)                         |
+| graceful shutdown for pod drains (`enableGracefulShutdown`)                        | nothing: delete your `SIGTERM` handler                        |
+| leader-elected scheduled jobs (`ExclusiveJob`, **deprecated** for `platform-jobs`) | the jobs themselves, and their TTLs                           |
+| request-arrival timing (ALB → app → handler)                                       | your logging interceptor's field names                        |
 
 `ExclusiveJob`, `request-timing` and `load-env` were extracted from `rova` and `opshub`, which carried byte-identical copies of
 `exclusive-job.service.ts` (104 lines), `request-timing.ts` (108), `load-env.ts` (35)
@@ -89,7 +89,7 @@ Need providers beyond config? Skip `AppConfigModule` and compose the validator i
 your own — that function is the part worth sharing:
 
 ```ts
-ConfigModule.forRoot({ isGlobal: true, validate: createEnvValidator(EnvSchema) })
+ConfigModule.forRoot({ isGlobal: true, validate: createEnvValidator(EnvSchema) });
 ```
 
 `createEnvValidator` is typed structurally (`safeParse` + `error.issues`) rather than
@@ -111,12 +111,12 @@ Call both **before** `listen()`. A worker (`createApplicationContext`) calls onl
 
 ### `enableHealth(app, { checks? })`
 
-| route                   | answers                                                                                                  |
-| ----------------------- | -------------------------------------------------------------------------------------------------------- |
-| `GET /livez`            | `200 {"status":"ok"}` while the process runs. **Touches no dependency**, and stays 200 during the endpoint-removal delay after shutdown begins. |
-| `GET /readyz`           | runs the checks: `200` when all are up, `503` when any is down, **always `503` once shutdown has begun** |
-| `GET /v1/healthz`       | same as `/livez`. Kept for the ALB target group and the Dockerfile `HEALTHCHECK` until ECS/EKS is gone   |
-| `GET /v1/readyz`        | same as `/readyz`. rova and opshub point the chart's readiness probe here                                |
+| route             | answers                                                                                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /livez`      | `200 {"status":"ok"}` while the process runs. **Touches no dependency**, and stays 200 during the endpoint-removal delay after shutdown begins. |
+| `GET /readyz`     | runs the checks: `200` when all are up, `503` when any is down, **always `503` once shutdown has begun**                                        |
+| `GET /v1/healthz` | same as `/livez`. Kept for the ALB target group and the Dockerfile `HEALTHCHECK` until ECS/EKS is gone                                          |
+| `GET /v1/readyz`  | same as `/readyz`. rova and opshub point the chart's readiness probe here                                                                       |
 
 `/livez` is a contract with the kubelet: `gitops/platform/policy/admission.yaml` **denies** any
 Deployment whose liveness path is not exactly `/livez`, and liveness that checks the database restarts
@@ -177,10 +177,10 @@ hooks.
 shutdown if they were enabled afterwards. Remove the call when you adopt this (opshub's worker has one
 today).
 
-| variable                       | default                                      | meaning                                                                 |
-| ------------------------------ | -------------------------------------------- | ----------------------------------------------------------------------- |
-| `SHUTDOWN_TIMEOUT_MS`          | `25000`                                      | hard deadline. Keep it below the chart's `terminationGracePeriodSeconds` (default 30) |
-| `SHUTDOWN_ENDPOINT_DELAY_MS`   | `5000` in a pod, `0` elsewhere               | how long to keep serving after going not-ready. "In a pod" is `KUBERNETES_SERVICE_HOST`, which the kubelet always sets, so Ctrl-C on a laptop is immediate |
+| variable                     | default                        | meaning                                                                                                                                                    |
+| ---------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SHUTDOWN_TIMEOUT_MS`        | `25000`                        | hard deadline. Keep it below the chart's `terminationGracePeriodSeconds` (default 30)                                                                      |
+| `SHUTDOWN_ENDPOINT_DELAY_MS` | `5000` in a pod, `0` elsewhere | how long to keep serving after going not-ready. "In a pod" is `KUBERNETES_SERVICE_HOST`, which the kubelet always sets, so Ctrl-C on a laptop is immediate |
 
 Both must be integers; a delay at or above the deadline is refused at startup. If you raise the chart's
 grace period, raise `SHUTDOWN_TIMEOUT_MS` with it.
@@ -233,8 +233,12 @@ unlocked.
 ## `request-timing` — which part of "slow" was slow
 
 ```ts
-import { registerRequestTiming, arrivalAtMs, albReceivedAtMs, albWaitMs }
-  from '@quynhonsemiconductor/platform-runtime';
+import {
+  registerRequestTiming,
+  arrivalAtMs,
+  albReceivedAtMs,
+  albWaitMs,
+} from '@quynhonsemiconductor/platform-runtime';
 
 registerRequestTiming(app.getHttpAdapter().getInstance());
 ```
@@ -246,7 +250,7 @@ extra call.
 
 `albWaitMs` is reported only above `ALB_WAIT_REPORTING_FLOOR_MS` (1000). The trace id
 carries whole seconds, so the value inherits up to 1000ms of truncation error; on
-real traffic it sat at a median of ~500ms, which is exactly what a request with *no*
+real traffic it sat at a median of ~500ms, which is exactly what a request with _no_
 delay looks like. A field that invites misattribution defeats instrumentation whose
 whole purpose was to stop latency being misattributed.
 
