@@ -1,0 +1,64 @@
+// Shared helpers for the canary and consumer-CI workflows.
+//
+// Plain ESM with no dependencies on purpose: these run in CI before (and independently of) any
+// build, and `node` executes them directly.
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+
+/** Every publishable package under `<root>/packages`: `{ dir, name, version }`. */
+export function listPackages(root) {
+  const base = join(root, 'packages');
+  return readdirSync(base)
+    .map((dir) => ({ dir, file: join(base, dir, 'package.json') }))
+    .filter(({ file }) => existsSync(file))
+    .map(({ dir, file }) => ({ dir, manifest: JSON.parse(readFileSync(file, 'utf8')) }))
+    .filter(({ manifest }) => manifest.private !== true)
+    .map(({ dir, manifest }) => ({ dir, name: manifest.name, version: manifest.version }));
+}
+
+/**
+ * Package directories that differ from `ref`. A change to a file every package is built from
+ * (the shared tsconfig, the toolchain pins, the lockfile) counts as changing all of them.
+ */
+export function changedPackageDirs(root, ref, all) {
+  const out = execFileSync('git', ['diff', '--name-only', `${ref}...HEAD`], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  const files = out.split('\n').filter(Boolean);
+  const shared = new Set([
+    'tsconfig.base.json',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+  ]);
+  if (files.some((f) => shared.has(f))) return all.map((p) => p.dir);
+  const dirs = new Set();
+  for (const f of files) {
+    const m = /^packages\/([^/]+)\//.exec(f);
+    if (m) dirs.add(m[1]);
+  }
+  return all.map((p) => p.dir).filter((d) => dirs.has(d));
+}
+
+/** Every `package.json` below `root`, skipping dependency and VCS directories. */
+export function findManifests(root) {
+  const skip = new Set(['node_modules', '.git', 'dist', 'coverage']);
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir)) {
+      if (skip.has(entry)) continue;
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (entry === 'package.json') found.push(path);
+    }
+  };
+  walk(root);
+  return found;
+}
+
+/** Posix-style relative path, for stable log output. */
+export function rel(root, path) {
+  return relative(root, path).split(sep).join('/');
+}
