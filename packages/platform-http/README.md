@@ -118,7 +118,21 @@ The browser can only read the response header if the product's CORS config lists
    `x-correlation-id`, so that middleware adopts it (and one that used to trust the raw header no longer
    reflects bad input). If it enters its own context, its id is the effective one and its `setHeader`
    wins, exactly as before.
-2. Delete the product's middleware when convenient.
+2. Delete the product's middleware when convenient, **after checking which store the product reads.**
+   This package seeds `observability`'s request context. The logger mixin, `RequestContextService` and the
+   `REQUEST_CONTEXT` binding of `GlobalExceptionFilter` must read that same store, or the id is seeded
+   where nothing looks:
+
+   | product  | reads today                                                                      | can delete its middleware                                   |
+   | -------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+   | rova     | `observability`'s store (its `request-context.ts` re-exports it)                 | yes                                                         |
+   | solodesk | this package's `RequestContextService`, which is now `observability`'s           | yes                                                         |
+   | opshub   | **its own** `AsyncLocalStorage` (`libs/platform/src/context/request-context.ts`) | **not yet**: first re-export `observability`'s, as rova did |
+
+   Checked by booting rova's and opshub's real middleware classes next to `enableCorrelationId`: with the
+   middleware kept there is one id in the response and in the product's own context in every case; with
+   opshub's removed, its logs and error bodies would see no id.
+
 3. A deployment that must not change yet sets **`CORRELATION_ID_MODE=disabled`**: nothing is registered.
    An unknown value fails the boot.
 
