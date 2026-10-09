@@ -73,6 +73,22 @@ export function usesDeprecatedDisableAlias(env: NodeJS.ProcessEnv = process.env)
   return env[DISABLE_RATE_LIMIT_ENV] === 'true';
 }
 
+/**
+ * What became of a `DISABLE_RATE_LIMIT=true` in the environment:
+ *
+ * - `unset`: not `true`, nothing to say.
+ * - `honoured`: it is the reason the mode is `disabled` (no `RATE_LIMIT_MODE` set).
+ * - `ignored`: `RATE_LIMIT_MODE` is set and wins, so the limiter is NOT disabled by it —
+ *   the case an operator who still believes the old variable works needs to be told about.
+ */
+export type DisableAliasStatus = 'unset' | 'honoured' | 'ignored';
+
+export function disableAliasStatus(env: NodeJS.ProcessEnv = process.env): DisableAliasStatus {
+  if (!usesDeprecatedDisableAlias(env)) return 'unset';
+  const explicit = env[RATE_LIMIT_MODE_ENV]?.trim();
+  return explicit === undefined || explicit === '' ? 'honoured' : 'ignored';
+}
+
 /** Read {@link IDEMPOTENCY_MODE_ENV}. Unset means `cache`. Throws on an unknown value. */
 export function readIdempotencyMode(env: NodeJS.ProcessEnv = process.env): IdempotencyMode {
   return readMode<IdempotencyMode>(env, IDEMPOTENCY_MODE_ENV, ['cache', 'disabled'], 'cache');

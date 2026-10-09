@@ -58,7 +58,9 @@ An unknown value fails at startup too — a typo never silently means the defaul
 
 `RATE_LIMIT_MODE=disabled` replaces `DISABLE_RATE_LIMIT=true`, which still works as a
 **deprecated alias** (and logs a deprecation warning at startup); an explicit
-`RATE_LIMIT_MODE` wins over it. In production a disabled limiter is a security control
+`RATE_LIMIT_MODE` wins over it, in which case the startup warning says the variable was
+**ignored** and which mode is in force, so nobody keeps believing it still switches the
+limiter off. In production a disabled limiter is a security control
 turned off, so it is reported as a fail-open: a warning at startup carrying
 `securityFailOpen: "rate_limit"`, and `SecurityMetrics.recordFailOpen('rate_limit')` at
 startup and on every request it lets through, so an alert on either keeps firing while

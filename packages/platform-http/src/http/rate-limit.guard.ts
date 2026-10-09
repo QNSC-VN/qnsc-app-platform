@@ -16,8 +16,8 @@ import {
   DISABLE_RATE_LIMIT_ENV,
   RATE_LIMIT_MODE_ENV,
   assertCacheInProduction,
+  disableAliasStatus,
   readRateLimitMode,
-  usesDeprecatedDisableAlias,
   type RateLimitMode,
 } from './cache-requirement';
 import { clientIp } from './client-ip';
@@ -89,9 +89,17 @@ export class RateLimitGuard implements CanActivate, OnApplicationBootstrap {
   ) {}
 
   onApplicationBootstrap(): void {
-    if (usesDeprecatedDisableAlias()) {
+    const alias = disableAliasStatus();
+    if (alias === 'honoured') {
       this.logger.warn(
         `${DISABLE_RATE_LIMIT_ENV} is deprecated; use ${RATE_LIMIT_MODE_ENV}=disabled`,
+      );
+    } else if (alias === 'ignored') {
+      // The operator may believe the limiter is off. It is not: RATE_LIMIT_MODE wins.
+      this.logger.warn(
+        `${DISABLE_RATE_LIMIT_ENV}=true is IGNORED because ${RATE_LIMIT_MODE_ENV}=${this.mode} is set ` +
+          `(rate limiting is ${this.mode === 'disabled' ? 'disabled' : 'not disabled by it'}); ` +
+          `${DISABLE_RATE_LIMIT_ENV} is deprecated, remove it`,
       );
     }
     if (this.mode === 'disabled') {

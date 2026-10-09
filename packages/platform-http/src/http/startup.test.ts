@@ -131,6 +131,42 @@ describe('production startup without a cache', () => {
       },
     );
 
+    describe('DISABLE_RATE_LIMIT warning says what happened to it', () => {
+      const warnings = async (env: Record<string, string>): Promise<string[]> => {
+        for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+        const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        await boot(NO_CACHE, rateLimitGuard);
+        const messages = warn.mock.calls
+          .map(([m]) => String(m))
+          .filter((m) => m.includes('DISABLE_RATE_LIMIT'));
+        warn.mockRestore();
+        return messages;
+      };
+
+      it('honoured: only deprecated', async () => {
+        const [message, ...rest] = await warnings({ DISABLE_RATE_LIMIT: 'true' });
+        expect(rest).toEqual([]);
+        expect(message).toMatch(/is deprecated; use RATE_LIMIT_MODE=disabled/);
+        expect(message).not.toMatch(/IGNORED/);
+      });
+
+      it('ignored because RATE_LIMIT_MODE=edge-only is set: says so, names the winner', async () => {
+        const [message, ...rest] = await warnings({
+          DISABLE_RATE_LIMIT: 'true',
+          RATE_LIMIT_MODE: 'edge-only',
+        });
+        expect(rest).toEqual([]);
+        expect(message).toMatch(
+          /DISABLE_RATE_LIMIT=true is IGNORED because RATE_LIMIT_MODE=edge-only/,
+        );
+        expect(message).toMatch(/not disabled by it/);
+      });
+
+      it('absent when the variable is not set', async () => {
+        await expect(warnings({ RATE_LIMIT_MODE: 'disabled' })).resolves.toEqual([]);
+      });
+    });
+
     it('outside production it starts quietly: no fail-open warning, no metric', async () => {
       vi.stubEnv('NODE_ENV', 'development');
       vi.stubEnv('RATE_LIMIT_MODE', 'disabled');

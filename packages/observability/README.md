@@ -274,7 +274,8 @@ those requests.
 **Recording never throws.** `LabelCardinalityGuard.bound` accepts any value (`undefined`
 becomes `UNKNOWN`, other types are stringified) and returns the overflow label rather than
 fail, and `HttpMetrics.record`, `JobMetrics.record` and the `QueueMetrics` recorders catch
-anything thrown while recording and log it once. A metric can cost a data point, never a
+anything thrown while recording and log it once; `SecurityMetrics` (`recordFailOpen`,
+`recordStaleToken`) and `AuthMetrics.recordLogin` do the same. A metric can cost a data point, never a
 response — the same fail-open contract as the rest of the package. (`JobMetrics.time` still
 re-throws the *job's* error.)
 
