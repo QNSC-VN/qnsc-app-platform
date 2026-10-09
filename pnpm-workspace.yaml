@@ -74,6 +74,13 @@ overrides:
   # 1.14.5 on the 1.x line. Reached only through the OTLP gRPC exporters that
   # `@opentelemetry/sdk-node` pulls in; nothing here opens a gRPC server. Capped below 2.0.0.
   "@grpc/grpc-js@<1.14.5": ">=1.14.5 <2.0.0"
+  # Seven advisories against fastify 5.11.3 (GHSA-3m5p-2c4r-xxw2, -4mh8-r7rc-xpvc, -667r-xxjv-c9mm,
+  # -9q9j-q6p8-xq58, -hwr6-493r-vm6h, -p68q-wchp-6fh7, -w2qp-rph6-63g4; CVSS up to 8.1), fixed in
+  # 5.12.5. `@nestjs/platform-fastify` pins fastify EXACTLY (11.2.7 -> 5.11.3), so a range floor
+  # on fastify itself cannot reach it. It is a devDependency of platform-runtime used to run a real
+  # Nest + Fastify server in tests, never published; this repo's own fastify devDependencies
+  # already resolve to 5.12.5, so this only brings the adapter's copy in line with them.
+  "@nestjs/platform-fastify>fastify": "5.12.5"
 
 # pnpm 11 fails an install that ignores a dependency's build script unless the decision is
 # written down. These five were already being skipped (pnpm 10 only warned); recording them as

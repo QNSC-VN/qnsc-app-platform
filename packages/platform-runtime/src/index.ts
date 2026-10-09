@@ -2,8 +2,8 @@
  * `@quynhonsemiconductor/platform-runtime`
  *
  * Runtime primitives every QNSC product backend needs and none of them should own a
- * private copy of: environment validation and typed access, leader-elected scheduled
- * jobs, and request-arrival timing.
+ * private copy of: environment validation and typed access, `/livez` and `/readyz`, graceful
+ * shutdown for pod drains, leader-elected scheduled jobs, and request-arrival timing.
  *
  * `load-env` is deliberately ABSENT from this barrel and reachable only at
  * `@quynhonsemiconductor/platform-runtime/load-env`. It must run before the OpenTelemetry
@@ -14,3 +14,5 @@
 export * from './config';
 export * from './scheduling';
 export * from './http';
+export * from './health';
+export * from './shutdown';
