@@ -36,12 +36,25 @@ function poolConfig(config: DatabaseConfig, host: string, max: number): PoolConf
 
 function build(config: DatabaseConfig, host: string, max: number, logger: DbLogger): Pool {
   const pool = new Pool(poolConfig(config, host, max));
-  // An idle client that loses its connection (a failover, a node drain) makes the pool emit
-  // 'error'. With no listener Node treats that as an uncaught exception and kills the process,
-  // turning one dropped idle socket into a restart. The pool replaces the client by itself.
-  pool.on('error', (err) => {
-    logger.error(`Idle database client error on ${host}:${config.port}: ${err.message}`);
+  // EVERY client gets a permanent 'error' listener, the moment it connects.
+  //
+  // pg-pool removes its own listener from a client when it hands the client out, and neither
+  // Drizzle's transaction() nor a bare pool.query() adds one. So when the server ends a
+  // connection that is IN USE (a failover, a node drain, a CNPG switchover: 57P01 "terminating
+  // connection due to administrator command"), the client emits 'error' with no listener and
+  // Node treats it as an uncaught exception: one dropped connection restarts the process. The
+  // query on that client still rejects normally and the pool discards the dead client.
+  //
+  // Logs host and port and the driver's message only. Never the connection string, user or
+  // password: pg's error messages do not carry them, and this must not add them.
+  pool.on('connect', (client) => {
+    client.on('error', (err) => {
+      logger.warn(`Database client error on ${host}:${config.port}: ${err.message}`);
+    });
   });
+  // The pool re-emits an IDLE client's error as its own, and throws if nobody listens. The
+  // client listener above has already logged it, so this only has to exist.
+  pool.on('error', () => undefined);
   return pool;
 }
 

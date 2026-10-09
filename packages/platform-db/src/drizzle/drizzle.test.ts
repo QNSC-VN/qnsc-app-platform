@@ -152,6 +152,44 @@ describe.skipIf(!enabled)('platform-db/drizzle', () => {
     });
   });
 
+  describe('the backend dies under a running transaction (failover, node drain, CNPG switchover)', () => {
+    /**
+     * pg-pool removes its own error listener when it hands a client out, and Drizzle's
+     * transaction() adds none. So when the server terminates the transaction's backend, the
+     * client's 'error' event (57P01 "terminating connection due to administrator command")
+     * had no listener at all and Node treated it as an uncaught exception: one dropped
+     * connection restarted the whole process.
+     */
+    it('rejects the transaction, raises NO uncaught exception, and the pool keeps serving', async () => {
+      const uncaught: unknown[] = [];
+      const onUncaught = (err: unknown) => uncaught.push(err);
+      process.on('uncaughtException', onUncaught);
+      const killer = pg.createPool({ max: 1 });
+      try {
+        const result = withTransaction(db, async (tx) => {
+          await tx.insert(accounts).values({ id: 1, owner: 'doomed' });
+          const { rows } = await tx.execute<{ pid: number }>(sql`SELECT pg_backend_pid() AS pid`);
+          // Kill the transaction's OWN backend, as a failover would.
+          await killer.query('SELECT pg_terminate_backend($1)', [rows[0]!.pid]);
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          await tx.insert(accounts).values({ id: 2, owner: 'never' });
+        });
+
+        await expect(result).rejects.toThrow();
+        // Give an unhandled 'error' event the chance to surface: it is emitted asynchronously.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(uncaught, 'a dropped connection raised an uncaught exception').toEqual([]);
+
+        // The dead client is discarded and the pool serves the next query.
+        const { rows } = await pool.query<{ ok: number }>('SELECT 1 AS ok');
+        expect(rows[0]!.ok).toBe(1);
+        expect(await owners(), 'the killed transaction left rows behind').toEqual([]);
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
+    });
+  });
+
   describe('read replica slot', () => {
     it('is the plain primary database when no read pool exists', () => {
       expect('$primary' in db).toBe(false);

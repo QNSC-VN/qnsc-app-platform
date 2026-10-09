@@ -22,6 +22,9 @@ export type AdvisoryLockResult<T> = { acquired: true; value: T } | { acquired: f
  * - `key` is hashed to the 64-bit key space on the server (`hashtextextended`). Distinct
  *   names can in theory collide; a collision only makes two jobs exclude each other.
  *
+ * The pool must come from `createPool()`: its clients carry the permanent 'error' listener that
+ * keeps a dropped connection from becoming an uncaught exception.
+ *
  * Errors thrown by `fn` propagate unchanged. A failure to obtain a connection or to run the
  * lock query rejects with a `DatabaseConnectionError` before `fn` has started.
  */
@@ -32,27 +35,24 @@ export async function withAdvisoryLock<T>(
 ): Promise<AdvisoryLockResult<T>> {
   let client;
   let acquired = false;
-  // A checked-out client has no pool error listener, so if its backend dies mid-run (a failover,
-  // a killed connection) the 'error' event would be uncaught and take the process down. The
-  // lock is gone with the session anyway; `fn` is already running and finishes or fails on its
-  // own, and the release below finds the connection dead and destroys it.
-  const onClientError = () => undefined;
+  // If the backend dies mid-run (a failover, a killed connection) the client's 'error' event is
+  // already handled by the permanent listener `createPool` puts on every client, so it cannot
+  // take the process down. The lock is gone with the session anyway; `fn` is already running
+  // and finishes or fails on its own, and the release below finds the connection dead and
+  // destroys it.
   try {
     client = await pool.connect();
-    client.on('error', onClientError);
     const { rows } = await client.query<{ locked: boolean }>(
       'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked',
       [key],
     );
     acquired = rows[0]?.locked === true;
   } catch (err) {
-    client?.off('error', onClientError);
     client?.release(true);
     throw classifyDatabaseError(err, targetOf(pool));
   }
 
   if (!acquired) {
-    client.off('error', onClientError);
     client.release();
     return { acquired: false };
   }
@@ -70,7 +70,6 @@ export async function withAdvisoryLock<T>(
     } catch {
       destroy = true;
     }
-    client.off('error', onClientError);
     client.release(destroy);
   }
 }

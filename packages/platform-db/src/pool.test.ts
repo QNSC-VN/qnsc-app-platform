@@ -149,16 +149,19 @@ describe.skipIf(!enabled)('createPool against PostgreSQL 18 with a self-signed C
   });
 
   it('does not kill the process when an idle client errors', async () => {
-    const errors: string[] = [];
+    const warnings: string[] = [];
     const pool = createPool(pg.env(), {
-      logger: { warn: () => undefined, error: (message) => errors.push(message) },
+      logger: { warn: (message) => warnings.push(message), error: () => undefined },
     });
     try {
       const { rows } = await pool.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
       // Terminate exactly that idle backend from outside, as a failover or node drain would.
       await pg.createPool({ max: 1 }).query('SELECT pg_terminate_backend($1)', [rows[0]!.pid]);
-      await vi.waitFor(() => expect(errors).toHaveLength(1));
-      expect(errors[0]).toMatch(/Idle database client error/);
+      await vi.waitFor(() => expect(warnings).toHaveLength(1));
+      expect(warnings[0]).toMatch(/Database client error on .*:\d+: terminating connection/);
+      // Names the host and port, and carries no credential.
+      expect(warnings[0]).not.toContain(pg.password);
+      expect(warnings[0]).not.toContain(pg.user + ':');
       // The pool replaces the dead client instead of the process having crashed.
       await pingDatabase(pool);
     } finally {

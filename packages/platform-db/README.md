@@ -224,6 +224,16 @@ Every connection failure surfaced by `pingDatabase`, `withAdvisoryLock` and the 
 Configuration problems found before connecting are `DatabaseConfigError`. `classifyDatabaseError()`
 walks the whole `cause` chain, because Drizzle wraps driver errors.
 
+## A dropped connection does not kill the process
+
+Every client `createPool` makes gets a permanent `'error'` listener that logs a warning (host, port and
+the driver's message; never credentials). Without it, ending a connection that is **in use** (a
+failover, a node drain, a CNPG switchover: `57P01`) raised an uncaught exception, because pg-pool
+removes its own listener while a client is checked out and Drizzle's `transaction()` adds none. The
+query or transaction on that connection still **rejects** normally and the pool discards the dead
+client. Pass pools from `createPool()` to `withAdvisoryLock` and Drizzle; a pool built by hand does not
+carry the listener.
+
 ## Read replica (unused until needed)
 
 Set `DATABASE_READ_HOST` and `DatabaseModule` builds a second pool (same role, TLS and sizing) and
