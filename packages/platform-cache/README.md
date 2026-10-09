@@ -77,8 +77,9 @@ In `optional` mode with no URL `consumeRateLimit` returns `allowed: true` and `a
 ## Environment
 
 This package **reads no environment variable itself**: the product passes `url`, `keyPrefix` and `mode`.
-The contract name for the URL is still open (`REDIS_URL` in rova and opshub today, `VALKEY_URL` in the
-plan) — see [PLATFORM-CONTRACT.md](../../docs/PLATFORM-CONTRACT.md), open question Q1.
+The contract name for the URL is **`REDIS_URL`** (what rova and opshub already read and the chart
+injects; [PLATFORM-CONTRACT.md](../../docs/PLATFORM-CONTRACT.md) §6). The product reads it and passes it to
+`CacheModule`.
 
 ## Shutdown order
 

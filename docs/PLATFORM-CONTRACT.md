@@ -1,6 +1,6 @@
 # QNSC platform runtime contract
 
-**Status:** v1.0 · derived from the packages **as merged on `main`** (2026-10-09):
+**Status:** v1.1 (2026-10-10: the four open questions are decided, see [Decisions](#decisions-on-the-questions-found-while-deriving-this-document)) · derived from the packages **as merged on `main`** (2026-10-09):
 `platform-db` 0.1.1 · `platform-runtime` 0.1.3 · `platform-http` 4.1.x · `platform-cache` 3.1.x ·
 `observability` 0.2.x · `identity` 7.1.0 (8.0.0 pending) — plus [ADR 0001](adr/0001-job-queue.md),
 [ADR 0002](adr/0002-identity-v8-better-auth.md) and [PLAN.md](PLAN.md) §4 for what is decided but not yet built.
@@ -126,8 +126,9 @@ Reference: `platform-runtime` `enableGracefulShutdown(app)`. Resource release be
     scale (10 trace … 60 fatal). Another implementation SHOULD use the same representation so one
     collector pipeline parses both.
 - When a span is active a line MUST carry **`trace.id`** and **`span.id`** (W3C hex ids, the dotted
-  names as shown) so a log links to its trace. _(The plan drafted `trace_id`/`span_id`; the packages
-  emit the dotted names and the contract follows the packages.)_
+  names as shown) so a log links to its trace. _(Decided 2026-10-10, [Q3](#decisions-on-the-questions-found-while-deriving-this-document):
+  the logger's dotted names stay. The plan's draft used `trace_id`/`span_id`; a non-TypeScript service
+  uses the dotted names so one collector pipeline joins them.)_
 - When known, a line SHOULD carry `correlationId`, `userId`, `workspaceId`. **Background work MUST seed
   its own correlation id** (job name + random suffix, for example `daily-cleanup:8f3a…`), or its lines
   carry none. Work that started in a request carries the request's id through its payload.
@@ -199,29 +200,29 @@ Names are a contract with the `qnsc-service` chart. **A rename on either side is
 change the chart and the package in the same release window. Unset means "use the default"; a
 required variable that is missing is a **startup error that names the variable**.
 
-| Group      | Variable                                                                                        | Default                  | Notes                                                                                                                                       |
-| ---------- | ----------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Database   | `DATABASE_HOST`                                                                                 | — (required)             | CloudNativePG `<cluster>-rw` service                                                                                                        |
-|            | `DATABASE_PORT`                                                                                 | `5432`                   |                                                                                                                                             |
-|            | `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`                                           | — (required)             | user and password from the CNPG-generated Secret                                                                                            |
-|            | `DATABASE_AUTH`                                                                                 | `password`               | only `password`; anything else (`iam`) is refused                                                                                           |
-|            | `DATABASE_SSL_CA`                                                                               | — (required¹)            | **path** of the mounted CA file (`ca.crt` of the `<cluster>-ca` Secret)                                                                     |
-|            | `DATABASE_SSL`                                                                                  | —                        | only `disable`, and only when `NODE_ENV` is not `production`                                                                                |
-|            | `DATABASE_READ_HOST`                                                                            | —                        | CNPG `-ro` service; unset until a replica exists                                                                                            |
-|            | `DB_POOL_MAX`                                                                                   | `10`                     | keep `replicas × DB_POOL_MAX` under the role's `CONNECTION LIMIT`                                                                           |
-|            | `DB_POOL_IDLE_TIMEOUT_MS`, `DB_POOL_CONNECT_TIMEOUT_MS`                                         | `30000`, `5000`          |                                                                                                                                             |
-| Cache      | `VALKEY_URL`                                                                                    | —                        | **Open: see [Q1](#open-questions).** Products read `REDIS_URL` today; no package reads either, the product passes the URL to `CacheModule`. |
-| HTTP       | `RATE_LIMIT_MODE`                                                                               | `cache`                  | `cache` \| `edge-only` \| `disabled` ([§9](#9-rate-limiting-and-idempotency)). Unknown value = startup error                                |
-|            | `IDEMPOTENCY_MODE`                                                                              | `cache`                  | `cache` \| `disabled`                                                                                                                       |
-|            | `DISABLE_RATE_LIMIT`                                                                            | —                        | **deprecated** alias of `RATE_LIMIT_MODE=disabled`; ignored when `RATE_LIMIT_MODE` is set                                                   |
-| Lifecycle  | `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_ENDPOINT_DELAY_MS`                                             | `25000`, `5000` in a pod | [§3](#3-shutdown)                                                                                                                           |
-|            | `ROLE`                                                                                          | —                        | `worker` runs handlers and schedules; anything else only enqueues                                                                           |
-|            | `NODE_ENV`                                                                                      | `development`            | `production` turns the production guards on                                                                                                 |
-| Telemetry  | `OTEL_*`, `SERVICE_VERSION`, `DEPLOYMENT_ENV`, `K8S_POD_NAME`, `K8S_NAMESPACE`, `K8S_NODE_NAME` |                          | [§5](#5-telemetry)                                                                                                                          |
-| Kubernetes | `KUBERNETES_SERVICE_HOST`                                                                       | set by the kubelet       | how a process knows it is in a pod                                                                                                          |
-| Mail       | `MAIL_TRANSPORT`, `MAIL_GRAPH_SENDER`, …                                                        |                          | **Pending WP-8** — [§14](#14-email)                                                                                                         |
-| Storage    | `S3_*`                                                                                          |                          | Product-owned today (R2 through the S3 API); not yet a shared package. Names follow the product's existing `S3_<PURPOSE>_BUCKET` convention |
-| AI         | `LITELLM_BASE_URL`, `LITELLM_API_KEY`                                                           | —                        | [§15](#15-ai)                                                                                                                               |
+| Group      | Variable                                                                                        | Default                  | Notes                                                                                                                                                                                                                        |
+| ---------- | ----------------------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Database   | `DATABASE_HOST`                                                                                 | — (required)             | CloudNativePG `<cluster>-rw` service                                                                                                                                                                                         |
+|            | `DATABASE_PORT`                                                                                 | `5432`                   |                                                                                                                                                                                                                              |
+|            | `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`                                           | — (required)             | user and password from the CNPG-generated Secret                                                                                                                                                                             |
+|            | `DATABASE_AUTH`                                                                                 | `password`               | only `password`; anything else (`iam`) is refused                                                                                                                                                                            |
+|            | `DATABASE_SSL_CA`                                                                               | — (required¹)            | **path** of the mounted CA file (`ca.crt` of the `<cluster>-ca` Secret)                                                                                                                                                      |
+|            | `DATABASE_SSL`                                                                                  | —                        | only `disable`, and only when `NODE_ENV` is not `production`                                                                                                                                                                 |
+|            | `DATABASE_READ_HOST`                                                                            | —                        | CNPG `-ro` service; unset until a replica exists                                                                                                                                                                             |
+|            | `DB_POOL_MAX`                                                                                   | `10`                     | keep `replicas × DB_POOL_MAX` under the role's `CONNECTION LIMIT`                                                                                                                                                            |
+|            | `DB_POOL_IDLE_TIMEOUT_MS`, `DB_POOL_CONNECT_TIMEOUT_MS`                                         | `30000`, `5000`          |                                                                                                                                                                                                                              |
+| Cache      | `REDIS_URL`                                                                                     | —                        | The product's Valkey. The name rova and opshub already read and the chart injects (decided 2026-10-10, Q1). **No package reads it**: the product reads it and passes the value to `CacheModule`. Required in `required` mode |
+| HTTP       | `RATE_LIMIT_MODE`                                                                               | `cache`                  | `cache` \| `edge-only` \| `disabled` ([§9](#9-rate-limiting-and-idempotency)). Unknown value = startup error                                                                                                                 |
+|            | `IDEMPOTENCY_MODE`                                                                              | `cache`                  | `cache` \| `disabled`                                                                                                                                                                                                        |
+|            | `DISABLE_RATE_LIMIT`                                                                            | —                        | **deprecated** alias of `RATE_LIMIT_MODE=disabled`; ignored when `RATE_LIMIT_MODE` is set                                                                                                                                    |
+| Lifecycle  | `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_ENDPOINT_DELAY_MS`                                             | `25000`, `5000` in a pod | [§3](#3-shutdown)                                                                                                                                                                                                            |
+|            | `ROLE`                                                                                          | —                        | `worker` runs handlers and schedules; anything else only enqueues                                                                                                                                                            |
+|            | `NODE_ENV`                                                                                      | `development`            | `production` turns the production guards on                                                                                                                                                                                  |
+| Telemetry  | `OTEL_*`, `SERVICE_VERSION`, `DEPLOYMENT_ENV`, `K8S_POD_NAME`, `K8S_NAMESPACE`, `K8S_NODE_NAME` |                          | [§5](#5-telemetry)                                                                                                                                                                                                           |
+| Kubernetes | `KUBERNETES_SERVICE_HOST`                                                                       | set by the kubelet       | how a process knows it is in a pod                                                                                                                                                                                           |
+| Mail       | `MAIL_TRANSPORT`, `MAIL_GRAPH_SENDER`, …                                                        |                          | **Pending WP-8** — [§14](#14-email)                                                                                                                                                                                          |
+| Storage    | `S3_*`                                                                                          |                          | Product-owned (R2 through the S3 API) with per-product names (`S3_ATTACHMENTS_BUCKET`, …). **Not part of the contract until WP-17** (decided 2026-10-10, Q4)                                                                 |
+| AI         | `LITELLM_BASE_URL`, `LITELLM_API_KEY`                                                           | —                        | [§15](#15-ai)                                                                                                                                                                                                                |
 
 ¹ Not needed when `DATABASE_SSL=disable`.
 
@@ -273,8 +274,9 @@ Every error response is one envelope. **Frontends branch on `code`, never on `me
 - **Correlation id:** a request carries one id. The request log reads `X-Correlation-Id` from the
   caller; the id is held in the request context and appears in every log line and error body for that
   request. _Seeding the context from the header, or generating an id when it is absent, is done by the
-  product's middleware today — no package does it. A service SHOULD generate one when the header is
-  missing; making that shared is an open question ([Q2](#open-questions))._ Background work seeds its
+  product's middleware today — no package does it yet. A service SHOULD generate one when the header is
+  missing. Decided 2026-10-10 ([Q2](#decisions-on-the-questions-found-while-deriving-this-document)):
+  `platform-http` will do both in a follow-up, and the products' middleware then goes._ Background work seeds its
   own ([§4](#4-logs)).
 - **Retry-safe writes:** `Idempotency-Key` on `POST`/`PUT` ([§9](#9-rate-limiting-and-idempotency)).
 
@@ -599,18 +601,18 @@ tracked in an issue in that repository.
   release window, and a deprecation period when a running product would otherwise break.
 - Additions are free. Error codes and metric names are append-only.
 
-## Open questions
+## Decisions on the questions found while deriving this document
 
-Found while deriving this document; each needs a decision from the platform lead.
+These were open in v1.0 and were decided by the platform lead on 2026-10-10. The numbers are this
+document's own (the plan's §11 has Q5–Q8 for the same decisions).
 
-- **Q1 — the cache variable.** [PLAN.md §6.14](PLAN.md) names `VALKEY_URL`; rova and opshub read
-  `REDIS_URL` today; no package reads either (the product passes the URL to `CacheModule`). One name
-  has to be chosen and put in the chart. This contract lists `VALKEY_URL` as _open_ until then.
-- **Q2 — correlation id.** No package seeds the request context from `X-Correlation-Id` or generates an id
-  when it is absent; each product does it in middleware. Worth a shared helper under the admission test
-  (divergence here breaks log joining across products).
-- **Q3 — `trace_id` vs `trace.id`.** The plan drafted underscores; the logger emits `trace.id` and
-  `span.id`. This contract follows the code. A Python service needs the dotted names to join in one
-  pipeline.
-- **Q4 — `S3_*`.** The plan lists `S3_*` as a platform variable; storage is product-owned and the names
-  are per product (`S3_ATTACHMENTS_BUCKET`, …). Left out of the contract until WP-17.
+- **Q1 — the cache variable: `REDIS_URL`.** rova and opshub already read it and the chart injects it.
+  The plan's earlier `VALKEY_URL` is dropped. No package reads it; the product passes the value to
+  `CacheModule`.
+- **Q2 — correlation id: a `platform-http` follow-up.** It will seed the request context from
+  `X-Correlation-Id` and generate an id when the header is absent. Until it ships, each product's
+  middleware does it, and the recommendation in [§7](#7-errors-and-http-behaviour) applies.
+- **Q3 — log trace fields stay `trace.id` / `span.id`.** The plan's `trace_id` / `span_id` is dropped; a
+  service in another language emits the dotted names.
+- **Q4 — `S3_*` waits for WP-17.** Storage stays product-owned, with per-product variable names, until it
+  is measured.
