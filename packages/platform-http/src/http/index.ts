@@ -1,3 +1,4 @@
+export * from './client-ip';
 export * from './request-context';
 export * from './request-context.service';
 export * from './global-exception.filter';

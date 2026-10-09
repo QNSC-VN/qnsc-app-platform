@@ -24,6 +24,7 @@
   },
   "dependencies": {},
   "peerDependencies": {
+    "@quynhonsemiconductor/observability": ">=0.2.1",
     "@quynhonsemiconductor/platform-cache": ">=2.0.0",
     "@nestjs/common": ">=11",
     "@nestjs/core": ">=11",
@@ -34,6 +35,7 @@
     "zod": ">=4"
   },
   "devDependencies": {
+    "@quynhonsemiconductor/observability": "workspace:^",
     "@quynhonsemiconductor/platform-cache": "workspace:^",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",

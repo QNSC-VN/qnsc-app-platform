@@ -4,12 +4,23 @@ import {
   Inject,
   Injectable,
   Logger,
+  type OnApplicationBootstrap,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { SecurityMetrics, failOpenLog } from '@quynhonsemiconductor/observability';
 import { RateLimitedException } from '../errors';
+import {
+  DISABLE_RATE_LIMIT_ENV,
+  RATE_LIMIT_MODE_ENV,
+  assertCacheInProduction,
+  readRateLimitMode,
+  usesDeprecatedDisableAlias,
+  type RateLimitMode,
+} from './cache-requirement';
+import { clientIp } from './client-ip';
 import {
   RATE_LIMIT_METADATA_KEY,
   RATE_LIMIT_TIERS,
@@ -27,8 +38,11 @@ import {
  *
  * Key strategy
  * ────────────
- * Pre-auth (login, public routes): keyed by client IP.
- *   `key = "{tier}:ip:{req.ip}"`
+ * Pre-auth (login, public routes): keyed by client IP — {@link clientIp}, i.e.
+ * `cf-connecting-ip`, then the first `x-forwarded-for`, then the socket address. Behind
+ * Cloudflare Tunnel `req.ip` is the tunnel's address, which would put every user in one
+ * bucket.
+ *   `key = "{tier}:ip:{clientIp(req)}"`
  *
  * Post-auth (protected routes where the JWT guard populated `req.user`): keyed
  * by authenticated user ID — fairer for enterprise users behind NAT or shared
@@ -44,21 +58,71 @@ import {
  *   `RateLimit-Remaining` — requests left in the current window
  *   `RateLimit-Reset`     — Unix timestamp when the window resets
  *   `Retry-After`         — seconds to wait (only on 429)
+ *
+ * Cache requirement
+ * ─────────────────
+ * With `NODE_ENV=production` the application FAILS AT STARTUP if `CacheModule` has no
+ * connection (optional mode, no url): a guard that quietly allows everything is the same
+ * as no guard. `RATE_LIMIT_MODE=edge-only` declares that limits are enforced at the edge
+ * (Cloudflare rules) only; the guard then allows every request without touching the cache.
+ *
+ * `RATE_LIMIT_MODE=disabled` (dev / CI) switches the guard off; `DISABLE_RATE_LIMIT=true`
+ * is a deprecated alias for it. In production that is a security control turned off, so it
+ * is reported like any other fail-open: a warning at bootstrap tagged
+ * `securityFailOpen=rate_limit`, and `SecurityMetrics.recordFailOpen('rate_limit')` at
+ * bootstrap and on every request it lets through.
+ *
+ * A cache that exists but is unreachable at request time still fails open, and reports it
+ * the same two ways (the log field and the metric) so the alert fires.
  */
 @Injectable()
-export class RateLimitGuard implements CanActivate {
+export class RateLimitGuard implements CanActivate, OnApplicationBootstrap {
   private readonly logger = new Logger(RateLimitGuard.name);
-  /** Skip all rate-limiting when `DISABLE_RATE_LIMIT=true` (dev / CI only). */
-  private readonly disabled = process.env['DISABLE_RATE_LIMIT'] === 'true';
+  private readonly securityMetrics = new SecurityMetrics();
+  /** Read once, at construction, so a typo in the setting fails at startup too. */
+  private readonly mode: RateLimitMode = readRateLimitMode();
+  private readonly production = process.env['NODE_ENV'] === 'production';
 
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(CacheService) private readonly cache: CacheService,
   ) {}
 
+  onApplicationBootstrap(): void {
+    if (usesDeprecatedDisableAlias()) {
+      this.logger.warn(
+        `${DISABLE_RATE_LIMIT_ENV} is deprecated; use ${RATE_LIMIT_MODE_ENV}=disabled`,
+      );
+    }
+    if (this.mode === 'disabled') {
+      if (this.production) {
+        // A control that is OFF in production is a fail-open like any other: say so in
+        // the form the alert on `securityFailOpen` matches.
+        this.logger.warn(
+          failOpenLog('rate_limit', { mode: 'disabled' }),
+          `${RATE_LIMIT_MODE_ENV}=disabled in production: the application does not rate limit`,
+        );
+        this.recordFailOpen();
+      }
+      return;
+    }
+    if (this.mode === 'edge-only') {
+      this.logger.warn(`${RATE_LIMIT_MODE_ENV}=edge-only: the application does not rate limit`);
+      return;
+    }
+    assertCacheInProduction(this.cache, 'RateLimitGuard', `${RATE_LIMIT_MODE_ENV}=edge-only`);
+  }
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // ── Dev bypass: DISABLE_RATE_LIMIT=true ─────────────────────────────────
-    if (this.disabled) return true;
+    // ── Disabled: dev / CI bypass (RATE_LIMIT_MODE=disabled) ────────────────
+    if (this.mode === 'disabled') {
+      // Counted per request in production so the alert keeps firing while it stays off,
+      // instead of clearing minutes after the single bootstrap data point.
+      if (this.production) this.recordFailOpen();
+      return true;
+    }
+    // ── Edge-only: limits live in Cloudflare, not here ──────────────────────
+    if (this.mode === 'edge-only') return true;
 
     // ── @SkipRateLimit() check ──────────────────────────────────────────────
     const skip = this.reflector.getAllAndOverride<boolean>(SKIP_RATE_LIMIT_KEY, [
@@ -88,6 +152,7 @@ export class RateLimitGuard implements CanActivate {
     const reply = context.switchToHttp().getResponse<FastifyReply>();
 
     // ── Build tracking key ──────────────────────────────────────────────────
+    const ip = clientIp(req);
     let identifier: string;
     if (tierConfig.keyBy === 'refreshToken') {
       // Per-session bucket: hash the HttpOnly cookie so raw tokens never appear
@@ -95,11 +160,11 @@ export class RateLimitGuard implements CanActivate {
       const rawCookie = req.cookies?.['refresh_token'];
       identifier = rawCookie
         ? `session:${createHash('sha256').update(rawCookie).digest('hex').slice(0, 32)}`
-        : `ip:${req.ip}`;
+        : `ip:${ip}`;
     } else {
       // Prefer authenticated user ID so corporate NAT users aren't penalised for
       // each other. Fall back to IP for unauthenticated endpoints.
-      identifier = req.user?.sub ? `uid:${req.user.sub}` : `ip:${req.ip}`;
+      identifier = req.user?.sub ? `uid:${req.user.sub}` : `ip:${ip}`;
     }
     const key = `${tier}:${identifier}`;
 
@@ -118,9 +183,10 @@ export class RateLimitGuard implements CanActivate {
       // Rate limiting is a protective control, not a hard dependency for serving
       // traffic. If Valkey is unavailable, fail open and surface the outage in logs.
       this.logger.error(
-        { err, key, tier, ip: req.ip, userId: req.user?.sub },
+        failOpenLog('rate_limit', { err, key, tier, ip, userId: req.user?.sub }),
         'Rate limit backend unavailable; allowing request',
       );
+      this.recordFailOpen();
       return true;
     }
 
@@ -136,11 +202,20 @@ export class RateLimitGuard implements CanActivate {
       const retryAfter = Math.max(resetAt - Math.floor(Date.now() / 1000), 1);
       setHeader('Retry-After', retryAfter);
 
-      this.logger.warn({ key, tier, ip: req.ip, userId: req.user?.sub }, 'Rate limit exceeded');
+      this.logger.warn({ key, tier, ip, userId: req.user?.sub }, 'Rate limit exceeded');
 
       throw new RateLimitedException(`Rate limit exceeded (${tier}). Retry after ${retryAfter}s.`);
     }
 
     return true;
+  }
+
+  /** Never throws: telemetry must not be able to fail a request. */
+  private recordFailOpen(): void {
+    try {
+      this.securityMetrics.recordFailOpen('rate_limit');
+    } catch {
+      // Dropping one data point is the correct failure here.
+    }
   }
 }

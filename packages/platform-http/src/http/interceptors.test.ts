@@ -10,6 +10,7 @@ import {
 } from './request-context.service';
 import { HttpLoggingInterceptor } from './http-logging.interceptor';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
+import { PROBE_PATHS } from '@quynhonsemiconductor/observability';
 
 function makeHttpContext(req: Record<string, unknown>, statusCode = 200): ExecutionContext {
   return {
@@ -86,6 +87,52 @@ describe('HttpLoggingInterceptor', () => {
     const ctx = makeHttpContext({ method: 'GET', url: '/health', headers: {} });
     const out = await lastValueFrom(interceptor.intercept(ctx, makeHandler('ok')));
     expect(out).toBe('ok');
+  });
+
+  // Every probe path the tracing hook ignores must also be absent from access logs —
+  // both derive from observability's PROBE_PATHS. `/livez` is the kubelet's liveness path.
+  it.each([...PROBE_PATHS, '/favicon.ico', '/livez?verbose=1'])(
+    'does not log the probe path %s by default',
+    async (url) => {
+      const interceptor = new HttpLoggingInterceptor();
+      const logSpy = vi.spyOn(
+        (interceptor as unknown as { logger: { log: () => void } }).logger,
+        'log',
+      );
+      const ctx = makeHttpContext({ method: 'GET', url, headers: {} }, 200);
+      await lastValueFrom(interceptor.intercept(ctx, makeHandler('ok')));
+      expect(logSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still logs a route that merely starts with a probe path', async () => {
+    const interceptor = new HttpLoggingInterceptor();
+    const logSpy = vi.spyOn(
+      (interceptor as unknown as { logger: { log: () => void } }).logger,
+      'log',
+    );
+    const ctx = makeHttpContext({ method: 'GET', url: '/livez/deep', headers: {} }, 200);
+    await lastValueFrom(interceptor.intercept(ctx, makeHandler('ok')));
+    expect(logSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs the client address from cf-connecting-ip, ignoring a forged x-forwarded-for', async () => {
+    const interceptor = new HttpLoggingInterceptor();
+    const logSpy = vi.spyOn(
+      (interceptor as unknown as { logger: { log: (o: unknown) => void } }).logger,
+      'log',
+    );
+    const ctx = makeHttpContext(
+      {
+        method: 'GET',
+        url: '/v1/things',
+        ip: '10.42.0.9',
+        headers: { 'cf-connecting-ip': '203.0.113.7', 'x-forwarded-for': '1.1.1.1' },
+      },
+      200,
+    );
+    await lastValueFrom(interceptor.intercept(ctx, makeHandler('ok')));
+    expect(logSpy.mock.calls[0][0]).toMatchObject({ ip: '203.0.113.7' });
   });
 
   it('logs one line on success', async () => {
