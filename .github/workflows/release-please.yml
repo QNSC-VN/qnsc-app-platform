@@ -6,6 +6,8 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual re-run: regenerates the release PR from current main without waiting for a push.
+  workflow_dispatch:
 
 permissions:
   contents: write
