@@ -13,7 +13,7 @@
 #
 # SAFETY RAILS (all in the script below):
 #   - a version is deleted only if its name matches ^X.Y.Z-pr.N.<7 hex>$ exactly;
-#   - only packages linked to THIS repository are looked at;
+#   - only packages that exist as directories under packages/ are looked at;
 #   - a package is never emptied: if every version of it would go, none are deleted;
 #   - `workflow_dispatch` defaults to a dry run.
 name: Canary cleanup
@@ -48,7 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      packages: write
+      packages: write # the only WRITE grant: it deletes package versions
+      contents: read # list packages/ on the default branch (API call, no checkout)
+      pull-requests: read # list the files a closed PR touched
     steps:
       - name: Delete
         env:
@@ -94,16 +96,35 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           deleted=0
-          packages=$(gh api --paginate "/orgs/${ORG}/packages?package_type=npm&per_page=100" \
-            --jq '.[] | select(.repository.full_name == env.REPO) | .name')
 
-          echo "packages linked to ${REPO}: $(wc -w <<<"$packages") (${packages//$'\n'/ })"
+          # Which packages could have a canary? The org-level package listing is no use here: a
+          # GITHUB_TOKEN gets an empty `[]` from it. Per-package calls do work, so build the
+          # candidate names instead -- every directory under packages/ on the DEFAULT branch, plus,
+          # for a closing PR, the packages that PR touched (a brand-new package is not on the
+          # default branch yet, and it is exactly the case that would otherwise leak).
+          # Directory name == package name (release-please component). Names a PR contributes are
+          # validated below and only ever used to look up versions of an org package.
+          packages=$(
+            {
+              gh api "/repos/${REPO}/contents/packages" --jq '.[] | select(.type == "dir") | .name'
+              if [ "$mode" = "pr" ]; then
+                gh api --paginate "/repos/${REPO}/pulls/${PR_NUMBER}/files?per_page=100" \
+                  --jq '.[].filename | select(startswith("packages/")) | split("/")[1]'
+              fi
+            } | sort -u
+          )
+          echo "candidate packages: ${packages//$'\n'/ }"
 
           for pkg in $packages; do
             [[ "$pkg" =~ ^[a-z0-9._-]+$ ]] || { echo "::warning::skipping odd package name '$pkg'"; continue; }
 
-            versions=$(gh api --paginate "/orgs/${ORG}/packages/npm/${pkg}/versions?per_page=100" \
-              --jq '.[] | {id, name, created_at}' | jq -sc '.')
+            # A directory that is not a published package (the private `testing` one) 404s: skip it.
+            if ! listing=$(gh api --paginate "/orgs/${ORG}/packages/npm/${pkg}/versions?per_page=100" \
+              --jq '.[] | {id, name, created_at}' 2>&1); then
+              echo "${pkg}: no published package (${listing//$'\n'/ })"
+              continue
+            fi
+            versions=$(jq -sc '.' <<<"$listing")
             doomed=$(jq -c --arg mode "$mode" --arg pr "${PR_NUMBER:-0}" --argjson cutoff "$cutoff" \
               "[.[] | select(${jq_select})]" <<<"$versions")
 
