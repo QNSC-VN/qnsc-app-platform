@@ -1,6 +1,6 @@
 {
   "name": "@quynhonsemiconductor/platform-db",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared PostgreSQL connection layer for QNSC product backends: password auth from the CloudNativePG secret, verified TLS, pool, readiness ping, advisory lock and the transaction contract. Drizzle at /drizzle, NestJS at /nest.",
   "license": "UNLICENSED",
   "main": "dist/index.js",

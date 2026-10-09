@@ -1,8 +1,8 @@
 {
   "packages/identity": "7.1.0",
-  "packages/platform-cache": "3.1.0",
+  "packages/platform-cache": "3.1.1",
   "packages/platform-http": "4.1.0",
   "packages/observability": "0.2.1",
-  "packages/platform-runtime": "0.1.2",
-  "packages/platform-db": "0.1.0"
+  "packages/platform-runtime": "0.1.3",
+  "packages/platform-db": "0.1.1"
 }

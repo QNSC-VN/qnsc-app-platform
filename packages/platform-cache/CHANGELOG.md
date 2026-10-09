@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/quynhonsemiconductor/app-platform/compare/platform-cache-v3.1.0...platform-cache-v3.1.1) (2026-10-09)
+
+
+### 🐛 Bug Fixes
+
+* **platform-cache:** quit the client in onApplicationShutdown, not onModuleDestroy ([9fd069b](https://github.com/quynhonsemiconductor/app-platform/commit/9fd069b0b26976088112cd5d862d50fbfd82f058))
+
 ## [3.1.0](https://github.com/quynhonsemiconductor/app-platform/compare/platform-cache-v3.0.0...platform-cache-v3.1.0) (2026-09-08)
 
 

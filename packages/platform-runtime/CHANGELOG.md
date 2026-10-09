@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/quynhonsemiconductor/app-platform/compare/platform-runtime-v0.1.2...platform-runtime-v0.1.3) (2026-10-09)
+
+
+### ✨ Features
+
+* **platform-runtime:** add /livez, /readyz and graceful shutdown for pod drains ([f227cb1](https://github.com/quynhonsemiconductor/app-platform/commit/f227cb1460e3f6b016cac8c2e849c5686d4c0295))
+
 ## [0.1.2](https://github.com/quynhonsemiconductor/app-platform/compare/platform-runtime-v0.1.1...platform-runtime-v0.1.2) (2026-10-09)
 
 
