@@ -91,6 +91,11 @@
       "package-name": "@quynhonsemiconductor/platform-jobs",
       "component": "platform-jobs",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/platform-mail": {
+      "package-name": "@quynhonsemiconductor/platform-mail",
+      "component": "platform-mail",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "pull-request-title-pattern": "chore(release): ${component} ${version}",

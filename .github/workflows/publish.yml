@@ -24,6 +24,7 @@ on:
       - 'platform-runtime-v*'
       - 'platform-db-v*'
       - 'platform-jobs-v*'
+      - 'platform-mail-v*'
 
 permissions:
   contents: read
