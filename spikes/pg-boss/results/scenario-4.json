@@ -1,0 +1,15 @@
+{
+  "ticks": 10,
+  "jobsPerTick": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  "gapsMinutes": [1, 1, 1, 1, 1, 1, 1, 1, 1],
+  "executionsPerJob": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  "executionsByReplica": {
+    "replica-A": 3,
+    "replica-C": 7
+  },
+  "replicaKilledAfterTick": 6,
+  "replicaJoinedAfterTick": 3,
+  "timezone": "Asia/Ho_Chi_Minh",
+  "dailyPreviewUtc": "2026-10-09T19:00:00.000Z",
+  "recordedAt": "2026-10-09T13:15:19.200Z"
+}

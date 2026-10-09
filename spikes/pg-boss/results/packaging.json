@@ -1,0 +1,11 @@
+{
+  "node": "v24.11.1",
+  "requireEsmFromCjs": "works, no warning on stderr",
+  "repoSettings": "compiles; emits require(\"pg-boss\"); types are real (not any)",
+  "withoutSkipLibCheck": {
+    "compiles": false,
+    "errorCount": 5,
+    "firstError": "..…/pg-boss@12.37.0_@opentelemetry+api@1.9.1/node_modules/pg-boss/dist/manager.d.ts(18,19): error TS2724: '\"/Users/benq/Desktop/qnsc/wt/app-platform-d/node_modules/.pnpm/pg-boss@12.37.0_@opentelemetry+api@1.9.1/node_modu"
+  },
+  "recordedAt": "2026-10-09T08:48:48.135Z"
+}

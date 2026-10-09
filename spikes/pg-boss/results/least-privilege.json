@@ -1,0 +1,38 @@
+{
+  "installPlanBytes": 19864,
+  "noGrants": "start() rejects",
+  "grantsOnly": {
+    "eventsDuringWorkload": []
+  },
+  "withoutRights": {
+    "attempts": {
+      "createQueue partition:true": "permission denied for schema pgboss",
+      "createQueue (shared table)": "ok",
+      "start with persistQueueStats": "ok",
+      "DROP TABLE pgboss.job": "must be owner of table job",
+      "CREATE TABLE pgboss.x": "permission denied for schema pgboss",
+      "ALTER TABLE pgboss.queue": "must be owner of table queue",
+      "TRUNCATE pgboss.job": "permission denied for table job"
+    },
+    "eventsWithPersistQueueStats": []
+  },
+  "olderSchemaWithMigrateFalse": "pg-boss database requires migrations",
+  "recordedAt": "2026-10-09T09:07:04.922Z",
+  "persistQueueStatsNonOwner": {
+    "droppedPartition": "queue_stats_20261010",
+    "errorsWithoutCreate": ["permission denied for schema pgboss"],
+    "errorsWithCreateOnSchema": ["must be owner of table queue_stats"],
+    "partitionCreated": false
+  },
+  "ownerRole": {
+    "errorsWhilePartitionMissing": [],
+    "partitionOwnerAfter": "pgb_app",
+    "appOutsidePgboss": {
+      "SELECT public.orders": "allowed",
+      "INSERT public.orders": "allowed",
+      "DELETE public.orders": "permission denied for table orders",
+      "DROP TABLE public.orders": "must be owner of table orders",
+      "CREATE TABLE public.x": "permission denied for schema public"
+    }
+  }
+}

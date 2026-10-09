@@ -1,0 +1,40 @@
+{
+  "otel": {
+    "instruments": [
+      "messaging.client.consumed.messages",
+      "messaging.client.operation.duration",
+      "messaging.client.sent.messages",
+      "messaging.process.duration",
+      "pgboss.queue.jobs"
+    ],
+    "queueJobsAttributeKeys": [
+      "db.namespace",
+      "messaging.destination.name",
+      "messaging.system",
+      "pgboss.job.state",
+      "pgboss.schema"
+    ],
+    "queueJobsIdleValue": 7,
+    "sentMessagesToTestQueues": 14,
+    "processDurationSeriesWithErrorType": 1,
+    "resolutionSeconds": 2
+  },
+  "recordedAt": "2026-10-09T09:55:56.487Z",
+  "panels": [
+    "Queue depth — jobs ready to run",
+    "Oldest ready job — age",
+    "Terminal failures per minute",
+    "Active jobs",
+    "Retrying now (failed an attempt, waiting for the next)",
+    "Dead-letter queues — jobs waiting to be handled"
+  ],
+  "live": {
+    "depthTranscode": 12,
+    "depthMail": 0,
+    "oldestAgeSeconds": [40, 50],
+    "terminalFailuresInQueueStats": 5,
+    "deadLetterWaiting": 5,
+    "retryingFlaky": 3,
+    "queueStatsResolutionSeconds": 5
+  }
+}

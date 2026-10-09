@@ -1,0 +1,187 @@
+{
+  "naiveDefaults": {
+    "sent": 3000,
+    "completedIn32s": 32,
+    "backlogAfter32s": 2968,
+    "completedPerSecond": 1
+  },
+  "recordedAt": "2026-10-09T08:58:24.091Z",
+  "main": {
+    "config": {
+      "rate": 100,
+      "seconds": 600,
+      "txShare": 0.3,
+      "dbCpus": 2,
+      "workers": 2,
+      "work": {
+        "pollingIntervalSeconds": 1,
+        "batchSize": 25,
+        "localConcurrency": 2,
+        "burstWhenBatchFull": true
+      },
+      "handlerMs": 10
+    },
+    "sent": 60000,
+    "completed": 60000,
+    "producerElapsedMs": 599994,
+    "producerMaxScheduleLagMs": 114,
+    "achievedRate": 100,
+    "drainMsAfterProducerStopped": 799,
+    "backlog": {
+      "max": 98,
+      "midThirdMean": 50,
+      "lastThirdMean": 49,
+      "final": 0
+    },
+    "dbCpuPercentOfOneCore": {
+      "mean": 22,
+      "p50": 20.39,
+      "p95": 26.8,
+      "max": 108.39,
+      "capPercent": 200
+    },
+    "dbMemoryMiB": 110,
+    "workerCpuPercentOfOneCore": {
+      "mean": 1,
+      "p95": 1,
+      "note": "per worker process, from ps cumulative CPU time deltas"
+    },
+    "pickupMs": {
+      "p50": 487,
+      "p95": 938,
+      "p99": 980,
+      "max": 1042
+    },
+    "size": {
+      "pgboss_tables_and_indexes": "18 MB",
+      "database": "28 MB"
+    },
+    "vacuum": {
+      "n_live_tup": "63048",
+      "n_dead_tup": "799",
+      "autovacuum_count": "11",
+      "autoanalyze_count": "11"
+    },
+    "samples": [
+      {
+        "t": 1,
+        "backlog": 0,
+        "dbCpu": 22.36,
+        "dbMem": 115028787.2,
+        "workerCpu": [0, 0]
+      },
+      {
+        "t": 37,
+        "backlog": 36,
+        "dbCpu": 27.36,
+        "dbMem": 63732449.28,
+        "workerCpu": [0.9927200529450705, 0.661813368630046]
+      },
+      {
+        "t": 74,
+        "backlog": 63,
+        "dbCpu": 19.67,
+        "dbMem": 67066920.96,
+        "workerCpu": [1.4888337468982624, 0.8271298593879228]
+      },
+      {
+        "t": 110,
+        "backlog": 27,
+        "dbCpu": 21.38,
+        "dbMem": 90198507.52,
+        "workerCpu": [0.6625807520291541, 0.49693556402186556]
+      },
+      {
+        "t": 147,
+        "backlog": 68,
+        "dbCpu": 18.49,
+        "dbMem": 82407587.84,
+        "workerCpu": [0.8250825082508259, 0.8250825082508259]
+      },
+      {
+        "t": 183,
+        "backlog": 21,
+        "dbCpu": 19.9,
+        "dbMem": 70642565.12,
+        "workerCpu": [0.9873292743129843, 1.4809939114694763]
+      },
+      {
+        "t": 219,
+        "backlog": 82,
+        "dbCpu": 22.57,
+        "dbMem": 66846720,
+        "workerCpu": [0.6621420294653209, 0.6621420294653209]
+      },
+      {
+        "t": 256,
+        "backlog": 30,
+        "dbCpu": 20.95,
+        "dbMem": 88080384,
+        "workerCpu": [0.8264462809917399, 1.322314049586778]
+      },
+      {
+        "t": 292,
+        "backlog": 82,
+        "dbCpu": 19.87,
+        "dbMem": 73410805.76,
+        "workerCpu": [0.4968532626697623, 0.6624710168930115]
+      },
+      {
+        "t": 328,
+        "backlog": 30,
+        "dbCpu": 23.78,
+        "dbMem": 82460016.64,
+        "workerCpu": [0.4954582989265038, 0.990916597853015]
+      },
+      {
+        "t": 364,
+        "backlog": 82,
+        "dbCpu": 18.33,
+        "dbMem": 83456163.84,
+        "workerCpu": [0.9915716410510669, 0.6610477607007113]
+      },
+      {
+        "t": 401,
+        "backlog": 34,
+        "dbCpu": 20.79,
+        "dbMem": 75539415.04,
+        "workerCpu": [0.6615944426066827, 0.6615944426066827]
+      },
+      {
+        "t": 437,
+        "backlog": 86,
+        "dbCpu": 21.51,
+        "dbMem": 82543902.72,
+        "workerCpu": [0.4966065220989943, 0.6621420294653209]
+      },
+      {
+        "t": 473,
+        "backlog": 35,
+        "dbCpu": 21.73,
+        "dbMem": 77668024.32,
+        "workerCpu": [0.6625807520291541, 0.6625807520291541]
+      },
+      {
+        "t": 509,
+        "backlog": 83,
+        "dbCpu": 19.73,
+        "dbMem": 88195727.36,
+        "workerCpu": [0.8269930532583496, 0.8269930532583496]
+      },
+      {
+        "t": 546,
+        "backlog": 28,
+        "dbCpu": 18.28,
+        "dbMem": 86497034.24,
+        "workerCpu": [0.8235875473562957, 0.823587547356281]
+      },
+      {
+        "t": 582,
+        "backlog": 79,
+        "dbCpu": 19.64,
+        "dbMem": 100904468.48,
+        "workerCpu": [0.6615944426066827, 0.6615944426066827]
+      }
+    ]
+  }
+}

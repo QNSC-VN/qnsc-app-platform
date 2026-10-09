@@ -1,0 +1,26 @@
+{
+  "healthyStarts": 1,
+  "recordedAt": "2026-10-09T08:20:02.360Z",
+  "expiry": {
+    "jobMs": 40000,
+    "expireInSeconds": 60,
+    "heartbeatSeconds": null,
+    "killedAfterStartMs": 15000,
+    "killToReLeaseMs": 78264,
+    "startToReLeaseMs": 93264,
+    "sequence": ["active#0", "retry#0", "active#1", "completed#1"],
+    "completions": 1,
+    "sideEffects": 1
+  },
+  "heartbeat": {
+    "jobMs": 40000,
+    "expireInSeconds": 3600,
+    "heartbeatSeconds": 10,
+    "killedAfterStartMs": 15001,
+    "killToReLeaseMs": 63249,
+    "startToReLeaseMs": 78250,
+    "sequence": ["active#0", "retry#0", "active#1", "completed#1"],
+    "completions": 1,
+    "sideEffects": 1
+  }
+}

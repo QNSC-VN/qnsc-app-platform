@@ -1,0 +1,130 @@
+{
+  "title": "Job queues (pg-boss)",
+  "uid": "pgboss-queues",
+  "tags": ["platform-jobs", "pg-boss"],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "description": "Queue depth, oldest-job age, terminal failures, retries and dead-letter depth for a product's pg-boss schema. Every panel is one SQL query over the pgboss schema; time series come from pgboss.queue_stats (constructor option persistQueueStats), so the queue_stats snapshot interval (monitorIntervalSeconds, default 60 s) is the resolution. Spike WP-6, see docs/adr/0001-job-queue.md.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Queue depth — jobs ready to run",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT captured_on AS time, name AS metric, ready_count AS value FROM pgboss.queue_stats WHERE $__timeFilter(captured_on) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Oldest ready job — age",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT captured_on AS time, name AS metric, ready_oldest_seconds AS value FROM pgboss.queue_stats WHERE $__timeFilter(captured_on) AND ready_oldest_seconds IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Terminal failures per minute",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT delta_on AS time, name AS metric, failed_delta::float8 / delta_seconds * 60 AS value FROM pgboss.queue_stats WHERE $__timeFilter(delta_on) AND delta_seconds > 0 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Active jobs",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT captured_on AS time, name AS metric, active_count AS value FROM pgboss.queue_stats WHERE $__timeFilter(captured_on) ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Retrying now (failed an attempt, waiting for the next)",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 6 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT name AS queue, count(*) AS retrying, max(retry_count) AS max_attempt FROM pgboss.job WHERE state = 'retry' GROUP BY name ORDER BY name"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Dead-letter queues — jobs waiting to be handled",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 6 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "pgboss" },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT d.name AS dead_letter_queue, count(j.id) AS waiting FROM pgboss.queue d LEFT JOIN pgboss.job j ON j.name = d.name AND j.state IN ('created', 'retry') WHERE d.name IN (SELECT dead_letter FROM pgboss.queue WHERE dead_letter IS NOT NULL) GROUP BY d.name ORDER BY d.name"
+        }
+      ]
+    }
+  ]
+}

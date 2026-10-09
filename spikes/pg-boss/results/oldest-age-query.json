@@ -1,0 +1,37 @@
+{
+  "completedRows": 1000000,
+  "waitingRows": 500,
+  "roundTripMsP50": 0.6,
+  "roundTripMsMax": 1.2,
+  "explainExecutionMs": 0.093,
+  "usesSeqScan": false,
+  "planHead": [
+    "GroupAggregate  (cost=0.28..1052.54 rows=2 width=10) (actual time=0.086..0.086 rows=1.00 loops=1)",
+    "  Group Key: job.name",
+    "  Buffers: shared hit=17",
+    "  ->  Index Only Scan using job_common_i11 on job_common job  (cost=0.28..1051.00 rows=300 width=14) (actual time=0.015..0.067 rows=500.00 loops=1)",
+    "        Index Cond: ((name = ANY ('{age.a,age.b}'::text[])) AND (start_after <= now()))",
+    "        Heap Fetches: 500",
+    "        Index Searches: 1",
+    "        Buffers: shared hit=17"
+  ],
+  "recordedAt": "2026-10-09T10:05:08.198Z",
+  "jobIndexes": [
+    "CREATE UNIQUE INDEX job_pkey ON ONLY pgboss.job USING btree (name, id)",
+    "CREATE UNIQUE INDEX job_common_pkey ON job_common USING btree (name, id)",
+    "CREATE UNIQUE INDEX job_common_i1 ON job_common USING btree (name, COALESCE(singleton_key, ''::text)) WHERE ((state = 'created'::pgboss.job_state) AND (policy = 'short'::text))",
+    "CREATE UNIQUE INDEX job_common_i2 ON job_common USING btree (name, COALESCE(singleton_key, ''::text)) WHERE ((state = 'active'::pgboss.job_state) AND (policy = 'singleton'::text))",
+    "CREATE UNIQUE INDEX job_common_i3 ON job_common USING btree (name, state, COALESCE(singleton_key, ''::text)) WHERE ((state <= 'active'::pgboss.job_state) AND (policy = 'stately'::text))",
+    "CREATE UNIQUE INDEX job_common_i6 ON job_common USING btree (name, COALESCE(singleton_key, ''::text)) WHERE ((state <= 'active'::pgboss.job_state) AND (policy = 'exclusive'::text))",
+    "CREATE UNIQUE INDEX job_common_i8 ON job_common USING btree (name, singleton_key) WHERE ((state = ANY (ARRAY['active'::pgboss.job_state, 'retry'::pgboss.job_state, 'failed'::pgboss.job_state])) AND (policy = 'key_strict_fifo'::text))",
+    "CREATE INDEX job_common_i10 ON job_common USING btree (name, singleton_key, state DESC, created_on, id) INCLUDE (start_after) WHERE ((state < 'active'::pgboss.job_state) AND (NOT blocked) AND (policy = 'key_strict_fifo'::text))",
+    "CREATE UNIQUE INDEX job_common_i4 ON job_common USING btree (name, singleton_on, COALESCE(singleton_key, ''::text)) WHERE ((state <> 'cancelled'::pgboss.job_state) AND (singleton_on IS NOT NULL))",
+    "CREATE INDEX job_common_i11 ON job_common USING btree (name, priority DESC, created_on, start_after) WHERE ((state < 'active'::pgboss.job_state) AND (NOT blocked))",
+    "CREATE INDEX job_common_i7 ON job_common USING btree (name, group_id) WHERE ((state = 'active'::pgboss.job_state) AND (group_id IS NOT NULL))",
+    "CREATE INDEX job_common_i9 ON job_common USING btree (name, id) WHERE (blocking AND (state = 'completed'::pgboss.job_state))",
+    "CREATE INDEX job_common_i12 ON job_common USING btree (source_root_id) WHERE (source_root_id IS NOT NULL)",
+    "CREATE UNIQUE INDEX job_common_i13 ON job_common USING btree (name, singleton_key) WHERE ((state = 'created'::pgboss.job_state) AND upsert_by_key)",
+    "CREATE UNIQUE INDEX job_dependency_pkey ON job_dependency USING btree (child_name, child_id, parent_name, parent_id)",
+    "CREATE INDEX job_dep_parent_idx ON job_dependency USING btree (parent_name, parent_id)"
+  ]
+}
