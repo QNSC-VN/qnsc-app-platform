@@ -39,7 +39,6 @@ import {
   ATTR_DEPLOYMENT_ENVIRONMENT_NAME,
 } from '@opentelemetry/semantic-conventions';
 
-
 export interface OtelBootstrapOptions {
   /**
    * Fallback service name, used when the env var below is unset. Each app passes
@@ -228,8 +227,7 @@ export function startOtel(options: OtelBootstrapOptions): boolean {
   //
   // Falls back to NODE_ENV so a deployment that has not set DEPLOYMENT_ENV yet keeps
   // its previous behaviour rather than reporting "unknown".
-  const deploymentEnv =
-    process.env['DEPLOYMENT_ENV'] ?? process.env['NODE_ENV'] ?? 'development';
+  const deploymentEnv = process.env['DEPLOYMENT_ENV'] ?? process.env['NODE_ENV'] ?? 'development';
   const isProd = deploymentEnv === 'production';
   const serviceName =
     process.env[options.serviceNameEnvVar ?? 'OTEL_SERVICE_NAME'] ?? options.defaultServiceName;

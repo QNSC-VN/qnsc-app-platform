@@ -107,9 +107,7 @@ describe('EntraOidcClient.exchangeCode', () => {
     const client = new EntraOidcClient(makeOptions({ authority: 'http://localhost:8899' }));
     await client.exchangeCode({ code: 'auth-code', codeVerifier: 'verifier-1' });
 
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:8899/tenant-123/oauth2/v2.0/token',
-    );
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8899/tenant-123/oauth2/v2.0/token');
   });
 
   it('throws when the token endpoint returns a non-2xx', async () => {

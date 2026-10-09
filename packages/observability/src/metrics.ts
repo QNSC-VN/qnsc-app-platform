@@ -68,8 +68,7 @@ export function methodLabelOf(method: string): HttpMethodLabel {
   return (KNOWN_METHODS.has(upper) ? upper : 'OTHER') as HttpMethodLabel;
 }
 
-const UUID_SEGMENT =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NUMERIC_SEGMENT = /^\d+$/;
 /** Anything long and mixed-case/alphanumeric is almost certainly a generated id. */
 const OPAQUE_ID_SEGMENT = /^[A-Za-z0-9_-]{16,}$/;
@@ -236,10 +235,9 @@ export class HttpMetrics {
     { description: 'Inbound HTTP request duration', unit: 'ms' },
   );
 
-  private readonly requests: Counter = this.meter.createCounter(
-    METRIC_NAMES.HTTP_SERVER_REQUESTS,
-    { description: 'Inbound HTTP requests' },
-  );
+  private readonly requests: Counter = this.meter.createCounter(METRIC_NAMES.HTTP_SERVER_REQUESTS, {
+    description: 'Inbound HTTP requests',
+  });
 
   private readonly errors: Counter = this.meter.createCounter(METRIC_NAMES.HTTP_SERVER_ERRORS, {
     description: 'Inbound HTTP requests that failed',

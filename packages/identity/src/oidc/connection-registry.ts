@@ -1,7 +1,11 @@
 import type { ISsoConnectionRepository } from '../repository-ports';
 import type { SsoConnection } from '../domain-types';
 import type { OidcDiscovery } from './oidc-discovery';
-import { isBrokerConfigured, type ISecretResolver, type ResolvedConnection } from './oidc-connection';
+import {
+  isBrokerConfigured,
+  type ISecretResolver,
+  type ResolvedConnection,
+} from './oidc-connection';
 
 /**
  * Resolves an `sso_connections` row into a fully-formed {@link ResolvedConnection}

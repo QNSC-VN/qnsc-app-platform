@@ -56,19 +56,19 @@ actually started — worth logging, since it is the cheapest way to tell
 
 ### Environment
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `OTEL_ENABLED` | `false` | Must be exactly `"true"` to start |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Collector, usually a sidecar |
-| `OTEL_SERVICE_NAME` | `defaultServiceName` | Overridable per env var name |
-| `OTEL_SERVICE_NAMESPACE` | `qnsc` | Groups products for cross-product queries |
-| `SERVICE_VERSION` | `dev` | Set from the release tag in CI, or telemetry is unattributable |
-| `OTEL_SAMPLING_PROBABILITY` | `1.0` dev / `0.1` prod | Head sampling (`parentbased_traceidratio`) — see the caveat below. A value that is not a number falls back to the default with a process warning, instead of dropping every trace |
-| `DEPLOYMENT_ENV` | `NODE_ENV` | Deployment identity and the sampling default (`production` ⇒ `0.1`) |
-| `NODE_ENV` | `development` | Batching/export tuning |
-| `K8S_POD_NAME` | — | `k8s.pod.name` resource attribute (downward API) |
-| `K8S_NAMESPACE` | — | `k8s.namespace.name` resource attribute (downward API) |
-| `K8S_NODE_NAME` | — | `k8s.node.name` resource attribute (downward API) |
+| Variable                      | Default                 | Purpose                                                                                                                                                                           |
+| ----------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OTEL_ENABLED`                | `false`                 | Must be exactly `"true"` to start                                                                                                                                                 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Collector, usually a sidecar                                                                                                                                                      |
+| `OTEL_SERVICE_NAME`           | `defaultServiceName`    | Overridable per env var name                                                                                                                                                      |
+| `OTEL_SERVICE_NAMESPACE`      | `qnsc`                  | Groups products for cross-product queries                                                                                                                                         |
+| `SERVICE_VERSION`             | `dev`                   | Set from the release tag in CI, or telemetry is unattributable                                                                                                                    |
+| `OTEL_SAMPLING_PROBABILITY`   | `1.0` dev / `0.1` prod  | Head sampling (`parentbased_traceidratio`) — see the caveat below. A value that is not a number falls back to the default with a process warning, instead of dropping every trace |
+| `DEPLOYMENT_ENV`              | `NODE_ENV`              | Deployment identity and the sampling default (`production` ⇒ `0.1`)                                                                                                               |
+| `NODE_ENV`                    | `development`           | Batching/export tuning                                                                                                                                                            |
+| `K8S_POD_NAME`                | —                       | `k8s.pod.name` resource attribute (downward API)                                                                                                                                  |
+| `K8S_NAMESPACE`               | —                       | `k8s.namespace.name` resource attribute (downward API)                                                                                                                            |
+| `K8S_NODE_NAME`               | —                       | `k8s.node.name` resource attribute (downward API)                                                                                                                                 |
 
 The `K8S_*` variables are added to the resource only when set and non-blank, so a local
 or CI run carries no empty `k8s.*` attributes. If the collector's Kubernetes attributes
@@ -80,7 +80,7 @@ which takes precedence over them. `OTEL_SAMPLING_PROBABILITY` is the only overri
 
 **Sampling caveat.** Head sampling is all the SDK can do alone, and a prod ratio
 below `1.0` drops most **error** traces, which are the ones you need. Prefer
-collector-side *tail* sampling (100% of errors and slow traces, a fraction of the
+collector-side _tail_ sampling (100% of errors and slow traces, a fraction of the
 rest) and leave this at `1.0`.
 
 Health, readiness and favicon requests are skipped outright — no span is created, so
@@ -115,12 +115,12 @@ startOtel({
 });
 ```
 
-| | |
-|---|---|
-| Option | `httpDurationBoundaries?: number[]` on `startOtel` |
-| Unit | **milliseconds** |
-| Applies to | the `http.server.duration` instrument only |
-| Omitted | the OpenTelemetry defaults are kept, and the SDK configuration is unchanged |
+|            |                                                                             |
+| ---------- | --------------------------------------------------------------------------- |
+| Option     | `httpDurationBoundaries?: number[]` on `startOtel`                          |
+| Unit       | **milliseconds**                                                            |
+| Applies to | the `http.server.duration` instrument only                                  |
+| Omitted    | the OpenTelemetry defaults are kept, and the SDK configuration is unchanged |
 
 **Why you might want it.** The OTel JS default explicit-histogram boundaries end at
 `10000`:
@@ -158,7 +158,7 @@ buckets past your own worst-case timeout budget and they become visible.
 `Infinity`), a negative value, or anything not strictly ascending throws from
 `startOtel`, with the offending index and value in the message. This is deliberate: the
 SDK's aggregator silently sorts and de-duplicates whatever it is handed, so a typo'd
-array is accepted upstream and quietly becomes a *different* bucket set than you wrote —
+array is accepted upstream and quietly becomes a _different_ bucket set than you wrote —
 producing a histogram that looks healthy and lies, which is the exact failure this
 option exists to fix. The check runs **before** the `OTEL_ENABLED` gate, so a bad array
 fails in local dev and CI rather than waiting for the one environment that has
@@ -225,11 +225,16 @@ httpMetrics.record({ route: '/v1/work-items/:id', method, statusCode, durationMs
 await jobMetrics.time('daily-cleanup', () => this.run());
 
 // Queues: lag is what reveals a relay falling behind; throughput alone looks fine
-queueMetrics.recordProcessed(name, n); queueMetrics.recordFailure(name, n); queueMetrics.recordLag(name, seconds);
+queueMetrics.recordProcessed(name, n);
+queueMetrics.recordFailure(name, n);
+queueMetrics.recordLag(name, seconds);
 
 // Pool: register ONCE with a closure over the driver's pool. OTel pulls it on
 // collection, so there is no timer to own and no stale reading.
-dbPoolMetrics.register(() => ({ inUse: pool.totalCount - pool.idleCount, waiting: pool.waitingCount }));
+dbPoolMetrics.register(() => ({
+  inUse: pool.totalCount - pool.idleCount,
+  waiting: pool.waitingCount,
+}));
 
 // Security: pair with failOpenLog() — same FailOpenControl union, so the metric label
 // and the log-based alarm pattern cannot drift apart
@@ -258,11 +263,11 @@ remembers the distinct values each recorder has seen per label and, past a limit
 new ones as `__other__` instead (values already admitted keep their own series). It logs
 once per label, so the leak is visible without becoming a log flood.
 
-| Label | Limit (distinct values) |
-|---|---|
-| `route` | 500 |
-| `error_code` | 200 |
-| `job`, `queue` | 100 |
+| Label          | Limit (distinct values) |
+| -------------- | ----------------------- |
+| `route`        | 500                     |
+| `error_code`   | 200                     |
+| `job`, `queue` | 100                     |
 
 **Label unmatched requests with a constant.** A request that matches no route (every 404
 from a scanner or a typo) has no template. If the product then labels it with the raw URL,
@@ -277,7 +282,7 @@ fail, and `HttpMetrics.record`, `JobMetrics.record` and the `QueueMetrics` recor
 anything thrown while recording and log it once; `SecurityMetrics` (`recordFailOpen`,
 `recordStaleToken`) and `AuthMetrics.recordLogin` do the same. A metric can cost a data point, never a
 response — the same fail-open contract as the rest of the package. (`JobMetrics.time` still
-re-throws the *job's* error.)
+re-throws the _job's_ error.)
 
 These are tripwires, not budgets: reaching one means an id or a raw path is being used as
 a label, and the fix is at the call site. Values longer than 128 characters are cut. The
@@ -304,4 +309,3 @@ the auto-instrumented baseline is what guarantees nothing is blind.
   collector-side tail sampler, because the decision needs the finished trace.
 - **No health controller.** Readiness checks are product-specific and would drag
   Terminus in as a peer dependency.
-

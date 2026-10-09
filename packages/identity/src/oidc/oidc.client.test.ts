@@ -44,7 +44,9 @@ describe('OidcClient', () => {
   });
 
   it('exchanges code and returns id_token', async () => {
-    const fetchFn = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id_token: 'idt' }) });
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ id_token: 'idt' }) });
     const out = await new OidcClient(fetchFn as unknown as typeof fetch).exchangeCode(conn, {
       code: 'c',
       codeVerifier: 'v',

@@ -578,7 +578,14 @@ export class AuthService {
       ssoWorkspaceId = provisioned.workspaceId;
     }
 
-    return this.finishWorkspaceSso(workspaceService, user, ssoWorkspaceId, entra, ipAddress, 'entra');
+    return this.finishWorkspaceSso(
+      workspaceService,
+      user,
+      ssoWorkspaceId,
+      entra,
+      ipAddress,
+      'entra',
+    );
   }
 
   /**
@@ -712,14 +719,20 @@ export class AuthService {
    * and honor invite-only mode (jitEnabled=false) with the platform-admin
    * break-glass allow-list.
    */
-  private async assertConnectionAllows(connection: ProvisioningConnection, email: string): Promise<void> {
+  private async assertConnectionAllows(
+    connection: ProvisioningConnection,
+    email: string,
+  ): Promise<void> {
     if (connection.status && connection.status !== 'active') {
       throw new UnauthorizedException(
         'SSO_CONNECTION_DISABLED',
         'SSO for your organization is disabled. Please contact your administrator.',
       );
     }
-    if (connection.kind !== 'shared' && !this.isEmailDomainAllowed(email, connection.allowedEmailDomains)) {
+    if (
+      connection.kind !== 'shared' &&
+      !this.isEmailDomainAllowed(email, connection.allowedEmailDomains)
+    ) {
       throw new UnauthorizedException(
         'SSO_DOMAIN_NOT_ALLOWED',
         'Your email domain is not permitted to sign in to this organization.',
@@ -736,8 +749,10 @@ export class AuthService {
       const allowed =
         isPlatformAdmin ||
         (await this.userRepo.findByEmail(normalizedEmail)) != null ||
-        (await this.ssoConnectionRepo?.hasPendingInvitation(connection.workspaceId, normalizedEmail)) ===
-          true;
+        (await this.ssoConnectionRepo?.hasPendingInvitation(
+          connection.workspaceId,
+          normalizedEmail,
+        )) === true;
       if (!allowed) {
         throw new UnauthorizedException(
           'SSO_JIT_DISABLED',

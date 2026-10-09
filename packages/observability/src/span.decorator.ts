@@ -33,11 +33,7 @@ export function Span(optionsOrName: SpanOptions | string = {}): MethodDecorator 
   const options: SpanOptions =
     typeof optionsOrName === 'string' ? { name: optionsOrName } : optionsOrName;
 
-  return function (
-    _target: object,
-    propertyKey: string | symbol,
-    descriptor: PropertyDescriptor,
-  ) {
+  return function (_target: object, propertyKey: string | symbol, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value as (...args: unknown[]) => Promise<unknown>;
     const spanName = options.name ?? String(propertyKey);
 

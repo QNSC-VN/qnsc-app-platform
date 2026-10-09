@@ -21,7 +21,9 @@ describe('withJobContext', () => {
     // Self-describing: an id that surfaces in a log search or an outbound payload
     // says which job produced it, with no extra field to join on.
     await withJobContext('daily-cleanup', () => {
-      expect(requestContextStorage.getStore()?.correlationId).toMatch(/^daily-cleanup:[0-9a-f-]{36}$/);
+      expect(requestContextStorage.getStore()?.correlationId).toMatch(
+        /^daily-cleanup:[0-9a-f-]{36}$/,
+      );
     });
   });
 
@@ -36,20 +38,24 @@ describe('withJobContext', () => {
   it('carries the originating request context when the job has one', async () => {
     // This is what joins the two halves of an async flow: the relay processes a row
     // that remembers which request queued it.
-    await withJobContext('notification-relay', () => {
-      const context = requestContextStorage.getStore();
-      expect(context).toMatchObject({
+    await withJobContext(
+      'notification-relay',
+      () => {
+        const context = requestContextStorage.getStore();
+        expect(context).toMatchObject({
+          correlationId: 'corr-from-request',
+          workspaceId: 'ws-1',
+          userId: 'user-1',
+          traceparent: '00-abc-def-01',
+        });
+      },
+      {
         correlationId: 'corr-from-request',
         workspaceId: 'ws-1',
         userId: 'user-1',
         traceparent: '00-abc-def-01',
-      });
-    }, {
-      correlationId: 'corr-from-request',
-      workspaceId: 'ws-1',
-      userId: 'user-1',
-      traceparent: '00-abc-def-01',
-    });
+      },
+    );
   });
 
   it('keeps the context across await boundaries', async () => {
@@ -67,9 +73,9 @@ describe('withJobContext', () => {
   });
 
   it('propagates a rejection rather than swallowing it', async () => {
-    await expect(
-      withJobContext('job', () => Promise.reject(new Error('boom'))),
-    ).rejects.toThrow('boom');
+    await expect(withJobContext('job', () => Promise.reject(new Error('boom')))).rejects.toThrow(
+      'boom',
+    );
   });
 
   it('does not leak the context after the job finishes', async () => {

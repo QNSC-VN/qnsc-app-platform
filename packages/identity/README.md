@@ -50,7 +50,7 @@ each extends the JWT payload and owns its own routes.
 | `JWT_STRATEGY_OPTIONS`    | `JwtStrategyOptions`     | ES256 verification material                                                                   |
 | `ENTRA_VERIFIER_OPTIONS`  | `EntraVerifierOptions`   | tenant + audience                                                                             |
 | `JwtService`              | `JwtModule`              | from `@nestjs/jwt`                                                                            |
-| `CacheService`            | `CacheModule`            | from `@quynhonsemiconductor/platform-cache`; backs `AuthTokenCache`                                        |
+| `CacheService`            | `CacheModule`            | from `@quynhonsemiconductor/platform-cache`; backs `AuthTokenCache`                           |
 
 ### Optional — bind only if the concept exists in your product
 
@@ -221,4 +221,3 @@ They are kept, not deleted, because that duplication is drift rather than a real
 divergence: the cookie-vs-Bearer branch is mechanism, and the second product needs
 exactly the first one's version when it adopts BFF sessions. Converging them here
 is the next step, not another deletion.
-

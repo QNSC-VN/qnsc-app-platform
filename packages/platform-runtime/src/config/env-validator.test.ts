@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { createEnvValidator, type EnvSchemaLike } from './env-validator';
 
 function schema<T>(
-  result: { success: true; data: T } | { success: false; issues: Array<{ path: string[]; message: string }> },
+  result:
+    | { success: true; data: T }
+    | { success: false; issues: Array<{ path: string[]; message: string }> },
 ): EnvSchemaLike<T> {
   return {
     safeParse: () =>

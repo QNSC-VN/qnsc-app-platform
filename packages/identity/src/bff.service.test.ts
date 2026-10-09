@@ -384,7 +384,12 @@ describe('BffService — multi-IdP broker path', () => {
       returnTo: '/back',
       createdAt: Date.now(),
     });
-    const res = await svc.completeLogin({ code: 'c', state: 'st', cookieState: 'st', ip: '1.1.1.1' });
+    const res = await svc.completeLogin({
+      code: 'c',
+      state: 'st',
+      cookieState: 'st',
+      ip: '1.1.1.1',
+    });
     expect(registry.resolveById).toHaveBeenCalledWith('conn-9');
     expect(brokerOidc.exchangeCode).toHaveBeenCalled();
     expect(verifier.verify).toHaveBeenCalledWith('idt', resolvedConn, 'n');
