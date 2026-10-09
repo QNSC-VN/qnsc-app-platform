@@ -1,0 +1,26 @@
+{
+  "graceBudgetMs": 15000,
+  "shortJobMs": 6000,
+  "longJobMs": 45000,
+  "workerExitAfterSigtermMs": 15056,
+  "workerExit": {
+    "code": 0,
+    "signal": null
+  },
+  "shortJobsFinishedOnDrainingWorker": 3,
+  "longJobAbortedAfterSigtermMs": 15028,
+  "longJobResumedOnOtherWorkerAfterSigtermMs": 16011,
+  "longJobRetryCountAfterResume": 1,
+  "longJobRetryLimit": 2,
+  "stopMessage": ["stop-begin SIGTERM", "stop-end 15025 ms"],
+  "lateJobRanOn": "drain-B",
+  "recordedAt": "2026-10-09T09:59:03.150Z",
+  "retryLimit0Drain": {
+    "jobState": "failed",
+    "deadLettered": 1,
+    "runsAfterDrain": 0,
+    "output": {
+      "value": "pg-boss shut down while active"
+    }
+  }
+}

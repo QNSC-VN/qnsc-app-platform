@@ -1,0 +1,70 @@
+{
+  "jobMs": 1800000,
+  "expireInSeconds": 2700,
+  "control": {
+    "starts": [
+      {
+        "worker": "control-A",
+        "retryCount": 0,
+        "at": "2026-10-09T13:06:18.338Z"
+      }
+    ],
+    "finishes": [
+      {
+        "worker": "control-A",
+        "at": "2026-10-09T13:36:18.791Z"
+      }
+    ],
+    "sideEffects": 1,
+    "sequence": ["active#0", "completed#0"]
+  },
+  "expiry": {
+    "starts": [
+      {
+        "worker": "expiry-A",
+        "retryCount": 0,
+        "at": "2026-10-09T13:06:18.335Z"
+      },
+      {
+        "worker": "expiry-B",
+        "retryCount": 1,
+        "at": "2026-10-09T13:52:18.583Z"
+      }
+    ],
+    "finishes": [
+      {
+        "worker": "expiry-B",
+        "at": "2026-10-09T14:22:18.535Z"
+      }
+    ],
+    "sideEffects": 1,
+    "sequence": ["active#0", "active#1", "completed#1"],
+    "killToReLeaseMs": 2157079,
+    "startToReLeaseMs": 2760248
+  },
+  "heartbeat": {
+    "starts": [
+      {
+        "worker": "heartbeat-A",
+        "retryCount": 0,
+        "at": "2026-10-09T13:06:18.340Z"
+      },
+      {
+        "worker": "heartbeat-B",
+        "retryCount": 1,
+        "at": "2026-10-09T13:17:18.015Z"
+      }
+    ],
+    "finishes": [
+      {
+        "worker": "heartbeat-B",
+        "at": "2026-10-09T13:47:17.999Z"
+      }
+    ],
+    "sideEffects": 1,
+    "sequence": ["active#0", "retry#0", "active#1", "completed#1"],
+    "killToReLeaseMs": 56511,
+    "startToReLeaseMs": 659675
+  },
+  "recordedAt": "2026-10-09T14:22:19.889Z"
+}

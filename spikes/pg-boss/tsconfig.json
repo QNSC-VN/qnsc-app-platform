@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Never compiled or published. vitest runs the TypeScript directly, and the child worker
+    // processes are started with Node's own type stripping (no build, no tsx) — so
+    // `erasableSyntaxOnly` rejects the few TypeScript features Node cannot strip (enums,
+    // parameter properties), and imports carry their `.ts` extension.
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": ["src/**/*"]
+}

@@ -1,0 +1,58 @@
+{
+  "inProcess_poll1s": {
+    "latency": {
+      "n": 150,
+      "min": 25,
+      "p50": 535,
+      "p95": 989,
+      "p99": 1018,
+      "max": 1018,
+      "mean": 533.9133333333333
+    },
+    "send": {
+      "n": 150,
+      "min": 4,
+      "p50": 10,
+      "p95": 16,
+      "p99": 25,
+      "max": 95,
+      "mean": 10.973333333333333
+    }
+  },
+  "inProcess_poll05s": {
+    "latency": {
+      "n": 150,
+      "min": 26,
+      "p50": 254,
+      "p95": 508,
+      "p99": 517,
+      "max": 524,
+      "mean": 267.91333333333336
+    },
+    "send": {
+      "n": 150,
+      "min": 4,
+      "p50": 10,
+      "p95": 15,
+      "p99": 18,
+      "max": 19,
+      "mean": 9.7
+    }
+  },
+  "childProcess_poll1s": {
+    "latency": {
+      "n": 100,
+      "min": 15.671,
+      "p50": 501.002,
+      "p95": 967.204,
+      "p99": 998.438,
+      "max": 1021.849,
+      "mean": 504.8836100000002
+    },
+    "note": "created_on → handler first line, both stamped by the database"
+  },
+  "idle_6queues_poll1s": {
+    "transactionsPerSecond": 10.1
+  },
+  "recordedAt": "2026-10-09T13:24:04.168Z"
+}

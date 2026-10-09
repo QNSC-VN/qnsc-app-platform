@@ -1,0 +1,27 @@
+{
+  "name": "@quynhonsemiconductor/spike-pg-boss",
+  "version": "0.0.0",
+  "private": true,
+  "description": "WP-6 spike: does pg-boss meet the seven job-queue scenarios of PORTFOLIO-TECH-REVIEW 2A.6 plus end-to-end pickup latency and transactional enqueue through the platform-db DbExecutor? Evidence for docs/adr/0001-job-queue.md. Never published.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "bench:load": "vitest run --config vitest.bench.config.ts src/bench/load.run.ts",
+    "bench:transcode": "vitest run --config vitest.bench.config.ts src/bench/transcode.run.ts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@quynhonsemiconductor/platform-db": "workspace:*",
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.1",
+    "pg-boss": "12.37.0"
+  },
+  "devDependencies": {
+    "@opentelemetry/sdk-metrics": "2.10.0",
+    "@quynhonsemiconductor/testing": "workspace:*",
+    "@types/pg": "8.23.1",
+    "testcontainers": "12.2.0"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "attempts": 4,
+  "retryGapsMs": [1499, 2504, 5508],
+  "totalMsToDeadLetter": 10329,
+  "sourceRetryCount": 3,
+  "deadLetterKeptDays": 1825,
+  "recordedAt": "2026-10-09T08:08:15.403Z"
+}

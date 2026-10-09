@@ -20,6 +20,9 @@ packages/platform-mail/     @quynhonsemiconductor/platform-infra
 # Private (never published) test harness shared by every package's tests.
 packages/testing/           @quynhonsemiconductor/platform-infra
 
+# Spikes: private, never published; they back the ADRs.
+spikes/                     @quynhonsemiconductor/platform-infra
+
 # Decision records and the plan they implement.
 docs/adr/                   @quynhonsemiconductor/platform-infra
 
