@@ -1,0 +1,133 @@
+# Canary cleanup: removes the GitHub Packages versions that canary.yml publishes.
+#
+#   * pull request CLOSED (merged or not): delete every version  <x>-pr.<this PR>.<sha7>
+#   * weekly sweep:                         delete every version  <x>-pr.<any>.<sha7>  older than 30 days
+#                                           (catches PRs whose close event was missed, e.g. a failed run)
+#
+# Why match on the version name: GitHub's package API does not expose npm dist-tags, and the only
+# versions that ever carry the tag `pr-<N>` are the ones named `...-pr.<N>.<sha7>`. Deleting by
+# that exact shape is the same set, and it cannot touch a release.
+#
+# LEAST PRIVILEGE. The one job holds `packages: write` and nothing else; there is no checkout, so
+# it runs no code from the pull request -- only `gh` and `jq`, which ship with the runner.
+#
+# SAFETY RAILS (all in the script below):
+#   - a version is deleted only if its name matches ^X.Y.Z-pr.N.<7 hex>$ exactly;
+#   - only packages linked to THIS repository are looked at;
+#   - a package is never emptied: if every version of it would go, none are deleted;
+#   - `workflow_dispatch` defaults to a dry run.
+name: Canary cleanup
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: '17 3 * * 0' # Sundays 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: List what would be deleted without deleting it
+        type: boolean
+        default: true
+      older-than-days:
+        description: Sweep only; delete -pr. versions older than this many days
+        type: string
+        default: '30'
+
+permissions: {}
+
+concurrency:
+  group: canary-cleanup-${{ github.event.pull_request.number || 'sweep' }}
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    name: Delete canary versions
+    # A fork's pull request never published a canary and its token cannot delete one.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    steps:
+      - name: Delete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OLDER_THAN_DAYS: ${{ inputs.older-than-days || '30' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT" = "pull_request" ]; then
+            mode="pr"
+            [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::bad PR number"; exit 1; }
+            scope="canaries of PR #${PR_NUMBER}"
+          else
+            mode=sweep
+            [[ "$OLDER_THAN_DAYS" =~ ^[0-9]+$ ]] || { echo "::error::older-than-days must be a number"; exit 1; }
+            scope="canaries older than ${OLDER_THAN_DAYS} days"
+          fi
+          cutoff=$(( $(date +%s) - OLDER_THAN_DAYS * 86400 ))
+
+          # The ONLY selector. A release such as 4.1.0 or a prerelease such as 5.0.0-beta.1 can
+          # never match it.
+          # shellcheck disable=SC2016  # the $ are jq variables, not shell ones
+          jq_select='
+            .name as $n
+            | ($n | test("^[0-9]+\\.[0-9]+\\.[0-9]+-pr\\.[0-9]+\\.[0-9a-f]{7}$")) as $canary
+            | $canary and (
+                ($mode == "pr"    and ($n | test("-pr\\." + $pr + "\\.[0-9a-f]{7}$")))
+                or
+                ($mode == "sweep" and ((.created_at | fromdateiso8601) < $cutoff))
+              )'
+
+          {
+            echo "### Canary cleanup (${scope})"
+            [ "$DRY_RUN" = "true" ] && echo "**Dry run: nothing is deleted.**"
+            echo
+            echo "| Package | Version | Result |"
+            echo "| --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          deleted=0
+          packages=$(gh api --paginate "/orgs/${ORG}/packages?package_type=npm&per_page=100" \
+            --jq '.[] | select(.repository.full_name == env.REPO) | .name')
+
+          for pkg in $packages; do
+            [[ "$pkg" =~ ^[a-z0-9._-]+$ ]] || { echo "::warning::skipping odd package name '$pkg'"; continue; }
+
+            versions=$(gh api --paginate "/orgs/${ORG}/packages/npm/${pkg}/versions?per_page=100" \
+              --jq '.[] | {id, name, created_at}' | jq -sc '.')
+            doomed=$(jq -c --arg mode "$mode" --arg pr "${PR_NUMBER:-0}" --argjson cutoff "$cutoff" \
+              "[.[] | select(${jq_select})]" <<<"$versions")
+
+            count=$(jq 'length' <<<"$doomed")
+            total=$(jq 'length' <<<"$versions")
+            [ "$count" -eq 0 ] && continue
+            if [ "$count" -eq "$total" ]; then
+              echo "::warning::refusing to delete every version of ${pkg}"
+              echo "| \`${pkg}\` | (all ${total}) | refused: would empty the package |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            while read -r id name; do
+              if [ "$DRY_RUN" = "true" ]; then
+                result="would delete"
+              elif out=$(gh api -X DELETE "/orgs/${ORG}/packages/npm/${pkg}/versions/${id}" 2>&1); then
+                result="deleted"; deleted=$((deleted + 1))
+              elif grep -q "Not Found" <<<"$out"; then
+                result="already gone"
+              else
+                echo "::error::could not delete ${pkg}@${name}: ${out}"
+                result="FAILED"; failed=1
+              fi
+              echo "| \`${pkg}\` | \`${name}\` | ${result} |" >> "$GITHUB_STEP_SUMMARY"
+            done < <(jq -r '.[] | "\(.id) \(.name)"' <<<"$doomed")
+          done
+
+          echo "deleted ${deleted} version(s)"
+          [ "${failed:-0}" -eq 0 ]
