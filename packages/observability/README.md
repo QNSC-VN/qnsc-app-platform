@@ -309,3 +309,29 @@ the auto-instrumented baseline is what guarantees nothing is blind.
   collector-side tail sampler, because the decision needs the finished trace.
 - **No health controller.** Readiness checks are product-specific and would drag
   Terminus in as a peer dependency.
+
+## Subpaths
+
+| import                                     | what                                                                                         |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `@quynhonsemiconductor/observability`      | logger options, request and job context, metrics, `failOpenLog`, `PROBE_PATHS`, `@Span`      |
+| `@quynhonsemiconductor/observability/otel` | `startOtel`, `shutdownOtel` — import this **first** in `main`, never through the root barrel |
+
+## Testing your code
+
+There is no `/testing` subpath. The recorders (`HttpMetrics`, `JobMetrics`, `QueueMetrics`,
+`SecurityMetrics`, `AuthMetrics`) are plain classes over the OpenTelemetry API, so a test asserts against
+an in-memory metric reader; `withJobContext` and `requestContextStorage.run` seed the context a log line
+reads. With `OTEL_ENABLED` unset, `startOtel` is a no-op and tests run without a collector.
+
+## Known limits
+
+- **Head sampling only.** `OTEL_SAMPLING_PROBABILITY` below `1.0` drops most error traces; use
+  collector-side tail sampling for those and leave this at `1.0` where the collector does it.
+- **`OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` are ignored** (the SDK is given its own sampler).
+- **Label caps are fixed** (`route` 500, `error_code` 200, `job`/`queue` 100) and there is deliberately
+  no per-product setting. Reaching one means an id or raw path is a label; fix the call site.
+- Changing `httpDurationBoundaries` invalidates existing latency series (see the warning above).
+- Auto-instrumentation covers HTTP, `pg` and `ioredis`; the AWS SDK, filesystem, DNS and raw sockets are
+  off.
+- **Node and pino only** (`nestjs-pino`). No log shipping and no health controller.

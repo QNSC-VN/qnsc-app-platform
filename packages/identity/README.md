@@ -221,3 +221,25 @@ They are kept, not deleted, because that duplication is drift rather than a real
 divergence: the cookie-vs-Bearer branch is mechanism, and the second product needs
 exactly the first one's version when it adopts BFF sessions. Converging them here
 is the next step, not another deletion.
+
+## Subpaths
+
+| import                                   | what                                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `@quynhonsemiconductor/identity`         | tokens, rotation, Entra verification, BFF, denylist, JWT strategy, the domain ports              |
+| `@quynhonsemiconductor/identity/testing` | the **conformance suites** a product runs against its own adapters (see _Testing your adapters_) |
+
+## Environment
+
+`identity` 7.x reads **no environment variable**: everything arrives through the DI tokens above
+(`AUTH_SERVICE_OPTIONS`, `JWT_STRATEGY_OPTIONS`, `ENTRA_VERIFIER_OPTIONS`, `BFF_OPTIONS`). Where the
+product sources those values is its own business. The client address used for rate limiting comes from
+`platform-http`'s `clientIp`.
+
+## Version 8 (pending WP-10)
+
+`identity` **8.0.0** rebuilds this package on Better Auth. It is a **major**: the binding model changes
+and a `MIGRATION-v7-to-v8.md` ships with it. Until it is released, 7.x is what the products run, and the
+text above describes 7.x. The design and the spike that validated it are in
+[ADR 0002](../../docs/adr/0002-identity-v8-better-auth.md); the contract-level decisions are in
+[PLATFORM-CONTRACT.md](../../docs/PLATFORM-CONTRACT.md) §12.

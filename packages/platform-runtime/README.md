@@ -266,3 +266,42 @@ proposing anything HTTP-shaped.
 
 Rate-limit thresholds, job schedules and TTLs are policy: mechanism here, values in
 the product.
+
+## Environment
+
+| variable                     | default                        | read by                                                                        |
+| ---------------------------- | ------------------------------ | ------------------------------------------------------------------------------ |
+| `SHUTDOWN_TIMEOUT_MS`        | `25000`                        | `enableGracefulShutdown` — hard deadline ([above](#enablegracefulshutdownapp)) |
+| `SHUTDOWN_ENDPOINT_DELAY_MS` | `5000` in a pod, `0` elsewhere | `enableGracefulShutdown` — keep serving after going not-ready                  |
+| `KUBERNETES_SERVICE_HOST`    | set by the kubelet             | decides "in a pod" for the delay default                                       |
+| `OTEL_ENABLED`               | `false`                        | `enableGracefulShutdown` flushes telemetry on exit only when this is `true`    |
+
+Everything else (the variable set your service validates with `AppConfigModule`) is yours. The names
+shared with the chart are listed in [PLATFORM-CONTRACT.md](../../docs/PLATFORM-CONTRACT.md) §6.
+
+## Subpaths
+
+| import                                            | what                                                                           |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `@quynhonsemiconductor/platform-runtime`          | config, health, shutdown, `ExclusiveJob` (deprecated), request timing          |
+| `@quynhonsemiconductor/platform-runtime/load-env` | `.env` loading — a leaf module, import it **first**, before the OTel bootstrap |
+
+## Testing your code
+
+There is no `/testing` subpath. `enableHealth(app, { checks })` takes plain async functions, so a check
+is unit-testable on its own; to exercise `/livez` and `/readyz` build a Nest Fastify application in the
+test and call `app.inject()`. This package's own tests do that against a throwaway application.
+
+## Known limits
+
+- **NestJS + Fastify.** `enableHealth`, `enableGracefulShutdown` and `registerRequestTiming` take the
+  Nest Fastify application (or its Fastify instance).
+- **`request-timing` decodes the AWS load balancer's `X-Amzn-Trace-Id`.** Behind Cloudflare Tunnel and
+  Envoy there is no such header, so the ALB fields are simply absent; the rest of the timing split
+  still works. It is retained until the ECS/ALB estate is gone.
+- **`/v1/healthz` and `/v1/readyz` aliases** exist only for the ALB target group and the Dockerfile
+  `HEALTHCHECK`; they are removed with ECS.
+- **`ExclusiveJob` is deprecated** for `platform-jobs` schedules and goes in the next major. Without a
+  cache **and** a database pool it still fails open and runs unlocked (logged at ERROR, counted in
+  `job.unlocked_runs`).
+- Shutdown handles `SIGTERM` and `SIGINT` only. A hook that throws ends Nest's close sequence.
