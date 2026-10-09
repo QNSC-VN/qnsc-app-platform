@@ -86,6 +86,11 @@
       "package-name": "@quynhonsemiconductor/platform-db",
       "component": "platform-db",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/platform-jobs": {
+      "package-name": "@quynhonsemiconductor/platform-jobs",
+      "component": "platform-jobs",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "pull-request-title-pattern": "chore(release): ${component} ${version}",

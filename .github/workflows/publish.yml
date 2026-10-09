@@ -23,6 +23,7 @@ on:
       - 'observability-v*'
       - 'platform-runtime-v*'
       - 'platform-db-v*'
+      - 'platform-jobs-v*'
 
 permissions:
   contents: read

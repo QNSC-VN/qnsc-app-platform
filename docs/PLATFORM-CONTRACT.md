@@ -44,7 +44,7 @@ service written today does not have to guess.
 ## 1. Process model
 
 - One image per service. The same image runs as the API and as the worker; **`ROLE=worker`** selects the
-  worker. Anything else is the API. (Reference: `platform-jobs`, pending WP-7 — [§13](#13-async-work).)
+  worker. Anything else is the API. (Reference: `platform-jobs` — [§13](#13-async-work).)
 - The API process MUST NOT run background handlers. It MAY enqueue work.
 - One worker deployment per product, running all of that product's queues.
 - Containers are `linux/amd64` and read configuration **from the environment**, plus files the
@@ -481,20 +481,34 @@ RabbitMQ or SQS.
    return a clear error **and** leave a retry job; the business step proceeds only from `notified`.
 8. SSE routes send a heartbeat every **30 s** and the route MUST disable the gateway's request timeout.
 
-### Pending WP-7 — `platform-jobs`
+### `platform-jobs` (WP-7)
 
-Decided in [ADR 0001](adr/0001-job-queue.md) (pg-boss; verdict PASS), not yet released:
+Decided in [ADR 0001](adr/0001-job-queue.md) and its amendment of 2026-10-10 (pg-boss; verdict PASS);
+implemented by WP-7, not yet released:
 
 - API: `jobs.send(queue, data, { tx, idempotencyKey, startAfter, priority })`, `jobs.handle(queue, handler, options)`,
   `jobs.schedule(name, cron, data, { tz })`. Products never import the queue library.
-- **Idempotency key → job id** (not a singleton key); a duplicate key inserts nothing.
+- **Idempotency key → job id** (not a singleton key); a duplicate key inserts nothing. `send` without `tx`
+  commits on the jobs pool's own connection, independently of any transaction you have open.
+- Handlers are at-least-once and MUST be idempotent. `jobs.once(db, key, effect)` guards a **database**
+  effect (savepoint, one transaction). It is **never** for an external call: that needs its own claim
+  ledger, as `platform-mail` does ([§14](#14-email)).
+- `PermanentJobError` from a handler dead-letters the job at once, with no retries.
 - Schedules default to `Asia/Ho_Chi_Minh`. One execution per tick across any number of workers.
-- Per-queue **retention** is mandatory: defaults completed 7 days, failed 30 days, dead-letter until
-  handled. `mail.send`: completed deleted immediately, failed at most 24 h — and because deleting a
-  completed job also drops the job-id dedupe, its handler keeps its own idempotency store.
-- Fetching is batched with burst; long jobs use a 30 s heartbeat. `retryLimit` minimum is 1.
-- The app role never owns the queue schema (the migrator does); queue statistics come from telemetry
-  (`queue.*`, [§5](#5-telemetry)), not from the queue's own stats table.
+- Per-queue **retention** defaults: completed 7 days; failed follows completed (pg-boss keeps finished
+  jobs on one clock); the dead-letter copy 30 days. `mail.send`: completed deleted immediately, failed
+  at most 24 h — and because deleting a completed job also drops the job-id dedupe, its handler keeps its
+  own idempotency store.
+- Fetching is batched with burst (`concurrency` jobs in flight, run as one batch); long jobs use a 30 s
+  heartbeat. `retryLimit` minimum is 1 (a pod drain spends an attempt). Each job is completed as soon as
+  its handler returns, so a drain never re-runs a job that had finished.
+- A dead worker's job is noticed after its lease or heartbeat **plus up to ~75 s** (the queue's monitor
+  pass); the platform accepts this.
+- The app role never owns the queue schema (the migrator does, through `installJobsSchema`); queue
+  statistics come from telemetry, not from the queue's own stats table.
+- Telemetry on the contract names ([§5](#5-telemetry)): `queue.processed`, `queue.failures`,
+  `queue.lag_seconds` (the age of the oldest ready job); pg-boss's `pgboss.*` instruments and
+  `pgboss.queue.oldest_ready_age` are extras. Handler logs carry `queue:jobId` as the correlation id.
 - One worker replica per product; alert on queue depth and oldest-job age. **No KEDA.**
 - `platform-runtime`'s `ExclusiveJob` is **deprecated** in favour of schedules and is removed in the
   next major, after every product has converged.

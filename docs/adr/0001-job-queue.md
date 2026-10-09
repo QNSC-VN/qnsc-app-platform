@@ -1,6 +1,6 @@
 # 0001. Use pg-boss as the job queue behind `platform-jobs`
 
-- **Status:** **Accepted** (2026-10-09, platform lead) — verdict **PASS**. WP-7 builds `platform-jobs` on pg-boss with the decisions below.
+- **Status:** **Accepted** (2026-10-09, platform lead) — verdict **PASS**. WP-7 builds `platform-jobs` on pg-boss with the decisions below. **Amended 2026-10-10** (see _Amendment 2026-10-10_, which supersedes the earlier text where they differ).
 - **Date:** 2026-10-09
 - **Work package:** WP-6 (builds WP-7; informs WP-8 and WP-9)
 - **Deciders:** platform lead (`@quynhonsemiconductor/platform-infra`)
@@ -255,6 +255,56 @@ and the dead-letter count, which is `ready` on the dead-letter queue, so an aler
 8. Not verified here, to verify on the server before the first product depends on it: CloudNativePG
    (and a PgBouncer Pooler if one is ever added), a real kubelet drain, table growth over weeks, and
    the Grafana Cloud dashboards over the OTLP metrics.
+
+## Amendment 2026-10-10 (WP-7 implementation and review; platform lead)
+
+Building `platform-jobs` against pg-boss 12.37.0 showed four things the spike could not, and the
+platform lead decided each. Where this section and an earlier one differ, this one governs.
+
+1. **Retention is one clock per queue.** pg-boss deletes every _finished_ job of a queue
+   (completed, and failed after its retries) on a single `deleteAfterSeconds`. So `retention.completed`
+   and `retention.failed` cannot differ by number; `failed` follows `completed` (7 days by default).
+   A queue that needs to keep failures longer than successes uses `completed: 'immediate'` (the row is
+   deleted the moment the handler succeeds) and sets `failed`; `mail.send` does exactly that
+   (`failed` 24 h). The "failures kept 30 days" intent is carried by the **dead-letter copy**, whose
+   default retention is **30 days** (was 365 days in the first implementation). That also bounds how
+   long a failed payload (personal data) lingers. A waiting dead-letter job is deleted at its
+   `keep_until`, so "until handled" is not literal: the alert on the dead-letter queue's depth is the
+   real control. This amends decision 3 and the plan's "failed 30 days".
+2. **Deletion interval.** pg-boss deletes finished jobs past their retention only every
+   `maintenanceIntervalSeconds`, whose default is **24 hours** ("at most 24 h" would mean up to 48).
+   `platform-jobs` sets **15 minutes**. Accepted.
+3. **Detecting a dead worker takes about 75 seconds plus the expiry.** Lease expiry and heartbeat
+   failure are checked by the monitor pass, which pg-boss claims per queue every
+   `monitorIntervalSeconds` (default 60 s); the supervise interval of F10 does not change it. A killed
+   worker's job therefore comes back after its lease (or, with a heartbeat, about one heartbeat of
+   silence) **plus up to ~75 s** (monitor 60 s plus a supervise pass). Measured with the monitor
+   shortened: 7 s for a 4 s lease and 12 s for a 10 s heartbeat. **Accepted by the platform lead; the
+   monitor interval stays at pg-boss's default**, because the same pass runs a whole-table statistics
+   aggregate whose cost at a shorter interval has not been measured. This amends F4 and F10.
+4. **A batch must not fail a job that already succeeded.** pg-boss settles a batch only when every
+   handler in it has returned, and on a drain past the budget, or when one job outlives the batch's
+   lease, it fails every job it still holds. A job that had succeeded would be retried and its side
+   effect run again on every deploy that catches a long job. `platform-jobs` therefore **completes
+   (or, for `'immediate'`, deletes) each job, fenced to the attempt fetched, as soon as its handler
+   returns**; the later batch settle finds it settled. This amends F5.
+
+Also decided:
+
+- **`PermanentJobError`.** A handler that throws it sends the job straight to the dead-letter queue
+  with no retries (`perJobResults: 'deadletter'`). `drainQueue` honours it.
+- **Concurrency model accepted:** `batchSize = concurrency`, `localConcurrency = 1`, so at most
+  `concurrency` jobs are in flight. One slow job holds its batch's other slots; long jobs get their
+  own queue.
+- **API additions to the sketch:** `defineQueue()` (a process that only enqueues must define the queue;
+  awaited when called after `start()`), `acceptDeadLetterOnDrain` (how a queue declares it will not
+  retry), `jobs.once()` and `pgboss.platform_effect` (the handler-side guard, in the one schema this
+  package owns; its effect runs inside a savepoint, and it must never hold an external call),
+  `installJobsSchema()` (the migration Job's step, using pg-boss's own install path under one advisory
+  lock, rather than running the `getConstructionPlans` SQL).
+- **Metrics** are emitted on the platform-contract names (`queue.processed`, `queue.failures`,
+  `queue.lag_seconds` = age of the oldest ready job) through `observability`'s `QueueMetrics`, with
+  pg-boss's own `pgboss.*` instruments and `pgboss.queue.oldest_ready_age` as extras.
 
 ## Alternatives considered
 
