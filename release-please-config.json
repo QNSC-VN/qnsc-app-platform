@@ -5,7 +5,7 @@
   "bump-patch-for-minor-pre-major": true,
   "draft": false,
   "prerelease": false,
-  "separate-pull-requests": true,
+  "separate-pull-requests": false,
   "include-component-in-tag": true,
   "include-v-in-tag": true,
   "tag-separator": "-",
@@ -84,5 +84,6 @@
     }
   },
   "pull-request-title-pattern": "chore(release): ${component} ${version}",
-  "pull-request-header": "🤖 Opened by Release Please. Merging tags `${component}-v${version}` and publishes the package to GitHub Packages."
+  "pull-request-header": "🤖 Opened by Release Please. One pull request for every pending package release: merging it tags each `<package>-v<version>` and the publish workflow pushes each package to GitHub Packages.",
+  "group-pull-request-title-pattern": "chore(release): publish app-platform packages"
 }
