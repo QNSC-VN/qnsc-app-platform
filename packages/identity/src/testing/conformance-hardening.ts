@@ -1,0 +1,789 @@
+import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
+import { hash as argon2hash } from '@node-rs/argon2';
+import { verifiedUser, signIn } from './flows';
+import {
+  API,
+  STAFF_DOMAIN,
+  TEST_TENANT,
+  startStack,
+  strongPassword,
+  uniqueEmail,
+  type ConformanceInfra,
+  type Stack,
+} from './harness';
+import { startMockIdp, type MockIdp } from './mock-idp';
+import {
+  createOrganization,
+  microsoftSignIn,
+  registerPartner,
+  ssoSignIn,
+  type TestApi,
+} from './support';
+
+/**
+ * Findings of the review of PR #168. Each `it` fails against the code as first submitted; the name
+ * says which finding it pins.
+ */
+export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void {
+  const { describe, it, expect } = t;
+
+  describe('review S1: trustedOrigins is static; organization creation is closed', () => {
+    it('an SSO provider registered by an organization does NOT make its origin a trusted redirect target', async () => {
+      const stack = await startStack(infra, { presets: ['public', 'organizations'] });
+      try {
+        const attacker = 'https://attacker.example';
+        const org = (
+          await stack.pool.query<{ id: string }>(
+            `insert into identity.organization (id, name, slug, created_at) values (uuidv7(), 'evil', 'evil', now()) returning id`,
+          )
+        ).rows[0]!.id;
+        const owner = (
+          await stack.pool.query<{ id: string }>(
+            `insert into identity."user" (id, name, email, email_verified, created_at, updated_at) values (uuidv7(), 'o', 'o@evil.test', true, now(), now()) returning id`,
+          )
+        ).rows[0]!.id;
+        await stack.pool.query(
+          `insert into identity.sso_provider (id, issuer, oidc_config, user_id, provider_id, organization_id, domain, domain_verified)
+           values (uuidv7(), $1, $2, $3::uuid, 'evil', $4::uuid, 'evil.test', false)`,
+          [
+            `${attacker}/oidc`,
+            JSON.stringify({
+              clientId: 'c',
+              clientSecret: 's',
+              discoveryEndpoint: `${attacker}/.well-known/openid-configuration`,
+            }),
+            owner,
+            org,
+          ],
+        );
+        const victim = uniqueEmail('victim');
+        await verifiedUser(stack, victim, strongPassword(), expect);
+        const reset = await stack.client().post(`${API}/request-password-reset`, {
+          email: victim,
+          redirectTo: `${attacker}/steal`,
+        });
+        expect(reset.status).toBe(403);
+        const verify = await stack.client().post(`${API}/sign-up/email`, {
+          email: uniqueEmail('x'),
+          password: strongPassword(),
+          name: 'x',
+          callbackURL: `${attacker}/x`,
+        });
+        expect(verify.status).toBe(403);
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    it('creating an organization is closed by default and opens only with the product option', async () => {
+      const closed = await startStack(infra, { presets: ['public', 'organizations'] });
+      try {
+        const user = await verifiedUser(closed, uniqueEmail('stranger'), strongPassword(), expect);
+        const res = await user.post(`${API}/organization/create`, {
+          name: 'Mine',
+          slug: `mine-${randomUUID().slice(0, 6)}`,
+        });
+        expect(res.status).toBe(403);
+      } finally {
+        await closed.stop();
+      }
+      const open = await startStack(infra, {
+        presets: ['public', 'organizations'],
+        allowOrganizationCreation: true,
+      });
+      try {
+        const user = await verifiedUser(open, uniqueEmail('stranger'), strongPassword(), expect);
+        const res = await user.post(`${API}/organization/create`, {
+          name: 'Mine',
+          slug: `mine-${randomUUID().slice(0, 6)}`,
+        });
+        expect(res.status).toBe(200);
+      } finally {
+        await open.stop();
+      }
+    });
+  });
+
+  describe('review S2: the 12 h staff cap is enforced where sessions are written', () => {
+    let stack: Stack;
+    let idp: MockIdp;
+    t.beforeAll(async () => {
+      idp = await startMockIdp();
+      stack = await startStack(infra, {
+        presets: ['public', 'staff'],
+        staff: { authority: idp.base },
+      });
+    });
+    t.afterAll(async () => {
+      await stack?.stop();
+      await idp?.stop();
+    });
+
+    const lifetime = async (email: string) => {
+      const { rows } = await stack.pool.query<{ secs: number }>(
+        `select extract(epoch from (s.expires_at - s.created_at))::int as secs
+           from identity.session s join identity."user" u on u.id = s.user_id where u.email = $1`,
+        [email],
+      );
+      return rows[0]!.secs;
+    };
+    const ageSessions = async (email: string, hours: number) => {
+      await stack.pool.query(
+        `update identity.session s set created_at = s.created_at - make_interval(hours => $2),
+                updated_at = s.updated_at - make_interval(hours => $2), expires_at = s.expires_at - make_interval(hours => $2)
+           from identity."user" u where u.id = s.user_id and u.email = $1`,
+        [email, hours],
+      );
+      await stack.flushCache();
+    };
+    const staffByDomainOnly = async () => {
+      const email = `clerk-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`;
+      const password = strongPassword();
+      const u = await stack.pool.query<{ id: string }>(
+        `insert into identity."user" (id, name, email, email_verified, created_at, updated_at) values (uuidv7(), 'C', $1, true, now(), now()) returning id`,
+        [email],
+      );
+      await stack.pool.query(
+        `insert into identity.account (id, account_id, provider_id, user_id, password, created_at, updated_at)
+         values (uuidv7(), $1::text, 'credential', $2::uuid, $3, now(), now())`,
+        [
+          u.rows[0]!.id,
+          u.rows[0]!.id,
+          await argon2hash(password, {
+            memoryCost: 19456,
+            timeCost: 2,
+            parallelism: 1,
+            algorithm: 2,
+          }),
+        ],
+      );
+      const c = stack.client();
+      expect((await signIn(c, email, password)).status).toBe(200);
+      return { email, c };
+    };
+
+    it('a tenant member signed in with Microsoft gets a 12 h session in a combined instance', async () => {
+      const email = `lead-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`;
+      await microsoftSignIn(stack, idp, {
+        sub: 'a',
+        oid: randomUUID(),
+        tid: TEST_TENANT,
+        email,
+        name: 'L',
+      });
+      expect(Math.abs((await lifetime(email)) - 12 * 3600)).toBeLessThanOrEqual(5);
+    });
+
+    it('a user with a staff-domain email but no Microsoft account is capped too; a public user is not', async () => {
+      const { email } = await staffByDomainOnly();
+      expect(Math.abs((await lifetime(email)) - 12 * 3600)).toBeLessThanOrEqual(5);
+      const visitor = uniqueEmail('visitor');
+      await verifiedUser(stack, visitor, strongPassword(), expect);
+      expect(await lifetime(visitor)).toBeGreaterThan(6 * 86400);
+    });
+
+    it("a 13 h staff session is dead on get-session, list-sessions and update-user (Better Auth's own endpoints)", async () => {
+      const { email, c } = await staffByDomainOnly();
+      expect((await c.get(`${API}/list-sessions`)).status).toBe(200);
+      await ageSessions(email, 13);
+      expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+      expect((await c.get(`${API}/list-sessions`)).status).toBe(401);
+      expect((await c.post(`${API}/update-user`, { name: 'Renamed' })).status).toBe(401);
+    });
+
+    it('a refresh cannot stretch a staff session beyond createdAt + 12 h', async () => {
+      const { email, c } = await staffByDomainOnly();
+      await ageSessions(email, 11); // one hour left
+      expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).not.toBeNull();
+      const { rows } = await stack.pool.query<{ over: number }>(
+        `select extract(epoch from (s.expires_at - s.created_at))::int - 43200 as over
+           from identity.session s join identity."user" u on u.id = s.user_id where u.email = $1`,
+        [email],
+      );
+      expect(rows[0]!.over).toBeLessThanOrEqual(5);
+    });
+  });
+
+  describe('review S3: an Entra identity never takes over an existing account by email', () => {
+    let idp: MockIdp;
+    t.beforeAll(async () => {
+      idp = await startMockIdp();
+    });
+    t.afterAll(() => idp?.stop());
+
+    const open = (staff: Record<string, unknown> = {}) =>
+      startStack(infra, { presets: ['public', 'staff'], staff: { authority: idp.base, ...staff } });
+
+    it('a tenant member whose email is NOT on a staff domain is refused and nothing is written', async () => {
+      const stack = await open();
+      try {
+        const email = `alias-${randomUUID().slice(0, 6)}@elsewhere.example`;
+        const { client, callback } = await microsoftSignIn(stack, idp, {
+          sub: 'a',
+          oid: randomUUID(),
+          tid: TEST_TENANT,
+          email,
+        });
+        expect(callback.location).toMatch(/error=unable_to_get_user_info/);
+        expect((await client.get(`${API}/get-session`)).json()).toBeNull();
+        expect(
+          (await stack.pool.query(`select 1 from identity."user" where email = $1`, [email])).rows,
+        ).toHaveLength(0);
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    it('a guest whose email belongs to an existing account is refused with ACCOUNT_LINK_REQUIRED, and nothing is linked', async () => {
+      const stack = await open({ allowGuests: true });
+      try {
+        const victim = uniqueEmail('victim');
+        await verifiedUser(stack, victim, strongPassword(), expect);
+        const before = (await stack.pool.query(`select count(*)::int as n from identity.account`))
+          .rows[0].n;
+        const { client, callback } = await microsoftSignIn(stack, idp, {
+          sub: 'g',
+          oid: randomUUID(),
+          tid: TEST_TENANT,
+          email: victim,
+          claims: { acct: 1 },
+        });
+        expect(callback.location).toMatch(/error=ACCOUNT_LINK_REQUIRED/);
+        expect((await client.get(`${API}/get-session`)).json()).toBeNull();
+        expect(
+          (await stack.pool.query(`select count(*)::int as n from identity.account`)).rows[0].n,
+        ).toBe(before);
+        const linked = await stack.pool.query(
+          `select 1 from identity.account a join identity."user" u on u.id = a.user_id where u.email = $1 and a.provider_id = 'microsoft'`,
+          [victim],
+        );
+        expect(linked.rows).toHaveLength(0);
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    it('the squatting replacement does not run for a guest: the unverified account survives and the guest is refused', async () => {
+      const stack = await open({ allowGuests: true });
+      try {
+        const email = uniqueEmail('squat');
+        const squatter = await stack.pool.query<{ id: string }>(
+          `insert into identity."user" (id, name, email, email_verified, created_at, updated_at) values (uuidv7(), 'S', $1, false, now(), now()) returning id`,
+          [email],
+        );
+        const { callback } = await microsoftSignIn(stack, idp, {
+          sub: 'g',
+          oid: randomUUID(),
+          tid: TEST_TENANT,
+          email,
+          claims: { acct: 1 },
+        });
+        expect(callback.location).toMatch(/error=ACCOUNT_LINK_REQUIRED/);
+        expect(
+          (
+            await stack.pool.query(`select 1 from identity."user" where id = $1`, [
+              squatter.rows[0]!.id,
+            ])
+          ).rows,
+        ).toHaveLength(1);
+        expect(stack.events.some((e) => e.name === 'account.unverified_replaced')).toBe(false);
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    it('a new guest is created with an UNVERIFIED email and can come back with the same Entra identity', async () => {
+      const stack = await open({ allowGuests: true });
+      try {
+        const email = `vendor-${randomUUID().slice(0, 6)}@vendor.example`;
+        const oid = randomUUID();
+        const guest = { sub: 'g', oid, tid: TEST_TENANT, email, claims: { acct: 1 } };
+        const first = await microsoftSignIn(stack, idp, guest);
+        expect((await first.client.get(`${API}/get-session`)).json()).not.toBeNull();
+        const { rows } = await stack.pool.query<{ email_verified: boolean }>(
+          `select email_verified from identity."user" where email = $1`,
+          [email],
+        );
+        expect(rows[0]!.email_verified).toBe(false);
+        const again = await microsoftSignIn(stack, idp, guest);
+        expect((await again.client.get(`${API}/get-session`)).json()).not.toBeNull();
+      } finally {
+        await stack.stop();
+      }
+    });
+  });
+
+  describe('review S4 + A13: Google mirrors the company-domain rule and the squatting rule', () => {
+    let stack: Stack;
+    let idp: MockIdp;
+    t.beforeAll(async () => {
+      idp = await startMockIdp();
+      stack = await startStack(infra, {
+        presets: ['public', 'staff', 'organizations'],
+        google: { clientId: 'google-client', clientSecret: `g-${randomUUID()}` },
+        staff: { authority: idp.base },
+        extraTrustedOrigins: [idp.base],
+      });
+    });
+    t.afterAll(async () => {
+      await stack?.stop();
+      await idp?.stop();
+    });
+
+    /** What Google's callback hands `getUserInfo`: an id_token (its signature is checked earlier, by Better Auth). */
+    const googleUser = (email: string, verified = true) => {
+      const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+      const idToken = `${b64({ alg: 'none' })}.${b64({ sub: randomUUID(), email, email_verified: verified, name: 'G' })}.`;
+      const provider = stack.auth.options.socialProviders?.google as unknown as {
+        getUserInfo(token: {
+          idToken: string;
+        }): Promise<{ user: { email: string; emailVerified: boolean } } | null>;
+      };
+      return provider.getUserInfo({ idToken });
+    };
+
+    it('refuses an address on a staff domain', async () => {
+      expect(await googleUser(`ceo@${STAFF_DOMAIN}`)).toBeNull();
+      expect(await googleUser(`ceo@mail.${STAFF_DOMAIN}`)).toBeNull();
+    });
+
+    it('refuses an address on a VERIFIED SSO domain, but not on an unverified claim', async () => {
+      await registerPartner(stack, idp, t, { domain: 'verified-g.test' });
+      await registerPartner(stack, idp, t, { domain: 'claimed-g.test', verified: false });
+      expect(await googleUser('a@verified-g.test')).toBeNull();
+      expect((await googleUser('a@claimed-g.test'))?.user.email).toBe('a@claimed-g.test');
+    });
+
+    it('lets an ordinary verified address through, with the email marked verified', async () => {
+      const info = await googleUser(`person-${randomUUID().slice(0, 6)}@gmail.example`);
+      expect(info?.user.emailVerified).toBe(true);
+    });
+
+    it('replaces an unverified, never-used password account for an address Google reports verified', async () => {
+      const email = uniqueEmail('squat');
+      const squatter = await stack.pool.query<{ id: string }>(
+        `insert into identity."user" (id, name, email, email_verified, created_at, updated_at) values (uuidv7(), 'S', $1, false, now(), now()) returning id`,
+        [email],
+      );
+      await googleUser(email);
+      expect(
+        (
+          await stack.pool.query(`select 1 from identity."user" where id = $1`, [
+            squatter.rows[0]!.id,
+          ])
+        ).rows,
+      ).toHaveLength(0);
+      expect(
+        stack.events.some(
+          (e) => e.name === 'account.unverified_replaced' && e.userId === squatter.rows[0]!.id,
+        ),
+      ).toBe(true);
+    });
+
+    it('does not replace an account Google reports as UNVERIFIED, nor one that has a session', async () => {
+      const unverified = uniqueEmail('unv');
+      const a = await stack.pool.query<{ id: string }>(
+        `insert into identity."user" (id, name, email, email_verified, created_at, updated_at) values (uuidv7(), 'A', $1, false, now(), now()) returning id`,
+        [unverified],
+      );
+      await googleUser(unverified, false);
+      expect(
+        (await stack.pool.query(`select 1 from identity."user" where id = $1`, [a.rows[0]!.id]))
+          .rows,
+      ).toHaveLength(1);
+
+      const used = uniqueEmail('used');
+      const b = await stack.pool.query<{ id: string }>(
+        `insert into identity."user" (id, name, email, email_verified, created_at, updated_at) values (uuidv7(), 'B', $1, false, now(), now()) returning id`,
+        [used],
+      );
+      await stack.pool.query(
+        `insert into identity.session (id, token, user_id, expires_at, created_at, updated_at) values (uuidv7(), $1, $2::uuid, now() + interval '1 day', now(), now())`,
+        [randomUUID(), b.rows[0]!.id],
+      );
+      await googleUser(used);
+      expect(
+        (await stack.pool.query(`select 1 from identity."user" where id = $1`, [b.rows[0]!.id]))
+          .rows,
+      ).toHaveLength(1);
+    });
+
+    it('password sign-up for a company domain is refused (the rule Google mirrors)', async () => {
+      const res = await stack.client().post(`${API}/sign-up/email`, {
+        email: `x@${STAFF_DOMAIN}`,
+        password: strongPassword(),
+        name: 'x',
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('review S6 + A12: SSRF classifier, update-provider, redirects, no SAML', () => {
+    const reg = (organizationId: string, base: string, extra: Record<string, unknown> = {}) => ({
+      providerId: `p-${randomUUID().slice(0, 8)}`,
+      issuer: `${base}/oidc`,
+      domain: 'ssrf.test',
+      organizationId,
+      oidcConfig: {
+        clientId: 'c',
+        clientSecret: `s-${randomUUID()}`,
+        discoveryEndpoint: `${base}/.well-known/openid-configuration`,
+        pkce: true,
+        mapping: { email: 'email', emailVerified: 'email_verified', name: 'name' },
+      },
+      ...extra,
+    });
+
+    it('refuses what a hand-written classifier misses: mapped IPv6, NAT64, 6to4, benchmarking, with a generic message', async () => {
+      const strict = await startStack(infra, {
+        presets: ['public', 'organizations'],
+        unsafeTestNetwork: false,
+      });
+      try {
+        const { organizationId, owner } = await createOrganization(strict, t);
+        for (const base of [
+          'https://[::ffff:7f00:1]',
+          'https://[64:ff9b::7f00:1]',
+          'https://[2002:7f00:1::1]',
+          'https://198.18.0.1',
+          'https://198.19.255.254',
+          'https://100.64.0.1',
+          'https://metadata.google.internal',
+        ]) {
+          const res = await owner.post(`${API}/sso/register`, reg(organizationId, base));
+          expect(res.status, base).toBe(400);
+          expect(res.json(), base).toEqual({
+            code: 'SSO_URL_NOT_ALLOWED',
+            message: 'That URL is not allowed for SSO.',
+          });
+        }
+      } finally {
+        await strict.stop();
+      }
+    });
+
+    it('applies the same guard to /sso/update-provider: a verified provider cannot be re-pointed inward', async () => {
+      const strict = await startStack(infra, {
+        presets: ['public', 'staff', 'organizations'],
+        unsafeTestNetwork: false,
+      });
+      try {
+        const { organizationId, owner, ownerId } = await createOrganization(strict, t);
+        await strict.pool.query(
+          `insert into identity.sso_provider (id, issuer, oidc_config, user_id, provider_id, organization_id, domain, domain_verified)
+           values (uuidv7(), 'https://idp.partner.example/oidc', $1, $2::uuid, 'inward', $3::uuid, 'partner.example', true)`,
+          [
+            JSON.stringify({
+              clientId: 'c',
+              clientSecret: 's',
+              discoveryEndpoint: 'https://idp.partner.example/.well-known/openid-configuration',
+            }),
+            ownerId,
+            organizationId,
+          ],
+        );
+        for (const tokenEndpoint of [
+          'https://10.0.0.5/token',
+          'https://[::ffff:7f00:1]/token',
+          'http://idp.partner.example/token',
+        ]) {
+          const res = await owner.post(`${API}/sso/update-provider`, {
+            providerId: 'inward',
+            oidcConfig: { tokenEndpoint },
+          });
+          expect(res.status, tokenEndpoint).toBe(400);
+          expect(res.json(), tokenEndpoint).toMatchObject({ code: 'SSO_URL_NOT_ALLOWED' });
+        }
+        const reserved = await owner.post(`${API}/sso/update-provider`, {
+          providerId: 'inward',
+          domain: STAFF_DOMAIN,
+        });
+        expect(reserved.status).toBe(403);
+        expect(reserved.json()).toMatchObject({ code: 'SSO_DOMAIN_RESERVED' });
+      } finally {
+        await strict.stop();
+      }
+    });
+
+    it('refuses a URL that redirects (to a private address)', async () => {
+      const redirecting = createServer((_req, res) => {
+        res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data' });
+        res.end();
+      });
+      await new Promise<void>((resolve) => redirecting.listen(0, '127.0.0.1', resolve));
+      const base = `http://127.0.0.1:${(redirecting.address() as { port: number }).port}`;
+      const stack = await startStack(infra, {
+        presets: ['public', 'organizations'],
+        extraTrustedOrigins: [base],
+      });
+      try {
+        const { organizationId, owner } = await createOrganization(stack, t);
+        const res = await owner.post(`${API}/sso/register`, reg(organizationId, base));
+        expect(res.status).toBe(400);
+        expect(res.json()).toMatchObject({ code: 'SSO_URL_NOT_ALLOWED' });
+      } finally {
+        await stack.stop();
+        await new Promise<void>((resolve) => redirecting.close(() => resolve()));
+      }
+    });
+
+    it('D18: SAML is not in 8.0.0 — samlConfig is refused and the SAML routes answer 404', async () => {
+      const stack = await startStack(infra, { presets: ['public', 'organizations'] });
+      try {
+        const { organizationId, owner } = await createOrganization(stack, t);
+        const withSaml = await owner.post(
+          `${API}/sso/register`,
+          reg(organizationId, 'https://idp.partner.example', {
+            samlConfig: {
+              entryPoint: 'https://idp.partner.example/sso',
+              cert: 'x',
+              callbackUrl: '/x',
+              spMetadata: {},
+            },
+          }),
+        );
+        expect(withSaml.status).toBe(400);
+        expect(withSaml.json()).toMatchObject({ code: 'SAML_NOT_SUPPORTED' });
+        for (const path of [
+          '/sso/saml2/sp/metadata?providerId=x',
+          '/sso/saml2/callback/x',
+          '/sso/saml2/sp/acs/x',
+        ]) {
+          const res = await owner.get(`${API}${path}`);
+          expect(res.status, path).toBe(404);
+        }
+      } finally {
+        await stack.stop();
+      }
+    });
+  });
+
+  describe('review S7 + S8 + S9: test-login allow-list, no impersonation, no secret echo', () => {
+    it('S7: test-login loads only for NODE_ENV exactly "test" or "development" (with both switches)', async () => {
+      for (const NODE_ENV of ['production', 'staging', 'prod', '', undefined]) {
+        await expect(
+          startStack(infra, {
+            testLogin: true,
+            unsafeTestNetwork: false,
+            env: { IDENTITY_TEST_LOGIN: 'enabled', NODE_ENV },
+          }),
+        ).rejects.toThrow(/test-login refused/);
+      }
+      const ok = await startStack(infra, {
+        testLogin: true,
+        env: { IDENTITY_TEST_LOGIN: 'enabled', NODE_ENV: 'test' },
+      });
+      try {
+        const c = ok.client();
+        expect((await c.post(`${API}/test-login`, { email: uniqueEmail('e2e') })).status).toBe(200);
+      } finally {
+        await ok.stop();
+      }
+    });
+
+    it('S8: admin impersonation does not exist in 8.0.0', async () => {
+      const stack = await startStack(infra, { presets: ['public'] });
+      try {
+        const adminEmail = uniqueEmail('admin');
+        const password = strongPassword();
+        await verifiedUser(stack, adminEmail, password, expect);
+        await stack.pool.query(`update identity."user" set role = 'admin' where email = $1`, [
+          adminEmail,
+        ]);
+        const victim = uniqueEmail('victim');
+        await verifiedUser(stack, victim, strongPassword(), expect);
+        const victimId = (
+          await stack.pool.query<{ id: string }>(
+            `select id from identity."user" where email = $1`,
+            [victim],
+          )
+        ).rows[0]!.id;
+        const admin = stack.client();
+        expect((await signIn(admin, adminEmail, password)).status).toBe(200);
+        expect(
+          (await admin.post(`${API}/admin/impersonate-user`, { userId: victimId })).status,
+        ).toBe(404);
+        expect((await admin.post(`${API}/admin/stop-impersonating`, {})).status).toBe(404);
+        // the rest of the admin plugin still works
+        expect(
+          (await admin.post(`${API}/admin/revoke-user-sessions`, { userId: victimId })).status,
+        ).toBe(200);
+        expect(stack.events.some((e) => e.name === ('admin.impersonation_started' as never))).toBe(
+          false,
+        );
+        for (const path of ['/admin/impersonate-user', '/admin/stop-impersonating']) {
+          expect(stack.auth.options.disabledPaths).toContain(path);
+        }
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    it('S9: /sso/register never echoes the client secret (asserted for every registration in the kit)', async () => {
+      const idp = await startMockIdp();
+      const stack = await startStack(infra, {
+        presets: ['public', 'organizations'],
+        extraTrustedOrigins: [idp.base],
+      });
+      try {
+        const partner = await registerPartner(stack, idp, t, { domain: 'quiet2-u.test' });
+        const list = await partner.owner.get(`${API}/sso/providers`);
+        expect(list.body.includes(partner.clientSecret)).toBe(false);
+        const update = await partner.owner.post(`${API}/sso/update-provider`, {
+          providerId: partner.providerId,
+          oidcConfig: { scopes: ['openid', 'email'] },
+        });
+        expect(update.body.includes(partner.clientSecret)).toBe(false);
+      } finally {
+        await stack.stop();
+        await idp.stop();
+      }
+    });
+  });
+
+  describe('review A13: behaviours the first kit did not pin', () => {
+    it('Valkey outage: users can still sign up, verify and sign in, quickly, and the limiters fail open', async () => {
+      const degraded: string[] = [];
+      const stack = await startStack(infra, {
+        appValkeyUrl: 'redis://127.0.0.1:1', // nothing listens there
+        onStorageDegraded: (operation) => degraded.push(operation),
+      });
+      try {
+        const started = performance.now();
+        const email = uniqueEmail('outage');
+        const password = strongPassword();
+        const c = await verifiedUser(stack, email, password, expect);
+        expect((await c.get(`${API}/get-session`)).json()).not.toBeNull(); // sessions fall back to Postgres
+        // The built-in per-IP rule (3 sign-ins / 10 s) lives in Valkey, so it is OFF too: fail open.
+        const ip = '203.0.113.99';
+        for (let i = 0; i < 6; i += 1) {
+          expect(
+            (await signIn(stack.client({ ip }), uniqueEmail('open'), strongPassword())).status,
+          ).toBe(401);
+        }
+        expect(performance.now() - started).toBeLessThan(10_000); // measured 67 ms; 39 s without the short-circuit
+        expect(degraded.length).toBeGreaterThan(0);
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    it('sendOnSignIn: a correct password on an unverified account re-sends the verification mail (the 403 stays)', async () => {
+      const stack = await startStack(infra);
+      try {
+        const email = uniqueEmail('resend');
+        const password = strongPassword();
+        const c = stack.client();
+        await c.post(`${API}/sign-up/email`, { email, password, name: 'x' });
+        const count = async () => (await stack.mail()).filter((m) => m.to === email).length;
+        expect(await count()).toBe(1);
+        // the verification token is stamped in whole seconds; a resend in the same second is the same mail
+        await new Promise((r) => setTimeout(r, 1100));
+        const wrong = await signIn(stack.client(), email, strongPassword());
+        expect(wrong.status).toBe(401);
+        expect(await count()).toBe(1); // a wrong password sends nothing: only the owner can trigger it
+        const right = await signIn(stack.client(), email, password);
+        expect(right.status).toBe(403);
+        expect(right.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' });
+        expect(await count()).toBe(2);
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    it('sign-up is limited per IP (3 per 10 s) and not by anything else', async () => {
+      const stack = await startStack(infra);
+      try {
+        const ip = '203.0.113.120';
+        const codes: number[] = [];
+        for (let i = 0; i < 5; i += 1) {
+          codes.push(
+            (
+              await stack.client({ ip }).post(`${API}/sign-up/email`, {
+                email: uniqueEmail('burst'),
+                password: strongPassword(),
+                name: 'x',
+              })
+            ).status,
+          );
+        }
+        expect(codes).toEqual([200, 200, 200, 429, 429]);
+        const other = await stack.client({ ip: '203.0.113.121' }).post(`${API}/sign-up/email`, {
+          email: uniqueEmail('other'),
+          password: strongPassword(),
+          name: 'x',
+        });
+        expect(other.status).toBe(200);
+      } finally {
+        await stack.stop();
+      }
+    });
+  });
+
+  describe('review A14: logs and security events reach the product, social and SSO sign-ins included', () => {
+    let idp: MockIdp;
+    let stack: Stack;
+    t.beforeAll(async () => {
+      idp = await startMockIdp();
+      stack = await startStack(infra, {
+        presets: ['public', 'staff', 'organizations'],
+        staff: { authority: idp.base },
+        extraTrustedOrigins: [idp.base],
+      });
+    });
+    t.afterAll(async () => {
+      await stack?.stop();
+      await idp?.stop();
+    });
+
+    it("Better Auth's warnings go to the injected logger, and never carry the password", async () => {
+      const password = strongPassword();
+      await signIn(stack.client(), uniqueEmail('nobody'), password);
+      expect(stack.logs.length).toBeGreaterThan(0);
+      expect(stack.logs.every((l) => l.level === 'warn' || l.level === 'error')).toBe(true);
+      expect(stack.logs.some((l) => l.message.includes(password))).toBe(false);
+    });
+
+    it('email sign-in, lockout, reset and revocation emit events with ids only', async () => {
+      const email = uniqueEmail('events');
+      const c = await verifiedUser(stack, email, strongPassword(), expect);
+      await signIn(stack.client(), email, strongPassword());
+      await c.post(`${API}/revoke-sessions`, {});
+      const names = new Set(stack.events.map((e) => e.name));
+      for (const name of ['sign_in.success', 'sign_in.failure', 'sessions.revoked'] as const) {
+        expect(names.has(name), name).toBe(true);
+      }
+      expect(JSON.stringify(stack.events).includes(email)).toBe(false);
+    });
+
+    it('a Microsoft sign-in emits sign_in.success; a refused one emits sign_in.failure (method social)', async () => {
+      const before = stack.events.length;
+      await microsoftSignIn(stack, idp, {
+        sub: 'm',
+        oid: randomUUID(),
+        tid: TEST_TENANT,
+        email: `ok-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`,
+      });
+      await microsoftSignIn(stack, idp, {
+        sub: 'x',
+        oid: randomUUID(),
+        tid: '99999999-9999-4999-8999-999999999999',
+        email: `no-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`,
+      });
+      const fresh = stack.events.slice(before).filter((e) => e.detail?.['method'] === 'social');
+      expect(fresh.map((e) => e.name)).toEqual(['sign_in.success', 'sign_in.failure']);
+    });
+
+    it('an SSO sign-in emits sign_in.success; one refused for its domain emits sign_in.failure (method sso)', async () => {
+      await registerPartner(stack, idp, t, { domain: 'events-u.test' });
+      const before = stack.events.length;
+      idp.loginAs({ sub: 'e1', email: 'ann@events-u.test', name: 'Ann' });
+      await ssoSignIn(stack.client(), { email: 'ann@events-u.test' });
+      idp.loginAs({ sub: 'e2', email: 'eve@elsewhere.example', name: 'Eve' });
+      await ssoSignIn(stack.client(), { email: 'x@events-u.test' });
+      const fresh = stack.events.slice(before).filter((e) => e.detail?.['method'] === 'sso');
+      expect(fresh.map((e) => e.name)).toEqual(['sign_in.success', 'sign_in.failure']);
+    });
+  });
+}

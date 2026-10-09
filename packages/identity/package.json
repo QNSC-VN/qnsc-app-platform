@@ -1,7 +1,7 @@
 {
   "name": "@quynhonsemiconductor/identity",
   "version": "7.1.0",
-  "description": "Shared authentication mechanism for QNSC product backends: refresh-token rotation with theft detection, Entra/SSO verification, ES256 JWT strategy + guard, and the BFF session flow. Authorization stays in the product.",
+  "description": "Authentication for QNSC product backends on Better Auth: secure defaults, presets (staff/public/organizations), SSO with encrypted secrets, session guard and a conformance kit. Authorization stays in the product.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,13 +10,22 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./nest": {
+      "types": "./dist/nest/index.d.ts",
+      "default": "./dist/nest/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "nest.js",
+    "nest.d.ts",
+    "testing.js",
+    "testing.d.ts",
+    "MIGRATION-v7-to-v8.md"
   ],
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
@@ -30,33 +39,66 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "jose": "^6.2.3",
-    "uuidv7": "^1.2.1"
+    "@better-auth/core": "1.7.7",
+    "@better-auth/drizzle-adapter": "1.7.7",
+    "@better-auth/sso": "1.7.7",
+    "@node-rs/argon2": "2.2.2",
+    "better-auth": "1.7.7",
+    "jose": "6.2.4",
+    "uuidv7": "1.2.1",
+    "zod": "4.6.5"
   },
   "peerDependencies": {
-    "@quynhonsemiconductor/platform-cache": ">=2.0.0",
-    "@quynhonsemiconductor/platform-http": ">=2.0.0",
     "@nestjs/common": ">=11",
-    "@nestjs/jwt": ">=11",
-    "@nestjs/passport": ">=11",
-    "passport": ">=0.7",
-    "passport-jwt": ">=4"
+    "@nestjs/core": ">=11",
+    "@quynhonsemiconductor/observability": ">=0.2.0",
+    "@quynhonsemiconductor/platform-cache": ">=3.1.0",
+    "@quynhonsemiconductor/platform-db": ">=0.1.1",
+    "@quynhonsemiconductor/platform-http": ">=4.1.0",
+    "drizzle-orm": ">=0.45.2 <1",
+    "fastify": ">=5",
+    "pg": ">=8.11",
+    "ioredis": ">=5"
   },
   "devDependencies": {
-    "@quynhonsemiconductor/platform-cache": "workspace:^",
-    "@quynhonsemiconductor/platform-http": "workspace:^",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
-    "@nestjs/jwt": "^11.0.0",
-    "@nestjs/passport": "^11.0.0",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/passport-jwt": "^4.0.1",
-    "passport": "^0.7.0",
-    "passport-jwt": "^4.0.1",
+    "@nestjs/platform-fastify": "^11.0.0",
+    "@nestjs/swagger": "^11.4.5",
+    "@quynhonsemiconductor/observability": "workspace:^",
+    "@quynhonsemiconductor/platform-cache": "workspace:^",
+    "@quynhonsemiconductor/platform-db": "workspace:^",
+    "@quynhonsemiconductor/platform-http": "workspace:^",
+    "@quynhonsemiconductor/testing": "workspace:*",
+    "@types/pg": "8.23.1",
+    "auth": "1.7.7",
+    "drizzle-kit": "0.31.11",
+    "drizzle-orm": "0.45.3",
+    "fastify": "^5.12.5",
+    "ioredis": "^5.4.1",
+    "nestjs-zod": "^5.4.0",
+    "pg": "8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@nestjs/core": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "@quynhonsemiconductor/observability": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    }
   }
 }
