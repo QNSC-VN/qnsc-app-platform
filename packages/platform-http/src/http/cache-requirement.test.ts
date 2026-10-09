@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertCacheInProduction,
+  disableAliasStatus,
   readIdempotencyMode,
   readRateLimitMode,
   usesDeprecatedDisableAlias,
@@ -49,6 +50,38 @@ describe('readRateLimitMode', () => {
   it('rejects anything else, naming the setting and the allowed values', () => {
     expect(() => readRateLimitMode({ RATE_LIMIT_MODE: 'edge_only' })).toThrow(
       /RATE_LIMIT_MODE="edge_only".*cache, edge-only, disabled/,
+    );
+  });
+});
+
+describe('disableAliasStatus', () => {
+  it.each([
+    ['not set', {}, 'unset'],
+    ['not "true"', { DISABLE_RATE_LIMIT: 'false' }, 'unset'],
+    ['the only setting', { DISABLE_RATE_LIMIT: 'true' }, 'honoured'],
+    [
+      'next to a blank RATE_LIMIT_MODE',
+      { DISABLE_RATE_LIMIT: 'true', RATE_LIMIT_MODE: ' ' },
+      'honoured',
+    ],
+    [
+      'overridden by RATE_LIMIT_MODE=cache',
+      { DISABLE_RATE_LIMIT: 'true', RATE_LIMIT_MODE: 'cache' },
+      'ignored',
+    ],
+    [
+      'overridden by RATE_LIMIT_MODE=edge-only',
+      { DISABLE_RATE_LIMIT: 'true', RATE_LIMIT_MODE: 'edge-only' },
+      'ignored',
+    ],
+  ] as const)('is %s → %s', (_label, env, expected) => {
+    expect(disableAliasStatus(env)).toBe(expected);
+  });
+
+  it('agrees with readRateLimitMode: honoured ⇒ disabled, ignored ⇒ not disabled by it', () => {
+    expect(readRateLimitMode({ DISABLE_RATE_LIMIT: 'true' })).toBe('disabled');
+    expect(readRateLimitMode({ DISABLE_RATE_LIMIT: 'true', RATE_LIMIT_MODE: 'cache' })).toBe(
+      'cache',
     );
   });
 });

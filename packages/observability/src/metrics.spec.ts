@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const record = vi.fn();
 const add = vi.fn();
@@ -488,5 +488,36 @@ describe('metrics never throw into the request path', () => {
     } finally {
       add.mockReset();
     }
+  });
+
+  describe('SecurityMetrics and AuthMetrics', () => {
+    const exploding = () => {
+      add.mockImplementation(() => {
+        throw new Error('instrument exploded');
+      });
+    };
+    afterEach(() => add.mockReset());
+
+    it('SecurityMetrics.recordFailOpen costs a data point, not the caller', () => {
+      exploding();
+      expect(() => new SecurityMetrics().recordFailOpen('rate_limit')).not.toThrow();
+    });
+
+    it('SecurityMetrics.recordStaleToken costs a data point, not the caller', () => {
+      exploding();
+      expect(() => new SecurityMetrics().recordStaleToken()).not.toThrow();
+    });
+
+    it('AuthMetrics.recordLogin costs a data point, not the caller', () => {
+      exploding();
+      expect(() => new AuthMetrics().recordLogin('sso', 'failure')).not.toThrow();
+    });
+
+    it('still records normally when nothing is wrong', () => {
+      new SecurityMetrics().recordFailOpen('denylist');
+      new AuthMetrics().recordLogin('dev', 'success');
+      expect(add).toHaveBeenCalledWith(1, { control: 'denylist' });
+      expect(add).toHaveBeenCalledWith(1, { method: 'dev', outcome: 'success' });
+    });
   });
 });

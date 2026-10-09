@@ -441,11 +441,11 @@ export class SecurityMetrics {
    * must agree by construction.
    */
   recordFailOpen(control: FailOpenControl): void {
-    this.failOpen.add(1, { control });
+    safely('SecurityMetrics.recordFailOpen', () => this.failOpen.add(1, { control }));
   }
 
   recordStaleToken(): void {
-    this.staleToken.add(1);
+    safely('SecurityMetrics.recordStaleToken', () => this.staleToken.add(1));
   }
 }
 
@@ -472,6 +472,6 @@ export class AuthMetrics {
   });
 
   recordLogin(method: LoginMethod, outcome: LoginOutcome): void {
-    this.login.add(1, { method, outcome });
+    safely('AuthMetrics.recordLogin', () => this.login.add(1, { method, outcome }));
   }
 }
