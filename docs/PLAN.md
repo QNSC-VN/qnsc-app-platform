@@ -299,6 +299,9 @@ Acceptance:
 - Startup refuses in production without cache; starts with `edge-only`.
 - No `aws` instrumentation in the default instrumentations list.
 
+Follow-up (later, not part of WP-4's acceptance): `platform-http` seeds the request context from
+`X-Correlation-Id` and generates an id when it is absent, so the products' own middleware can go (Q6).
+
 Depends on: none.
 
 ### 6.5 WP-5 — internal `testing` package (W1)
@@ -454,11 +457,13 @@ deploys to the dev namespace with `/livez`, `/readyz`, a job round-trip and an S
 Language-neutral runtime contract, normative for TS and Python services:
 - Health: `/livez` (no dependency), `/readyz` (dependencies; 503 while draining).
 - Shutdown: SIGTERM → not-ready → drain → close → exit within the grace period.
-- Logs: JSON lines to stdout; required fields (`time`, `level`, `msg`, `trace_id`, `span_id`,
-  `service`, `env`); no secrets or personal data.
+- Logs: JSON lines to stdout; required fields (`time`, `level`, `msg`, `service`, `env`, `version`, and
+  `trace.id` / `span.id` under an active span — dotted names, as the logger emits them; Q7); no secrets
+  or personal data.
 - Telemetry: OpenTelemetry OTLP to the Alloy endpoint; resource attributes including `k8s.*`.
-- Environment names: `DATABASE_*`, `VALKEY_URL`, `S3_*`, `MAIL_*`, `LITELLM_BASE_URL`,
-  `LITELLM_API_KEY`, `K8S_*`.
+- Environment names: `DATABASE_*`, `REDIS_URL` (the cache; the name the products and the chart already
+  use — Q5), `MAIL_*`, `LITELLM_BASE_URL`, `LITELLM_API_KEY`, `K8S_*`. `S3_*` is product-owned and stays
+  out of the contract until WP-17 (Q8).
 - Errors: the `platform-http` error envelope and code taxonomy (frontends branch on codes).
 - Client IP: `cf-connecting-ip` first.
 - Auth: staff via Entra (OIDC); service-to-service via internal network + per-service token.
@@ -588,3 +593,7 @@ After WP-15: remove `ExclusiveJob` in the next `platform-runtime` major.
 | Q2 | Consumer CI credentials | **Decided:** existing org automation GitHub App (§6.1); owner extends its installation to rova, opshub, solodesk |
 | Q3 | `qnsc-service-starter` | **Decided:** deferred (§6.13) |
 | Q4 | Mail sender addresses | **Decided (2026-10-09):** one shared mailbox and one app per product — `noreply-rova@qnsc.vn` "Rova" (rova's existing Entra app); `noreply-opshub@qnsc.vn` "QNSC OpsHub" (opshub's existing Entra app); `noreply-kb@qnsc.vn` "QNSC Knowledge Base" (kb's existing Entra app); `noreply-solodesk@qnsc.vn` "SoloDesk" (solodesk's existing Entra app); `noreply-academy@qnsc.vn` "QNSC Academy" (the LMS Entra app) |
+| Q5 | Cache environment variable | **Decided (2026-10-10):** `REDIS_URL` — rova and opshub already use it and the chart injects it. The earlier `VALKEY_URL` in §6.14 is dropped. No package reads it: the product passes the value to `CacheModule` |
+| Q6 | Correlation id | **Decided (2026-10-10):** `platform-http` follow-up (Agent C, later): seed the request context from `X-Correlation-Id`, generate an id when absent. Until then each product's middleware does it |
+| Q7 | Log trace field names | **Decided (2026-10-10):** keep `trace.id` / `span.id`, as the logger emits them. The earlier `trace_id` / `span_id` in §6.14 is dropped; a non-TypeScript service uses the dotted names |
+| Q8 | `S3_*` in the contract | **Decided (2026-10-10):** waits for WP-17. Storage stays product-owned, and its variable names per product, until it is measured |

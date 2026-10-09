@@ -149,8 +149,8 @@ see `platform-cache`. There is no `/testing` subpath.
 - **`cf-connecting-ip` is trusted.** That is correct only if the pods are reachable solely through
   Cloudflare Tunnel (see the assumption above).
 - Correlation ids are **read** from `X-Correlation-Id` for logging; seeding the request context and
-  generating an id when it is absent is still done in each product's middleware (open question Q2 in the
-  contract).
+  generating an id when it is absent is still done in each product's middleware. A follow-up in this
+  package will do both (decided; see the contract's Q2).
 - The rate-limit tiers are fixed (`DEFAULT`, `STRICT`, `AUTH_LOGIN`, `AUTH_REFRESH`). `@RateLimit(tier)`
   selects one by name and `@SkipRateLimit()` opts a route out; a product cannot define a tier of its own
   without a change here. Which route gets which tier is the product's.
