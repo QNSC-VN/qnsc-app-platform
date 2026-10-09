@@ -3,3 +3,7 @@
 # of 2026-10-10 (§6.4, §6.14, §11 Q5-Q8) ahead of the original. It stays out of prettier so a sync is a
 # plain diff and not a reformat. (Prettier reads .prettierignore from the repo root.)
 docs/PLAN.md
+
+# release-please writes these on every release PR in its own style. Formatting them would make the
+# release PR fail `format:check` (it did), and the next release would rewrite them anyway.
+**/CHANGELOG.md

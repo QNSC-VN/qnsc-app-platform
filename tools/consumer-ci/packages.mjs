@@ -100,15 +100,36 @@ export function commitMessages(root, ref, dir) {
     .filter(Boolean);
 }
 
+/** Whether `tag` exists in the repository. */
+export function tagExists(root, tag) {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Every message that decides a package's next version: its commits since `ref`, plus the PR title.
+ * Every message that decides a package's next version: its commits since the LAST RELEASE, plus the
+ * PR title.
  *
- * A squash merge uses the PR TITLE as the commit message, so a `feat!:` title is breaking even when
- * no individual commit says so. The title speaks for the packages the PR touches, so it is added
- * only for a package that has commits in the PR -- a title cannot bump a package it does not change.
+ * "Since the last release" is the tag `<component>-v<version>` that release-please cut, because that
+ * is what release-please itself counts. The PR's own base is the wrong baseline: a breaking change
+ * that is already on main but not yet released (identity 8, say) is invisible to every later PR, so
+ * that PR packed the new major's code as the old version, linked it into products still on the old
+ * range, and failed all of them. When the tag does not exist (a package's first release, or the
+ * release PR itself, whose package.json already carries the new version) the PR's base is used.
+ *
+ * A squash merge commits the PR TITLE, so a `feat!:` title is breaking even when no commit says so.
+ * The title speaks for what the PR changes, so it is added only for a package the PR has commits in.
  */
-export function packageMessages(root, ref, dir, prTitle) {
-  const messages = commitMessages(root, ref, dir);
-  if (prTitle && messages.length > 0) messages.push(prTitle);
+export function packageMessages(root, ref, dir, prTitle, tag) {
+  const since = tag && tagExists(root, tag) ? tag : ref;
+  const messages = commitMessages(root, since, dir);
+  if (prTitle && commitMessages(root, ref, dir).length > 0) messages.push(prTitle);
   return messages;
 }

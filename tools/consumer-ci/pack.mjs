@@ -49,7 +49,10 @@ for (const pkg of selected) {
   const file = join(cwd, 'package.json');
   const original = readFileSync(file, 'utf8');
   let version = bumpSince
-    ? releaseVersion(pkg.version, packageMessages(root, bumpSince, pkg.dir, prTitle))
+    ? releaseVersion(
+        pkg.version,
+        packageMessages(root, bumpSince, pkg.dir, prTitle, `${pkg.dir}-v${pkg.version}`),
+      )
     : pkg.version;
   const rewritten = version !== pkg.version || canary !== undefined;
   try {
