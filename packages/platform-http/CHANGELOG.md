@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.0](https://github.com/quynhonsemiconductor/app-platform/compare/platform-http-v4.0.2...platform-http-v4.1.0) (2026-10-09)
+
+
+### ✨ Features
+
+* **platform-http:** client IP and cache-required startup checks ([#147](https://github.com/quynhonsemiconductor/app-platform/issues/147)) ([7f76ebc](https://github.com/quynhonsemiconductor/app-platform/commit/7f76ebc64393c1645f4b82388c773a3936ce6921))
+
 ## [4.0.2](https://github.com/quynhonsemiconductor/app-platform/compare/platform-http-v4.0.1...platform-http-v4.0.2) (2026-10-08)
 
 
