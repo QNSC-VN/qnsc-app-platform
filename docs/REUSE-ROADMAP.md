@@ -1,5 +1,11 @@
 # Shared-platform roadmap and implementation plan
 
+> **Status banner (2026-10-09).** §4 (implementation plan) and §5 (sequencing) are **superseded by
+> [PLAN.md](./PLAN.md)** (`APP-PLATFORM-PLAN.md`, 2026-10-08), which is now the single source of truth
+> for what is built and in what order. **§0–§2 stay in force** as the method: the corrections (§0), the
+> `identity-drizzle` withdrawal (§0.0), the measurement method (§1) and the classification (§2). Read
+> those before proposing to promote anything. §3 describes a package that no longer exists.
+
 > **Status:** WP-0 and WP-1 shipped **and adopted**; **WP-2 withdrawn**; **WP-3 measured and not needed** — **v4, supersedes v3**
 > **Date:** 2026-09-08
 > **Consumers:** `rova` · `opshub` · `solodesk` · Learning (new)

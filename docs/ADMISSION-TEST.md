@@ -14,8 +14,8 @@ shared?" has an answer that isn't a matter of taste.
 > If divergence would merely be _inconsistent_, it stays in the product.
 
 Cross-repo contract break means something outside the code depends on the exact
-value: frontend error-code branching, a CloudWatch metric filter in Terraform, the
-storage a session is written to.
+value: frontend error-code branching, a Grafana alert rule that matches a log field or a
+metric name, the storage a session is written to.
 
 Worked examples, all real:
 
@@ -23,7 +23,7 @@ Worked examples, all real:
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | refresh-token rotation, theft detection, PKCE, `state` single-use | two divergent copies = two security postures, and the bug class is account takeover                                               |
 | `DomainException` → HTTP status mapping                           | **both** frontends branch on those codes; divergence turns one product's 409 into another's 422                                   |
-| `FAIL_OPEN_FIELD` (`securityFailOpen`)                            | a CloudWatch metric filter in each product's Terraform matches this literal; a rename disarms the alarm silently                  |
+| `FAIL_OPEN_FIELD` (`securityFailOpen`)                            | a Grafana alert rule matches this literal in the logs and on the `security.fail_open` metric; a rename disarms the alert silently |
 | `CacheService`                                                    | it is a **peer** dependency of the BFF session store — two copies means sessions written by one holder are invisible to the other |
 
 | out                                                    | why                                                                                                                                                                                     |
@@ -44,14 +44,40 @@ The counter-example is in this repo's own history: `oidc/` (12 files, the multi-
 broker) was written here before a second consumer existed. It has one consumer
 today, which is exactly what the checklist exists to prevent.
 
+## Building new, instead of extracting
+
+The checklist above is for code that **already exists in a product** and is being promoted. A
+capability that **no product has implemented yet** can also be built here, directly. These principles
+(numbered as in [PLAN.md](PLAN.md) §2) say when, and what stays true either way.
+
+**P4 — new-capability rule.** A capability that no product has implemented yet, and that the platform
+change requires (CloudNativePG, the job queue, Graph mail, Better Auth), may be built in this repo
+when **at least two consumers are scheduled** and it passes the admission test above. Nothing is being
+extracted, so the checklist does not apply. What still applies is the lesson from `identity-drizzle`
+(REUSE-ROADMAP §0.0): **zero product-specific configuration knobs.** Configuration comes from the
+environment only; if a knob seems necessary, the capability does not belong here as code.
+
+**P5 — framework-agnostic core, NestJS adapter at a subpath.** Every _new_ package exports plain
+functions from its root and the NestJS module from `/nest`, so a script, a worker or a future framework
+can use it. Existing packages are not refactored to fit.
+
+**P6 — no product schema in packages.** A package owns only its own schema (the job queue's own
+schema, for instance). Product tables are passed in by the product or not used; there is no outbox
+table in `platform-mail` because the job queue is the outbox.
+
+Packages built under P4, with their consumers: `platform-db` (all TypeScript products), `platform-jobs`
+and `platform-mail` (the LMS and solodesk first; rova and opshub at convergence), `identity` 8.
+
 ## Current status per package
 
-| package          | status                                                                                              |
-| ---------------- | --------------------------------------------------------------------------------------------------- |
-| `identity`       | trimmed in v6.0.0. See below for what was removed and what is deliberately kept-but-unused          |
-| `platform-http`  | error taxonomy + pagination. Both products import it identically                                    |
-| `platform-cache` | thin on its own; justified as the peer that keeps one Valkey client                                 |
-| `observability`  | OTel bootstrap, logger factory, job context, fail-open contract. Best-documented; the model to copy |
+| package            | status                                                                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`         | trimmed in v6.0.0. See below for what was removed and what is deliberately kept-but-unused                                                                             |
+| `platform-http`    | error taxonomy + pagination. Both products import it identically                                                                                                       |
+| `platform-cache`   | thin on its own; justified as the peer that keeps one Valkey client                                                                                                    |
+| `observability`    | OTel bootstrap, logger factory, job context, fail-open contract. Best-documented; the model to copy                                                                    |
+| `platform-runtime` | env loading, health and graceful shutdown, request-arrival timing. Extracted byte-identical from rova and opshub; `ExclusiveJob` is deprecated for job-queue schedules |
+| `platform-db`      | built new under P4 (zero knobs: environment only). The one transaction contract the job queue and identity 8 depend on                                                 |
 
 ### identity: removed in v6.0.0
 
