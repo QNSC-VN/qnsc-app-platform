@@ -33,7 +33,7 @@ export const DISABLE_RATE_LIMIT_ENV = 'DISABLE_RATE_LIMIT';
 /** Opt-out variable for {@link IdempotencyInterceptor}: `disabled`. */
 export const IDEMPOTENCY_MODE_ENV = 'IDEMPOTENCY_MODE';
 
-function readMode<T extends string>(
+export function readMode<T extends string>(
   env: NodeJS.ProcessEnv,
   name: string,
   allowed: readonly T[],
