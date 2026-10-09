@@ -27,7 +27,14 @@ export interface ValkeyHarness {
 export async function startValkey(options: StartValkeyOptions = {}): Promise<ValkeyHarness> {
   const started: StartedTestContainer = await new GenericContainer(options.image ?? VALKEY_IMAGE)
     .withExposedPorts(6379)
-    .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
+    // BOTH, deliberately. The log line proves the server is up INSIDE the container; it says nothing
+    // about the port Docker maps on the host, which can refuse for a moment after it (measured:
+    // 4-10 of 16 parallel containers got ECONNREFUSED on a connect made right after start()).
+    // `forListeningPorts` also connects to the mapped host port, so start() returns only once a
+    // client on the host can actually reach the server.
+    .withWaitStrategy(
+      Wait.forAll([Wait.forListeningPorts(), Wait.forLogMessage(/Ready to accept connections/)]),
+    )
     .withStartupTimeout(60_000)
     .start();
 
