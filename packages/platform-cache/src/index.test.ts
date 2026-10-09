@@ -32,7 +32,29 @@ describe.skipIf(!dockerEnabled)('CacheService (real Valkey)', () => {
   });
 
   afterEach(async () => {
+    await service.onApplicationShutdown();
+  });
+
+  it('quits in onApplicationShutdown, so jobs and in-flight requests still have the client until then', async () => {
+    // Nest runs onModuleDestroy before beforeApplicationShutdown (job runners stop there) and
+    // before the HTTP server drains. The ordering itself is proven end to end in
+    // platform-runtime's graceful-shutdown test; this pins the hook the client quits in.
+    const own = new CacheService({ url: valkey.url, keyPrefix: PREFIX });
+    own.onModuleInit();
+    await own.set('k', 'v', 60);
+    await expect(own.onApplicationShutdown()).resolves.toBeUndefined();
+    await expect(own.get('k')).rejects.toThrow(/closed/i);
+  });
+
+  it('keeps onModuleDestroy() as a deprecated no-op that does not close the connection', async () => {
+    // Non-breaking: a caller of the old hook still compiles, but the client stays usable.
+    await service.set('before', 'v', 60);
     await service.onModuleDestroy();
+    await service.onModuleDestroy();
+    expect(service.isAvailable).toBe(true);
+    expect(await service.get('before')).toBe('v');
+    await service.set('after', 'v', 60);
+    expect(await service.get('after')).toBe('v');
   });
 
   it('stores and reads a string value with TTL', async () => {
