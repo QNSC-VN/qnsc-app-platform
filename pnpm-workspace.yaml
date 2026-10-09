@@ -1,6 +1,6 @@
 packages:
   - "packages/*"
-  - "spikes/*"
+  - "spikes/pg-boss"
 
 # Transitive CVE floors. Everything here is a package this repo does NOT declare: it
 # arrives under a dev or build tool whose own declared range already admits the fix, so
