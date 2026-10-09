@@ -18,3 +18,5 @@ helpers used by `@quynhonsemiconductor/identity`.
 pnpm add @quynhonsemiconductor/platform-cache
 ```
 
+
+<!-- throwaway: exercises canary publish and cleanup end to end; this PR is closed unmerged -->
