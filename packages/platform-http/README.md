@@ -13,6 +13,7 @@ HTTP **access-log interceptor**, the request-context accessor, and input sanitis
 | `clientIp(req)`: `cf-connecting-ip` → `x-forwarded-for` → socket                                      | nothing: stop reading `req.ip` / `x-real-ip`           |
 | `RateLimitGuard`, `@RateLimit(tier)`, tiers (`DEFAULT`, `STRICT`, `AUTH_LOGIN`, `AUTH_REFRESH`)       | **which route gets which tier**                        |
 | `IdempotencyInterceptor` (`Idempotency-Key` on `POST`/`PUT`)                                          | which routes opt in                                    |
+| `enableCorrelationId(app)`: the request's correlation id, validated, echoed, in the request context   | nothing: delete your own middleware, at your pace      |
 | `HttpLoggingInterceptor` (one summary line per request; skips probe paths)                            | your log field names for anything else                 |
 | `sanitizeString` / `sanitizeObject` (XSS stripping ahead of validation)                               | where it is applied                                    |
 
@@ -85,6 +86,74 @@ literal IP address is skipped.
 
 `HttpLoggingInterceptor` no longer reads `x-real-ip`.
 
+## Correlation id
+
+```ts
+// main.ts, after creating the application and before listen()
+enableCorrelationId(app);
+```
+
+On every request, before any module middleware, guard or filter:
+
+1. `X-Correlation-Id` is kept **only if** it is one value of **1 to 128 characters from `[A-Za-z0-9._:-]`**.
+   Anything else (empty, longer, a space, a quote, a control character, CR/LF, a repeated header) is
+   replaced by `crypto.randomUUID()`. A replacement is logged at DEBUG with the **reason and the length**,
+   never the value. An absent header is simply generated.
+2. The id is **echoed** on the response as `X-Correlation-Id`, including on 404s and error responses.
+3. It is put in `observability`'s request context (with the `traceparent`, when well formed), so
+   `correlationId` is on every log line, in the error envelope, and in
+   `RequestContextService.getCorrelationId()`.
+
+The character class is deliberate. A UUID-only rule would drop the ULIDs, hex trace ids and
+`service:request` composites that upstream systems send and break correlation across a call chain. What
+has to be excluded is anything that can inject: CR, LF, control characters, whitespace, quotes.
+
+The browser can only read the response header if the product's CORS config lists it in
+`exposedHeaders`.
+
+### Rolling it out
+
+1. Upgrade, add `enableCorrelationId(app)`. If the product's own middleware still seeds the context, **it
+   keeps working and there is still one id**: the id settled on here is written back to the request's
+   `x-correlation-id`, so that middleware adopts it (and one that used to trust the raw header no longer
+   reflects bad input). If it enters its own context, its id is the effective one and its `setHeader`
+   wins, exactly as before.
+2. Delete the product's middleware when convenient.
+3. A deployment that must not change yet sets **`CORRELATION_ID_MODE=disabled`**: nothing is registered.
+   An unknown value fails the boot.
+
+What changes for a product that deletes its own middleware (each product's rule today is different):
+
+| product  | accepts today                                                       | also reads `X-Request-ID`     | after this package                            |
+| -------- | ------------------------------------------------------------------- | ----------------------------- | --------------------------------------------- |
+| rova     | `[A-Za-z0-9_-]{8,64}`                                               | yes, when the other is absent | wider class; `X-Request-ID` is no longer read |
+| opshub   | UUID-shaped only (`[0-9a-f-]{32,36}`); anything else is regenerated | no                            | non-UUID ids (ULIDs, `svc:req`) are now kept  |
+| solodesk | **anything**, unvalidated, and not echoed                           | no                            | validated, and echoed on the response         |
+
+`X-Request-ID` is not read here: the contract names one header.
+
+### Background work
+
+A job does not run inside the request, so it must be handed the id. Put it in the payload when you
+enqueue, and restore it when the handler starts. No dependency on `platform-jobs` is needed, and the
+convention is the same whichever queue carries it:
+
+```ts
+// where the work is enqueued, inside the request
+const correlationId = this.requestContext.getCorrelationId(); // RequestContextService
+await jobs.send('mail.send', { ...message, correlationId }, { tx });
+
+// in the handler
+import { withJobContext } from '@quynhonsemiconductor/observability';
+
+await withJobContext('mail.send', () => this.deliver(job.data), {
+  correlationId: job.data.correlationId, // omit it and the job gets its own: `mail.send:<uuid>`
+});
+```
+
+Every log line the handler writes then carries the request's id. The payload value came from this
+package, so it is already validated; a handler fed from anywhere else should validate before trusting it.
+
 ## Rate limiting and idempotency need a cache
 
 `RateLimitGuard` and `IdempotencyInterceptor` store their state in Valkey through
@@ -148,9 +217,6 @@ see `platform-cache`. There is no `/testing` subpath.
   start without one unless `RATE_LIMIT_MODE` / `IDEMPOTENCY_MODE` say so.
 - **`cf-connecting-ip` is trusted.** That is correct only if the pods are reachable solely through
   Cloudflare Tunnel (see the assumption above).
-- Correlation ids are **read** from `X-Correlation-Id` for logging; seeding the request context and
-  generating an id when it is absent is still done in each product's middleware. A follow-up in this
-  package will do both (decided; see the contract's Q2).
 - The rate-limit tiers are fixed (`DEFAULT`, `STRICT`, `AUTH_LOGIN`, `AUTH_REFRESH`). `@RateLimit(tier)`
   selects one by name and `@SkipRateLimit()` opts a route out; a product cannot define a tier of its own
   without a change here. Which route gets which tier is the product's.

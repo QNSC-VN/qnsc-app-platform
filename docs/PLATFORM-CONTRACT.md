@@ -1,6 +1,6 @@
 # QNSC platform runtime contract
 
-**Status:** v1.1 (2026-10-10: the four open questions are decided, see [Decisions](#decisions-on-the-questions-found-while-deriving-this-document)) · derived from the packages **as merged on `main`** (2026-10-09):
+**Status:** v1.2 (2026-10-10: the four open questions are decided, and the correlation id ships in `platform-http`; see [Decisions](#decisions-on-the-questions-found-while-deriving-this-document)) · derived from the packages **as merged on `main`** (2026-10-09):
 `platform-db` 0.1.1 · `platform-runtime` 0.1.3 · `platform-http` 4.1.x · `platform-cache` 3.1.x ·
 `observability` 0.2.x · `identity` 7.1.0 (8.0.0 pending) — plus [ADR 0001](adr/0001-job-queue.md),
 [ADR 0002](adr/0002-identity-v8-better-auth.md) and [PLAN.md](PLAN.md) §4 for what is decided but not yet built.
@@ -214,6 +214,7 @@ required variable that is missing is a **startup error that names the variable**
 | Cache      | `REDIS_URL`                                                                                     | —                        | The product's Valkey. The name rova and opshub already read and the chart injects (decided 2026-10-10, Q1). **No package reads it**: the product reads it and passes the value to `CacheModule`. Required in `required` mode |
 | HTTP       | `RATE_LIMIT_MODE`                                                                               | `cache`                  | `cache` \| `edge-only` \| `disabled` ([§9](#9-rate-limiting-and-idempotency)). Unknown value = startup error                                                                                                                 |
 |            | `IDEMPOTENCY_MODE`                                                                              | `cache`                  | `cache` \| `disabled`                                                                                                                                                                                                        |
+|            | `CORRELATION_ID_MODE`                                                                           | `enabled`                | `enabled` \| `disabled` ([§7](#7-errors-and-http-behaviour)). `disabled` for a deployment whose product still seeds the correlation id itself. Unknown value = startup error                                                 |
 |            | `DISABLE_RATE_LIMIT`                                                                            | —                        | **deprecated** alias of `RATE_LIMIT_MODE=disabled`; ignored when `RATE_LIMIT_MODE` is set                                                                                                                                    |
 | Lifecycle  | `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_ENDPOINT_DELAY_MS`                                             | `25000`, `5000` in a pod | [§3](#3-shutdown)                                                                                                                                                                                                            |
 |            | `ROLE`                                                                                          | —                        | `worker` runs handlers and schedules; anything else only enqueues                                                                                                                                                            |
@@ -271,13 +272,28 @@ Every error response is one envelope. **Frontends branch on `code`, never on `me
 - **Pagination:** cursor pagination takes `limit` (1..100, default 50), `cursor`
   (opaque, base64url) and `sort`, and returns `{ data: [...], pageInfo: { nextCursor, hasNextPage, limit } }`.
   A malformed cursor is `422 INVALID_CURSOR`.
-- **Correlation id:** a request carries one id. The request log reads `X-Correlation-Id` from the
-  caller; the id is held in the request context and appears in every log line and error body for that
-  request. _Seeding the context from the header, or generating an id when it is absent, is done by the
-  product's middleware today — no package does it yet. A service SHOULD generate one when the header is
-  missing. Decided 2026-10-10 ([Q2](#decisions-on-the-questions-found-while-deriving-this-document)):
-  `platform-http` will do both in a follow-up, and the products' middleware then goes._ Background work seeds its
-  own ([§4](#4-logs)).
+- **Correlation id.** A request carries exactly one id, from its first byte to its last log line.
+  - **Header:** `X-Correlation-Id`, on the request and echoed on the response.
+  - **Accepted from the caller** only if it is a single header value of **1 to 128 characters from
+    `[A-Za-z0-9._:-]`**. Anything else (empty, longer, a space, a quote, a control character, CR/LF, a
+    repeated header) is **replaced** by a freshly generated id (a random UUID, `crypto.randomUUID()` in
+    the TypeScript reference). A service MUST NOT put an unvalidated caller value in a log line or a
+    response header: the id is untrusted input on both paths, and CR/LF in it forges log records and
+    splits headers. The character class is deliberate: a UUID-only rule would discard the ULIDs, hex
+    trace ids and `service:request` composites that real callers send and break correlation across a
+    call chain.
+  - **Absent:** a service SHOULD generate one.
+  - A replacement is logged at DEBUG with the **reason and the length** of the rejected value, never
+    the value.
+  - **The id is in the request context**, so it is on every log line as `correlationId` ([§4](#4-logs)),
+    in every error body ([above](#7-errors-and-http-behaviour)), and available to code through the
+    request-context accessor.
+  - **Background work** continues the id of the request that caused it: put `correlationId` in the job
+    payload when enqueuing, and restore it when the handler starts (the TypeScript reference:
+    `withJobContext(name, fn, { correlationId })`). Work that did not start in a request gets its own,
+    prefixed with the job name ([§4](#4-logs)).
+  - Reference: `platform-http` `enableCorrelationId(app)` (4.2.0). `CORRELATION_ID_MODE=disabled` turns
+    it off for a deployment whose product still seeds the id itself ([§6](#6-environment-names)).
 - **Retry-safe writes:** `Idempotency-Key` on `POST`/`PUT` ([§9](#9-rate-limiting-and-idempotency)).
 
 Reference: `platform-http` `DomainException` and subclasses, `GlobalExceptionFilter`, `HttpErrorCodes`,
@@ -569,24 +585,25 @@ Stated so nobody looks for them here:
 A service conforms when every line is true. For TypeScript services most are given by the packages;
 for any other language each is the service's own to implement and demonstrate.
 
-| #   | Requirement                                                                                                                     | How to check                                                     |
-| --- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| 1   | `GET /livez` is `200`, unprefixed, unauthenticated, touches no dependency                                                       | `curl` with the database stopped: still `200`                    |
-| 2   | `GET /readyz` is `503` when a dependency is down, and from the first moment of shutdown                                         | stop the database; send `SIGTERM` and poll                       |
-| 3   | Shutdown order: not-ready, delay, drain, stop work, release resources, flush, exit; bounded by a timeout below the grace period | `SIGTERM` under load: no dropped request; exit `0`               |
-| 4   | Logs are JSON lines on stdout with `time level msg service env version`, plus `trace.id`/`span.id` under a span                 | read the stream                                                  |
-| 5   | The redaction list is applied in the API **and** the worker                                                                     | log an error object holding an `Authorization` header            |
-| 6   | Probe paths create no spans and no access-log lines                                                                             | tail the logs during a probe                                     |
-| 7   | Telemetry via OTLP; resource attributes include `service.*`, `deployment.environment.name`, `k8s.*`                             | collector view                                                   |
-| 8   | Metric labels are bounded; unmatched routes are labelled `unmatched`                                                            | request 1,000 random URLs: label count does not move             |
-| 9   | Error body is the envelope; statuses follow the category table; no internal detail                                              | provoke 404, 422, 500                                            |
-| 10  | Client IP follows `cf-connecting-ip` → `x-forwarded-for` → socket, literal IPs only                                             | forge `x-forwarded-for`                                          |
-| 11  | In production, no cache and neither `RATE_LIMIT_MODE=edge-only` nor `disabled` ⇒ startup error                                  | boot with `NODE_ENV=production` and no URL                       |
-| 12  | Database: password auth, TLS verified against the CA **and** the host name; `DATABASE_SSL=disable` refused in production        | point `DATABASE_HOST` at an IP                                   |
-| 13  | A dropped database connection does not kill the process                                                                         | `pg_terminate_backend` under load                                |
-| 14  | Jobs are enqueued in the business transaction; handlers are idempotent; no provider call in a transaction                       | roll back a transaction: no job; deliver a job twice: one effect |
-| 15  | Email only as a job, from the product's own mailbox, within ~20 messages a minute                                               | send a burst                                                     |
-| 16  | AI calls go to LiteLLM with the product's key and `metadata.feature`; restricted data only to local models                      | check the gateway's spend log                                    |
+| #   | Requirement                                                                                                                                                               | How to check                                                     |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 1   | `GET /livez` is `200`, unprefixed, unauthenticated, touches no dependency                                                                                                 | `curl` with the database stopped: still `200`                    |
+| 2   | `GET /readyz` is `503` when a dependency is down, and from the first moment of shutdown                                                                                   | stop the database; send `SIGTERM` and poll                       |
+| 3   | Shutdown order: not-ready, delay, drain, stop work, release resources, flush, exit; bounded by a timeout below the grace period                                           | `SIGTERM` under load: no dropped request; exit `0`               |
+| 4   | Logs are JSON lines on stdout with `time level msg service env version`, plus `trace.id`/`span.id` under a span                                                           | read the stream                                                  |
+| 5   | The redaction list is applied in the API **and** the worker                                                                                                               | log an error object holding an `Authorization` header            |
+| 6   | Probe paths create no spans and no access-log lines                                                                                                                       | tail the logs during a probe                                     |
+| 7   | Telemetry via OTLP; resource attributes include `service.*`, `deployment.environment.name`, `k8s.*`                                                                       | collector view                                                   |
+| 8   | Metric labels are bounded; unmatched routes are labelled `unmatched`                                                                                                      | request 1,000 random URLs: label count does not move             |
+| 9   | Error body is the envelope; statuses follow the category table; no internal detail                                                                                        | provoke 404, 422, 500                                            |
+| 10  | Client IP follows `cf-connecting-ip` → `x-forwarded-for` → socket, literal IPs only                                                                                       | forge `x-forwarded-for`                                          |
+| 11  | In production, no cache and neither `RATE_LIMIT_MODE=edge-only` nor `disabled` ⇒ startup error                                                                            | boot with `NODE_ENV=production` and no URL                       |
+| 12  | Database: password auth, TLS verified against the CA **and** the host name; `DATABASE_SSL=disable` refused in production                                                  | point `DATABASE_HOST` at an IP                                   |
+| 13  | A dropped database connection does not kill the process                                                                                                                   | `pg_terminate_backend` under load                                |
+| 14  | Jobs are enqueued in the business transaction; handlers are idempotent; no provider call in a transaction                                                                 | roll back a transaction: no job; deliver a job twice: one effect |
+| 15  | Email only as a job, from the product's own mailbox, within ~20 messages a minute                                                                                         | send a burst                                                     |
+| 16  | AI calls go to LiteLLM with the product's key and `metadata.feature`; restricted data only to local models                                                                | check the gateway's spend log                                    |
+| 17  | A valid `X-Correlation-Id` is kept and echoed; an invalid, oversized or CR/LF one is replaced and never reflected; an absent one is generated; the id is on the log lines | send each, read the response header and the log                  |
 
 `qnsc-kb-backend` (Python) is the first non-TypeScript service measured against this list; its gaps are
 tracked in an issue in that repository.
@@ -609,9 +626,9 @@ document's own (the plan's §11 has Q5–Q8 for the same decisions).
 - **Q1 — the cache variable: `REDIS_URL`.** rova and opshub already read it and the chart injects it.
   The plan's earlier `VALKEY_URL` is dropped. No package reads it; the product passes the value to
   `CacheModule`.
-- **Q2 — correlation id: a `platform-http` follow-up.** It will seed the request context from
-  `X-Correlation-Id` and generate an id when the header is absent. Until it ships, each product's
-  middleware does it, and the recommendation in [§7](#7-errors-and-http-behaviour) applies.
+- **Q2 — correlation id: a `platform-http` follow-up. Delivered:** `enableCorrelationId(app)` seeds the
+  request context from `X-Correlation-Id` and generates an id when the header is absent or invalid
+  ([§7](#7-errors-and-http-behaviour)). The products' own middleware can now be removed, at their pace.
 - **Q3 — log trace fields stay `trace.id` / `span.id`.** The plan's `trace_id` / `span_id` is dropped; a
   service in another language emits the dotted names.
 - **Q4 — `S3_*` waits for WP-17.** Storage stays product-owned, with per-product variable names, until it

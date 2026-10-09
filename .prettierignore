@@ -1,5 +1,4 @@
-# docs/PLAN.md is a copy of APP-PLATFORM-PLAN.md, the planning document that lives outside this
-# repository and is synced into it by hand. It started byte-identical and now carries the decisions
-# of 2026-10-10 (§6.4, §6.14, §11 Q5-Q8) ahead of the original. It stays out of prettier so a sync is a
-# plain diff and not a reformat. (Prettier reads .prettierignore from the repo root.)
+# docs/PLAN.md is a verbatim copy of APP-PLATFORM-PLAN.md, the planning document it is copied
+# from. It is kept byte-identical so the two can be diffed; reformatting it would make every
+# future sync a noisy diff. (Prettier reads .prettierignore from the repo root.)
 docs/PLAN.md
