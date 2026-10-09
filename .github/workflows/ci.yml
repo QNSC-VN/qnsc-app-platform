@@ -44,6 +44,9 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      # Formatting is part of this job, so it is part of `CI required`: it drifted to ~30 files
+      # on main while nothing checked it.
+      - run: pnpm format:check
       - run: pnpm lint
       # Build before typecheck: packages resolve each other via their built
       # dist types (e.g. @quynhonsemiconductor/identity depends on @quynhonsemiconductor/platform-cache).
