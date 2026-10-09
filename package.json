@@ -29,6 +29,7 @@
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
+    "semver": "7.8.5",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.18.0",
     "vitest": "^4.1.11"
