@@ -1,245 +1,244 @@
 # @quynhonsemiconductor/identity
 
-Shared authentication for QNSC product backends — the mechanism, not the policy.
+One authentication system for every QNSC product backend, built on [Better Auth](https://better-auth.com).
+Staff sign in with Microsoft Entra, public users with email + password or Google, partner organisations with
+their own OIDC identity provider. The package owns the **mechanism** and its secure defaults; roles,
+permissions, UI, email text and cookie names stay in the product (`docs/ADMISSION-TEST.md`).
 
-| in this package                                                                  | in your product                                              |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| access + refresh tokens (ES256), single-use rotation with family theft-detection | your `users` / `auth_sessions` tables and their adapters     |
-| Microsoft Entra ID token verification                                            | your HTTP controller and cookie names                        |
-| BFF: PKCE, single-use `state`, code exchange, opaque server-side session         | your JWT strategy/guard if your payload is extended          |
-| access-token + user denylist (logout, offboarding)                               | **authorization** — permission catalogue, guard, scope model |
-| JIT SSO provisioning hook                                                        |                                                              |
+**v8 is a breaking rewrite.** The Passport/JWT strategy, refresh-token service, BFF flow, Entra verifier and
+`oidc/` broker are gone. See [MIGRATION-v7-to-v8.md](./MIGRATION-v7-to-v8.md).
 
-Authorization is deliberately absent. It carries product vocabulary (permission
-codes, scope dimensions, role definitions), so it belongs in the product — see
-[Not in scope](#not-in-scope).
+Decisions and evidence: [ADR 0002](../../docs/adr/0002-identity-v8-better-auth.md) (the WP-9 spike and the
+platform lead's decisions) and the identity v8 plan.
 
-Depends on [`@quynhonsemiconductor/platform-cache`](../platform-cache) and
-[`@quynhonsemiconductor/platform-http`](../platform-http) as **peer** dependencies: the cache
-must be the same instance your app uses, or BFF sessions written by one holder are
-invisible to the other.
+## Migration from 7.x
+
+[MIGRATION-v7-to-v8.md](./MIGRATION-v7-to-v8.md) lists what is removed, what to add (dependencies, environment,
+tables, Entra settings), the data mapping with a SQL template, and the behaviour changes to design for.
 
 ## Install
 
 ```ini
 # .npmrc
 @quynhonsemiconductor:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
 ```
 
 ```bash
 pnpm add @quynhonsemiconductor/identity
 ```
 
-## What you must bind
+Better Auth is a **dependency of this package, pinned exactly**. Products never import `better-auth`
+themselves (one place to upgrade; every bump runs the conformance kit). It is ESM-only; this CommonJS
+package loads it through `require(esm)`, which needs Node >= 22.12 (the repo is >= 24).
 
-Every collaborator arrives through a DI token. There is no `forRoot` that fills
-them in — both existing products assemble the pieces in their own module, because
-each extends the JWT payload and owns its own routes.
-
-### Required
-
-| token                     | you provide              | notes                                                                                         |
-| ------------------------- | ------------------------ | --------------------------------------------------------------------------------------------- |
-| `USER_REPOSITORY`         | `IUserRepository`        | your users table; `Tx` is generic, so any driver works                                        |
-| `AUTH_SESSION_REPOSITORY` | `IAuthSessionRepository` | refresh-token sessions + families                                                             |
-| `TRANSACTION_RUNNER`      | `ITransactionRunner`     | e.g. a wrapper over `db.transaction`                                                          |
-| `CLAIMS_PROVIDER`         | `IClaimsProvider`        | **the product's authorization shape** — what goes in the token (roles? permissions? nothing?) |
-| `AUDIT_SERVICE`           | `IAuditService`          | login / rotation / theft events                                                               |
-| `AUTH_CONTEXT`            | request-context adapter  | read by `JwtAuthGuard`; usually your ALS store                                                |
-| `AUTH_SERVICE_OPTIONS`    | `AuthServiceOptions`     | token TTLs, cookie + rotation policy                                                          |
-| `JWT_STRATEGY_OPTIONS`    | `JwtStrategyOptions`     | ES256 verification material                                                                   |
-| `ENTRA_VERIFIER_OPTIONS`  | `EntraVerifierOptions`   | tenant + audience                                                                             |
-| `JwtService`              | `JwtModule`              | from `@nestjs/jwt`                                                                            |
-| `CacheService`            | `CacheModule`            | from `@quynhonsemiconductor/platform-cache`; backs `AuthTokenCache`                           |
-
-### Optional — bind only if the concept exists in your product
-
-| token                       | bind when                                          | if unbound                                     |
-| --------------------------- | -------------------------------------------------- | ---------------------------------------------- |
-| `SSO_PROVISIONING_HOOK`     | you reconcile roles/records on each SSO login      | no hook runs                                   |
-| `SSO_CONNECTION_REPOSITORY` | multi-connection / multi-IdP login                 | home-tenant login only                         |
-| `ACCESS_SERVICE`            | multi-tenant: resolve a user's access to a context | skipped                                        |
-| `WORKSPACE_SERVICE`         | multi-tenant: workspace membership + switching     | skipped; single-tenant products leave this out |
-| `BFF_OPTIONS`               | you want browser sessions instead of tokens in JS  | `BffService` unusable                          |
-
-`BffService` additionally needs `EntraOidcClient`, `BffSessionStore` and
-`AuthService` as providers, and takes `ConnectionRegistry` / `OidcClient` /
-`OidcTokenVerifier` as `@Optional()` multi-IdP broker collaborators.
-
-## Assembling it
-
-```ts
-@Global()
-@Module({
-  controllers: [MyAuthController, MyBffController], // yours, not the package's
-  providers: [
-    AuthService,
-    EntraTokenVerifier,
-    // BFF (browser sessions): the product supplies the controller + cookie name
-    EntraOidcClient,
-    BffSessionStore,
-    BffService,
-
-    // Persistence + collaborators
-    { provide: USER_REPOSITORY, useClass: UserDrizzleRepository },
-    { provide: AUTH_SESSION_REPOSITORY, useClass: AuthSessionDrizzleRepository },
-    { provide: TRANSACTION_RUNNER, useClass: DrizzleTransactionRunner },
-    { provide: CLAIMS_PROVIDER, useClass: MyClaimsProvider },
-    { provide: AUDIT_SERVICE, useExisting: AuditService },
-    { provide: AUTH_CONTEXT, useExisting: RequestContextService },
-
-    // Options, resolved from your own config layer
-    {
-      provide: AUTH_SERVICE_OPTIONS,
-      useFactory: (c: AppConfig) => c.authOptions,
-      inject: [AppConfig],
-    },
-    {
-      provide: JWT_STRATEGY_OPTIONS,
-      useFactory: (c: AppConfig) => c.jwtOptions,
-      inject: [AppConfig],
-    },
-    {
-      provide: ENTRA_VERIFIER_OPTIONS,
-      useFactory: (c: AppConfig) => c.entraOptions,
-      inject: [AppConfig],
-    },
-    { provide: BFF_OPTIONS, useFactory: (c: AppConfig) => c.bffOptions, inject: [AppConfig] },
-  ],
-})
-export class IdentityModule {}
-```
-
-A missing binding surfaces as a Nest resolution error at boot, naming the token it
-could not resolve — check it against the required table above.
-
-## Testing your adapters
-
-`@quynhonsemiconductor/identity/testing` ships typed in-memory ports and the conformance suites
-that cover the semantics the interfaces cannot express:
-
-```ts
-import { describeAuthSessionRepositoryContract } from '@quynhonsemiconductor/identity/testing';
-
-describeAuthSessionRepositoryContract({
-  name: 'AuthSessionDrizzleRepository',
-  create: async () => new AuthSessionDrizzleRepository(db),
-});
-```
-
-Run these against your real repositories. A `revokeByIdIfActive` that returns
-`true` unconditionally typechecks perfectly and turns single-use refresh rotation
-into a token that can be replayed for ever — the suite is what catches it. Same for
-family revocation scope (theft detection) and `upsertBySsoIdentity` linking an
-existing email instead of creating a second account.
-
-### Running them against a REAL adapter
-
-The example above is the in-memory shape. Pointing the suite at a Drizzle adapter
-needs two more options, and until 7.1.0 it could not be done at all — which is why
-no product runs these today:
-
-```ts
-import {
-  describeAuthSessionRepositoryContract,
-  SESSION_CONTRACT_USER_IDS,
-} from '@quynhonsemiconductor/identity/testing';
-
-// Deterministic: the suite maps the same logical name more than once.
-const uuidFor = (logical: string) => uuidv5(logical, FIXTURE_NAMESPACE);
-
-describeAuthSessionRepositoryContract({
-  name: 'AuthSessionDrizzleRepository',
-  id: uuidFor,
-  seedUsers: async (userIds) => {
-    await db.delete(authSessions);
-    await db.insert(users).values(userIds.map(seedUserRow)).onConflictDoNothing();
-  },
-  create: async () => new AuthSessionDrizzleRepository(),
-});
-```
-
-**`id`** exists because the fixtures are logical names (`'session-1'`). A `uuid`
-column rejects those with `22P02 invalid input syntax for type uuid` before a single
-assertion runs. **`seedUsers`** exists because `auth_sessions.user_id` is a foreign
-key — the parent rows have to exist first. `SESSION_CONTRACT_USER_IDS` is exported so
-you know exactly which ones. `describeUserRepositoryContract` takes `absentId` and
-`absentEmail` for the same reason.
-
-`revokeByIdIfActive wins exactly once under REAL concurrency` is the assertion worth
-the setup. The sequential case passes even for an adapter that reads and then writes
-in two statements — the second call simply sees the first's committed result. Only
-firing them together separates a genuine compare-and-swap from a race, and that
-distinction is what single-use rotation rests on.
-
-The in-memory classes (`InMemoryUserRepository`, `InMemoryAuthSessionRepository`,
-`InMemoryTransactionRunner`, `StubClaimsProvider`, `RecordingAuditService`,
-`RecordingAuthContext`) are usable directly in your own tests. They carry real
-`implements` clauses, so a port change breaks them at compile time.
-
-`reference-consumer.spec.ts` in this package boots a real Nest context with exactly
-the required bindings below and nothing else — that is what keeps the table honest.
-
-## Constraints
-
-Assumptions baked in today. Each is a real limit, not a config gap:
-
-- **Microsoft Entra ID.** `EntraTokenVerifier`, `EntraOidcClient` and
-  `BffEntraOptions` are Entra-shaped. A product on another IdP needs the generic
-  `oidc/` path generalised first.
-- **NestJS + Passport.** Guards, strategies and modules are Nest constructs.
-- **A shared cache reachable from every replica.** BFF sessions and the denylist
-  live in Valkey/Redis. A per-instance cache means sessions and revocations that
-  only some replicas can see.
-- **No JWKS endpoint.** Both verification sites run in the signing process. Tokens
-  cannot be verified by a third party as-is.
-
-## Not in scope
-
-The line: **divergence in the mechanism above is a security defect; divergence in
-controllers, DTOs, routes, cookie names and permission codes is merely
-inconsistent.** The first belongs here, the second in the product.
-
-Removed in v6 because nothing consumed it and all of it was on the wrong side of
-that line:
-
-| removed                                                                                | why                                                                                                                                                                |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `AuthController`, auth DTOs, `AuthModule`                                              | HTTP surface. Both products write their own controller (one needed a `switch-workspace` route the other has no concept of) and neither called `AuthModule.forRoot` |
-| `PermissionGuard`, `permissions.ts`, `PERMISSION_CHECKER`                              | authorization, and hardcoded one product's `ns:*` wildcard vocabulary — unusable by a product whose codes are `resource.action`                                    |
-| `Public`, `Auth`, `RequirePermission`, `CurrentUser`, `ApiCommonErrors`, metadata keys | route decorators; `Auth()` mounted the deleted permission guard. Both products already have their own                                                              |
-| `BffModule`                                                                            | products bind the three BFF providers directly                                                                                                                     |
-
-## Convergence candidate
-
-`JwtStrategy`, `JwtAuthGuard`, `AUTH_CONTEXT` and `JWT_STRATEGY_OPTIONS` are
-exported but **used by neither product today** — each wrote its own guard to carry
-an extended `JwtPayload` plus product concerns (BFF-cookie-vs-Bearer branch,
-denylist, authorization-epoch check, fail-open telemetry).
-
-They are kept, not deleted, because that duplication is drift rather than a real
-divergence: the cookie-vs-Bearer branch is mechanism, and the second product needs
-exactly the first one's version when it adopts BFF sessions. Converging them here
-is the next step, not another deletion.
+Peers: `@quynhonsemiconductor/platform-cache`, `platform-db`, `platform-http`, `drizzle-orm`, `pg`; for `/nest`:
+`@nestjs/common`, `@nestjs/core`, `fastify`; optional `observability`, `ioredis`.
 
 ## Subpaths
 
-| import                                   | what                                                                                             |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `@quynhonsemiconductor/identity`         | tokens, rotation, Entra verification, BFF, denylist, JWT strategy, the domain ports              |
-| `@quynhonsemiconductor/identity/testing` | the **conformance suites** a product runs against its own adapters (see _Testing your adapters_) |
+| Import                                   | What                                                                                    |
+| ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `@quynhonsemiconductor/identity`         | Framework-agnostic: `createIdentity`, `purgeUnverifiedAccounts`, ports, `DEFAULTS`      |
+| `@quynhonsemiconductor/identity/nest`    | `IdentityModule`, global `SessionGuard`, `@Public()`, `@CurrentSession()`, error filter |
+| `@quynhonsemiconductor/identity/testing` | The conformance kit, a test client, a mock IdP, the reference schema                    |
 
 ## Environment
 
-`identity` 7.x reads **no environment variable**: everything arrives through the DI tokens above
-(`AUTH_SERVICE_OPTIONS`, `JWT_STRATEGY_OPTIONS`, `ENTRA_VERIFIER_OPTIONS`, `BFF_OPTIONS`). Where the
-product sources those values is its own business. The client address used for rate limiting comes from
-`platform-http`'s `clientIp`.
+Secrets and keys come from the environment only.
 
-## Version 8 (pending WP-10)
+| Variable                  | Required when          | Meaning                                                                                                                                                              |
+| ------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`      | always                 | 32+ characters. Signs cookies and encrypts 2FA secrets and OAuth tokens. Key Vault -> External Secrets                                                               |
+| `IDENTITY_ENCRYPTION_KEY` | `organizations` preset | 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts SSO client secrets at rest. Rotation: `v2=<b64>,v1=<b64>` (encrypt with the highest, decrypt with any) |
+| `IDENTITY_TEST_LOGIN`     | end-to-end suites only | `enabled` loads `/test-login`, and only when `NODE_ENV` is exactly `test` or `development`                                                                           |
+| `NODE_ENV`                | —                      | `production` requires an `https` `baseURL`                                                                                                                           |
 
-`identity` **8.0.0** rebuilds this package on Better Auth. It is a **major**: the binding model changes
-and a `MIGRATION-v7-to-v8.md` ships with it. Until it is released, 7.x is what the products run, and the
-text above describes 7.x. The design and the spike that validated it are in
-[ADR 0002](../../docs/adr/0002-identity-v8-better-auth.md); the contract-level decisions are in
-[PLATFORM-CONTRACT.md](../../docs/PLATFORM-CONTRACT.md) §12.
+## What a product writes
+
+```ts
+// apps/api/src/auth.ts
+export const auth = createIdentity({
+  product: 'lms',
+  db, // the product's Drizzle instance (platform-db DATABASE_TOKEN)
+  schema: identitySchema, // the product's auth tables, generated (see "Tables")
+  cache, // platform-cache CacheService
+  baseURL: env.PUBLIC_API_URL,
+  trustedOrigins: [env.WEB_ORIGIN],
+  presets: ['public', 'staff', 'organizations'],
+  mail: { jobs, templates }, // platform-jobs / platform-mail; templates are the product's
+  staff: { tenantId, clientId, clientSecret, domains: ['qnsc.vn'], allowGuests: false },
+  google: { clientId, clientSecret },
+  hooks: { onUserCreated, onSsoProvisioned, ssoRole },
+  events, // security events -> observabilitySecurityEvents(logger) / audit
+  logger, // Better Auth warnings and errors -> identityLoggerFrom(logger)
+});
+```
+
+```ts
+@Module({
+  imports: [
+    CacheModule.forRoot({/* … */}),
+    DatabaseModule.forRootAsync({ schema: identitySchema }),
+    IdentityModule.forRootAsync({
+      inject: [DATABASE_TOKEN, CacheService, JOBS],
+      useFactory: (db, cache, jobs) => createIdentity({/* … */}),
+    }),
+  ],
+  providers: [
+    // Order matters: Nest asks the LAST registered global filter first.
+    { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    { provide: APP_FILTER, useClass: AuthApiErrorFilter },
+  ],
+})
+export class AppModule {}
+```
+
+The module mounts `auth.handler` on `/api/auth/*` as an encapsulated Fastify plugin that receives the raw body
+(so form posts from SSO work) and leaves the rest of the app's parsers alone. It writes the client address,
+resolved with `clientIp()` (`cf-connecting-ip` first), into the one header Better Auth reads, discarding any the
+client sent.
+
+Every route needs a session unless it is `@Public()`. Authorization stays in the product's guard, which reads
+`@CurrentSession()` / `@CurrentUser()`.
+
+### Presets
+
+| Preset          | Enables                                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `public`        | Email + password with verification, reset, Google, TOTP two-factor                                                   |
+| `staff`         | Microsoft Entra restricted to the QNSC tenant (`tid` checked), no password endpoints, 12 h sessions, no cookie cache |
+| `organizations` | Organizations, OIDC SSO per organization with verified domains and provisioning, encrypted secrets                   |
+
+The `admin` plugin is always on, **without impersonation** (the endpoints do not exist in 8.0.0; 8.1 brings them back with
+a required reason, a 1 h limit and an audit record). Passkeys, the `jwt` plugin, SAML and `contextId` are not in 8.0.0.
+
+Better Auth's lifetime is per instance, so in an instance with both `staff` and `public` sessions are written with the
+public lifetime and **the 12 h staff cap is enforced where sessions are written** (`session.create.before` and
+`session.update.before`, so Better Auth's own endpoints honour it and a refresh cannot stretch it). Staff means a user
+with a Microsoft account or an email on `staff.domains`. The cookie cache is off whenever `staff` is present.
+
+Organization creation is closed (`allowOrganizationCreation`, default `false`): organizations are created by the product,
+because an organization owner can register an SSO provider. `trustedOrigins` is exactly the list you pass; provider
+origins are never added to it.
+
+### Tables
+
+The product owns the auth tables, in its own database. Generate them with the Better Auth CLI against the same
+`createIdentity` call and commit the result as a normal migration:
+
+```bash
+pnpm exec auth generate --config scripts/auth-cli-config.ts --output src/db/identity.schema.ts
+```
+
+House adjustments the package expects (see `scripts/regenerate-reference-schema.sh` for the exact edits): tables
+in an `identity` schema, `uuid` id columns (ids are `uuidv7()`), `timestamptz`. The reference schema the
+conformance kit uses is exported from `/testing`.
+
+### Ports
+
+Identity depends on two ports, never on the packages behind them:
+
+- **`JobEnqueue`** — `send(queue, data, { tx, idempotencyKey, retention })` (satisfied by `platform-jobs`). Auth emails
+  are **enqueued, never awaited**, on queue `mail.send`, with idempotency key `purpose:userId:sha256(token)`. The
+  sign-up verification mail joins Better Auth's own database transaction (rolled back with the user); the others
+  enqueue on their own. `retention` is `{ deleteWhenCompleted: true, keepFailedSeconds: 86400 }`: reset and
+  verification links are bearer tokens in clear in the job row, so the queue deletes completed jobs at once and
+  keeps failures at most 24 h.
+- **`AuthEmailTemplates`** — the product renders `verifyEmail` and `resetPassword`.
+
+`EmailSender` and `EmailMessage` are exported as the **contract `platform-mail` implements** (`send(message) -> { id }`).
+Identity never calls an `EmailSender`: auth emails go through the job queue, which is what calls it. The types are here so
+the product and `platform-mail` agree on one shape.
+
+### Logs and security events
+
+Pass `logger` (`{ warn, error }`) to receive Better Auth's own warnings and errors, and `events` to receive the security
+events (`sign_in.success`/`failure` for password, social and SSO sign-ins, `account.locked`, `password.reset*`,
+`sessions.revoked`, `admin.user_banned`, `account.unverified_replaced`/`purged`). `/nest` has adapters for
+`observability`: `observabilitySecurityEvents(logger)` (a counter `identity.security_events{event}` and a log line with ids
+only) and `identityLoggerFrom(pinoLogger)`. Events never contain an email address or a token.
+
+### Scheduled work
+
+```ts
+// the worker process, once platform-jobs exists
+await registerIdentityJobs(jobs, auth); // or
+// until then, from an ExclusiveJob, hourly:
+await purgeUnverifiedAccounts(auth);
+```
+
+`purgeUnverifiedAccounts` deletes accounts that are unverified, older than 72 h, hold only a password account and
+never had a session. Safe to run concurrently.
+
+## Secure defaults
+
+Fixed in `DEFAULTS` and asserted by the conformance kit; a product cannot change them.
+
+| Setting            | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Password hash      | argon2id, m = 19456 KiB, t = 2, p = 1; verifies existing argon2 hashes of any parameters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Password policy    | 12..128 characters, no composition rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Email verification | Required before first sign-in                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Reset              | Single-use token, 15 minutes, stored hashed; every session revoked                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Sessions           | Public 7 d sliding (cookie cache 5 min); staff 12 h, no cache; stored in Postgres and Valkey                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Cookies            | `__Secure-<product>.*`, HttpOnly, Secure, SameSite=Lax, host-only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Origins            | `trustedOrigins` required; origin and callback-URL checks pinned **on** (Better Auth turns them off under `NODE_ENV=test`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Rate limits        | Per IP in Valkey (client IP from `clientIp()`); per account **and address** lockout (5 failures in 15 minutes) and, per account from any address, a progressive delay with a ceiling of 50 attempts an hour, on sign-in and on 2FA — a success or a password reset clears both. A browser that has signed in carries a signed, HttpOnly **known-device** cookie (90 days, per account); with it the account-wide delay and ceiling are skipped and only 5 failures per device in 15 minutes apply, so a flood of guesses from many addresses cannot lock the owner out; reset/verification mail 3 per hour per email, dropped silently |
+| Enumeration        | Identical responses; `request-password-reset`, `send-verification-email`, `sign-up` take at least 150 ms                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Account linking    | Only verified emails from the tenant or a verified SSO domain; SSO auto-links only members of the provider's organization                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| IDs                | `uuidv7()`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Telemetry          | Off                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+## Decisions the package enforces (ADR 0002, plan D9–D20)
+
+- **SSO client secret** is stored as `enc:v1:<base64(iv|ciphertext|tag)>` (AES-256-GCM) in `sso_provider.oidc_config`;
+  never logged or returned by an API.
+- **Squatting.** Password sign-up is refused for staff domains and verified SSO domains (`USE_COMPANY_SIGN_IN`). When a
+  provider asserts a verified email and the only account is unverified, password-only and never had a session, it is
+  replaced (`account.unverified_replaced`). Unverified accounts are purged after 72 h.
+- **Tenant and guests.** `tid` must equal the configured tenant. A tenant member is accepted only with an email on
+  `staff.domains`. B2B guests are refused unless `staff.allowGuests`, and a guest **never auto-links**: if the address belongs
+  to an existing account the sign-in is refused with `ACCOUNT_LINK_REQUIRED`.
+- **Google** (public preset) is refused for staff and verified-SSO domains, like password sign-up.
+- **IdP registration is default-deny** on `/sso/register` and `/sso/update-provider`. Only an organization owner or admin,
+  only for the organization, never for a staff domain; the provider is unusable until its domain is verified. Asserted
+  emails outside the provider's domain are rejected. SAML is refused (`SAML_NOT_SUPPORTED`). The client secret is not
+  echoed in the response.
+- **Linking.** An existing local account is linked by SSO automatically only if it is a member of the provider's
+  organization; otherwise the sign-in is refused with `ACCOUNT_LINK_REQUIRED`.
+- **SSRF.** Discovery, token, JWKS and userinfo URLs must be `https` and public, judged by Better Auth's
+  `isPublicRoutableHost` (it sees through IPv4-mapped, NAT64, 6to4 and Teredo forms, benchmarking and CGNAT ranges) after
+  resolving the name, and must not redirect. Checked at registration and update; at fetch time Better Auth's own guard
+  applies. An error shows the caller a generic message; the reason is only in the log.
+- **Test login.** `/test-login` loads only with `testLogin: true`, `IDENTITY_TEST_LOGIN=enabled` **and** `NODE_ENV` exactly
+  `test` or `development` (an unset or unknown value is refused); asking for it otherwise throws at start-up.
+
+## Testing
+
+```ts
+import { runIdentityConformance } from '@quynhonsemiconductor/identity/testing';
+
+runIdentityConformance(
+  { describe, it, beforeAll, afterAll, expect },
+  {
+    database: async () => ({ pool /* a fresh, empty PostgreSQL 18 database */ }),
+    valkey: async () => ({ url, keyPrefix: `${randomUUID()}:` }),
+  },
+);
+```
+
+Run it in the package's CI (done) and in every consumer's CI. It builds an instance over the reference schema, drives
+it in process through `auth.handler` and a local OIDC mock, and fails if any default or decision above is no longer in force.
+
+## Known limits
+
+- **Explicit account linking from a signed-in session is not implemented** (D15): a non-member's account is refused
+  with `ACCOUNT_LINK_REQUIRED`; Better Auth's SSO callback exposes no session to the resolver.
+- **No refresh-token family theft detection** (cookie sessions have no refresh token); mitigations are HttpOnly cookies,
+  short staff sessions and immediate revocation.
+- **The public cookie cache is a revocation window** of up to 5 minutes. Staff instances have none.
+- `Identity` is the wide `Auth<BetterAuthOptions>` type; plugin endpoints are untyped through it.
+- Entra behaviour (single-tenant app registration, the `email` optional claim, which claims mark a guest) and the DNS-TXT
+  domain verification are proven only against a mock here; ADR 0002 lists them as manual checks.
+- The conformance kit's `platform-jobs` / `platform-mail` stand-ins are not those packages; re-run `testing` against them when WP-7/WP-8 land.

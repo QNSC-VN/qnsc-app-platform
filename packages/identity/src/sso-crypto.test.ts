@@ -1,154 +1,131 @@
-import 'reflect-metadata';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-
-const { jwtVerifyMock, createRemoteJWKSetMock } = vi.hoisted(() => ({
-  jwtVerifyMock: vi.fn(),
-  createRemoteJWKSetMock: vi.fn(() => 'JWKS_KEYSET'),
-}));
-
-vi.mock('jose', () => ({
-  jwtVerify: jwtVerifyMock,
-  createRemoteJWKSet: createRemoteJWKSetMock,
-}));
-
-import { generateRefreshToken, hashToken, parseTtlSeconds } from './refresh-token';
+import { randomBytes } from 'node:crypto';
+import { describe, expect, it } from 'vitest';
 import {
-  EntraTokenVerifier,
-  SsoVerificationError,
-  type EntraVerifierOptions,
-} from './entra-verifier';
+  decryptSecret,
+  EncryptionKeyError,
+  encryptSecret,
+  isEncrypted,
+  openOidcConfig,
+  parseKeyring,
+  sealOidcConfig,
+  sealSsoClientSecret,
+} from './sso-crypto';
+import { withEncryptedSsoSecrets } from './sso-protect';
 
-describe('refresh-token crypto', () => {
-  it('generateRefreshToken returns a base64url token, its sha256 hash and a family id', () => {
-    const a = generateRefreshToken();
-    expect(a.refreshToken).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(a.tokenHash).toBe(hashToken(a.refreshToken));
-    expect(a.tokenHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(a.familyId).toMatch(/^[0-9a-f-]{36}$/);
+const key = () => randomBytes(32).toString('base64');
+
+describe('sso-crypto', () => {
+  it('round-trips and never produces the same ciphertext twice', () => {
+    const ring = parseKeyring(key());
+    const a = encryptSecret('s3cret-value', ring);
+    const b = encryptSecret('s3cret-value', ring);
+    expect(a).toMatch(/^enc:v1:/);
+    expect(a).not.toBe(b);
+    expect(a).not.toContain('s3cret-value');
+    expect(decryptSecret(a, ring)).toBe('s3cret-value');
   });
 
-  it('generateRefreshToken is unique per call', () => {
-    const a = generateRefreshToken();
-    const b = generateRefreshToken();
-    expect(a.refreshToken).not.toBe(b.refreshToken);
-    expect(a.familyId).not.toBe(b.familyId);
-  });
-
-  it('hashToken is a deterministic sha256 hex digest', () => {
-    expect(hashToken('hello')).toBe(hashToken('hello'));
-    expect(hashToken('a')).not.toBe(hashToken('b'));
-  });
-
-  it('parseTtlSeconds parses s/m/h/d units', () => {
-    expect(parseTtlSeconds('45s', 1)).toBe(45);
-    expect(parseTtlSeconds('15m', 1)).toBe(15 * 60);
-    expect(parseTtlSeconds('12h', 1)).toBe(12 * 3600);
-    expect(parseTtlSeconds('30d', 1)).toBe(30 * 86400);
-  });
-
-  it('parseTtlSeconds falls back on malformed input', () => {
-    expect(parseTtlSeconds('', 99)).toBe(99);
-    expect(parseTtlSeconds('30', 99)).toBe(99);
-    expect(parseTtlSeconds('lots', 99)).toBe(99);
-  });
-});
-
-describe('EntraTokenVerifier', () => {
-  const baseOptions: EntraVerifierOptions = { tenantId: 'tenant-1', clientId: 'client-1' };
-
-  const makeVerifier = (opts: Partial<EntraVerifierOptions> = {}) =>
-    new EntraTokenVerifier({ ...baseOptions, ...opts });
-
-  beforeEach(() => {
-    jwtVerifyMock.mockReset();
-    createRemoteJWKSetMock.mockClear();
-  });
-
-  it('throws SSO_NOT_CONFIGURED when tenant/client are missing', async () => {
-    const verifier = makeVerifier({ tenantId: '', clientId: '' });
-    await expect(verifier.verify('tok')).rejects.toMatchObject({
-      code: 'SSO_NOT_CONFIGURED',
-    });
-    expect(jwtVerifyMock).not.toHaveBeenCalled();
-  });
-
-  it('verifies against the tenant JWKS + issuers and returns normalized claims', async () => {
-    jwtVerifyMock.mockResolvedValue({
-      payload: { oid: 'oid-1', email: '  User@Example.COM ', name: 'User One', tid: 'ext-9' },
-    });
-    const verifier = makeVerifier();
-
-    const claims = await verifier.verify('id-token');
-
-    expect(claims).toEqual({
-      oid: 'oid-1',
-      email: 'user@example.com',
-      displayName: 'User One',
-      externalTenantId: 'ext-9',
-      roles: [],
-    });
-    expect(createRemoteJWKSetMock).toHaveBeenCalledWith(
-      new URL('https://login.microsoftonline.com/tenant-1/discovery/v2.0/keys'),
+  it('rotates: new ciphertext uses the newest key, old ciphertext still decrypts', () => {
+    const k1 = key();
+    const k2 = key();
+    const old = encryptSecret('x', parseKeyring(k1));
+    const ring = parseKeyring(`v2=${k2},v1=${k1}`);
+    expect(ring.current).toBe(2);
+    expect(encryptSecret('x', ring)).toMatch(/^enc:v2:/);
+    expect(decryptSecret(old, ring)).toBe('x');
+    expect(() => decryptSecret(old, parseKeyring(`v2=${k2}`))).toThrow(
+      /no key configured for version v1/,
     );
-    expect(jwtVerifyMock).toHaveBeenCalledWith('id-token', 'JWKS_KEYSET', {
-      issuer: [
-        'https://login.microsoftonline.com/tenant-1/v2.0',
-        'https://sts.windows.net/tenant-1/',
-      ],
-      audience: 'client-1',
-    });
   });
 
-  it('falls back email to preferred_username then upn, and displayName to email', async () => {
-    jwtVerifyMock.mockResolvedValue({
-      payload: { oid: 'oid-2', preferred_username: 'pref@example.com', tid: 'ext-1' },
-    });
-    const claims = await makeVerifier().verify('t');
-    expect(claims.email).toBe('pref@example.com');
-    expect(claims.displayName).toBe('pref@example.com');
+  it('rejects a bad key without echoing it', () => {
+    const bad = Buffer.from('short').toString('base64');
+    expect(() => parseKeyring(bad)).toThrow(EncryptionKeyError);
+    try {
+      parseKeyring(bad);
+    } catch (e) {
+      expect(String(e)).not.toContain(bad);
+    }
+    expect(() => parseKeyring(undefined)).toThrow(/required/);
+    expect(() => parseKeyring(`v1=${key()},v1=${key()}`)).toThrow(/duplicate/);
   });
 
-  it('parses App Role values from the token roles claim, ignoring non-strings', async () => {
-    jwtVerifyMock.mockResolvedValue({
-      payload: {
-        oid: 'oid-3',
-        email: 'r@example.com',
-        tid: 'ext-2',
-        roles: ['it-admin', 'asset-manager', 42, null],
-      },
-    });
-    const claims = await makeVerifier().verify('t');
-    expect(claims.roles).toEqual(['it-admin', 'asset-manager']);
+  it('a tampered or foreign ciphertext fails closed', () => {
+    const ring = parseKeyring(key());
+    const other = parseKeyring(key());
+    const c = encryptSecret('x', ring);
+    expect(() => decryptSecret(c, other)).toThrow(/could not be decrypted/);
+    expect(() => decryptSecret(c.slice(0, -4) + 'AAAA', ring)).toThrow(/could not be decrypted/);
   });
 
-  it('throws SSO_TOKEN_INVALID when jose verification fails', async () => {
-    jwtVerifyMock.mockRejectedValue(new Error('bad signature'));
-    await expect(makeVerifier().verify('t')).rejects.toMatchObject({
-      code: 'SSO_TOKEN_INVALID',
+  it('seals only clientSecret inside the oidc_config JSON and is idempotent', () => {
+    const ring = parseKeyring(key());
+    const raw = JSON.stringify({ clientId: 'id', clientSecret: 'plain', pkce: true });
+    const sealed = sealOidcConfig(raw, ring) as string;
+    const parsed = JSON.parse(sealed) as Record<string, unknown>;
+    expect(isEncrypted(parsed['clientSecret'])).toBe(true);
+    expect(parsed['clientId']).toBe('id');
+    expect(sealOidcConfig(sealed, ring)).toBe(sealed);
+    expect(JSON.parse(openOidcConfig(sealed, ring) as string)).toMatchObject({
+      clientSecret: 'plain',
     });
+    // legacy plain rows and non-JSON pass through
+    expect(openOidcConfig(raw, ring)).toBe(raw);
+    expect(sealOidcConfig('not json', ring)).toBe('not json');
   });
 
-  it('throws SSO_CLAIMS_MISSING when oid or email are absent', async () => {
-    jwtVerifyMock.mockResolvedValue({ payload: { email: 'x@example.com' } });
-    await expect(makeVerifier().verify('t')).rejects.toBeInstanceOf(SsoVerificationError);
-    await expect(makeVerifier().verify('t')).rejects.toMatchObject({
-      code: 'SSO_CLAIMS_MISSING',
+  it('the adapter wrapper stores ciphertext and returns plain text, inside transactions too', async () => {
+    const ring = parseKeyring(key());
+    const stored: Array<Record<string, unknown>> = [];
+    const base = {
+      create: async ({ data }: { data: Record<string, unknown> }) => (stored.push(data), data),
+      update: async ({ update }: { update: Record<string, unknown> }) => update,
+      updateMany: async () => 0,
+      findOne: async (_args?: unknown) => stored[0] ?? null,
+      findMany: async (_args?: unknown) => stored,
+      transaction: async (cb: (t: unknown) => Promise<unknown>) =>
+        cb({ ...base, transaction: undefined }),
+    };
+    const adapter = withEncryptedSsoSecrets(
+      (() => base) as never,
+      ring,
+    )({} as never) as unknown as typeof base;
+    const config = JSON.stringify({ clientSecret: 'plain-secret' });
+
+    const created = (await adapter.create({
+      model: 'ssoProvider',
+      data: { oidcConfig: config },
+    } as never)) as Record<string, unknown>;
+    expect(stored[0]!['oidcConfig']).not.toContain('plain-secret');
+    expect(created['oidcConfig']).toContain('plain-secret');
+    expect(
+      JSON.parse(
+        ((await adapter.findOne({ model: 'ssoProvider' } as never)) as Record<string, string>)[
+          'oidcConfig'
+        ]!,
+      ),
+    ).toMatchObject({ clientSecret: 'plain-secret' });
+
+    await adapter.transaction(async (trx) => {
+      await (trx as typeof base).create({
+        model: 'ssoProvider',
+        data: { oidcConfig: config },
+      } as never);
     });
+    expect(stored[1]!['oidcConfig']).not.toContain('plain-secret');
+
+    // other models are untouched
+    await adapter.create({ model: 'user', data: { oidcConfig: config } } as never);
+    expect(stored[2]!['oidcConfig']).toBe(config);
   });
 
-  it('uses an injected jwksResolver and custom issuers when provided', async () => {
-    const customResolver = vi.fn(() => 'CUSTOM_KEYSET');
-    jwtVerifyMock.mockResolvedValue({ payload: { oid: 'o', email: 'e@e.com', tid: null } });
-    const verifier = makeVerifier({ jwksResolver: customResolver, issuers: ['iss-x'] });
-
-    const claims = await verifier.verify('t');
-
-    expect(customResolver).toHaveBeenCalledOnce();
-    expect(createRemoteJWKSetMock).not.toHaveBeenCalled();
-    expect(jwtVerifyMock).toHaveBeenCalledWith('t', 'CUSTOM_KEYSET', {
-      issuer: ['iss-x'],
-      audience: 'client-1',
-    });
-    expect(claims.externalTenantId).toBeNull();
+  it('sealSsoClientSecret seals for migration tooling, with the same key the application reads', () => {
+    const k = key();
+    const sealed = sealSsoClientSecret('legacy-secret', { IDENTITY_ENCRYPTION_KEY: k });
+    expect(sealed).toMatch(/^enc:v1:/);
+    expect(sealed).not.toContain('legacy-secret');
+    expect(decryptSecret(sealed, parseKeyring(k))).toBe('legacy-secret');
+    expect(sealSsoClientSecret(sealed, { IDENTITY_ENCRYPTION_KEY: k })).toBe(sealed);
+    expect(() => sealSsoClientSecret('x', {})).toThrow(/required/);
   });
 });

@@ -13,14 +13,14 @@ product's `libs/`.
 
 ## Packages
 
-| Package                                                               | Purpose                                                                                                                                                                                                                        | Tag prefix            |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------- |
-| [`@quynhonsemiconductor/identity`](packages/identity)                 | Auth **mechanism**: refresh rotation with theft detection, Entra/SSO verification, token denylist, JWT strategy, BFF session flow. Authorization stays in the product                                                          | `identity-v*`         |
-| [`@quynhonsemiconductor/platform-cache`](packages/platform-cache)     | Valkey/Redis cache service (ioredis wrapper, key-prefix, fail-open)                                                                                                                                                            | `platform-cache-v*`   |
-| [`@quynhonsemiconductor/platform-http`](packages/platform-http)       | Error taxonomy + HTTP status mapping, global exception filter, pagination                                                                                                                                                      | `platform-http-v*`    |
-| [`@quynhonsemiconductor/observability`](packages/observability)       | OTel bootstrap, logger factory, ALS request/job context, metric instruments, fail-open contract                                                                                                                                | `observability-v*`    |
-| [`@quynhonsemiconductor/platform-runtime`](packages/platform-runtime) | `.env` loading (subpath, pre-OTel), env validation + typed config, leader-elected scheduled jobs, request-arrival timing                                                                                                       | `platform-runtime-v*` |
-| [`@quynhonsemiconductor/platform-db`](packages/platform-db)           | PostgreSQL connection layer: password auth from the CloudNativePG secret, TLS verified against the cluster CA, pool, readiness ping, advisory lock, `DbExecutor` + `withTransaction`. Drizzle at `/drizzle`, NestJS at `/nest` | `platform-db-v*`      |
+| Package                                                               | Purpose                                                                                                                                                                                                                                               | Tag prefix            |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| [`@quynhonsemiconductor/identity`](packages/identity)                 | Authentication on Better Auth: staff (Entra, tenant-checked), public (email + password, Google, TOTP) and organization SSO presets, secure defaults, encrypted SSO secrets, NestJS session guard, conformance kit. Authorization stays in the product | `identity-v*`         |
+| [`@quynhonsemiconductor/platform-cache`](packages/platform-cache)     | Valkey/Redis cache service (ioredis wrapper, key-prefix, fail-open)                                                                                                                                                                                   | `platform-cache-v*`   |
+| [`@quynhonsemiconductor/platform-http`](packages/platform-http)       | Error taxonomy + HTTP status mapping, global exception filter, pagination                                                                                                                                                                             | `platform-http-v*`    |
+| [`@quynhonsemiconductor/observability`](packages/observability)       | OTel bootstrap, logger factory, ALS request/job context, metric instruments, fail-open contract                                                                                                                                                       | `observability-v*`    |
+| [`@quynhonsemiconductor/platform-runtime`](packages/platform-runtime) | `.env` loading (subpath, pre-OTel), env validation + typed config, leader-elected scheduled jobs, request-arrival timing                                                                                                                              | `platform-runtime-v*` |
+| [`@quynhonsemiconductor/platform-db`](packages/platform-db)           | PostgreSQL connection layer: password auth from the CloudNativePG secret, TLS verified against the cluster CA, pool, readiness ping, advisory lock, `DbExecutor` + `withTransaction`. Drizzle at `/drizzle`, NestJS at `/nest`                        | `platform-db-v*`      |
 
 Each package is versioned and released **independently** via release-please
 (Conventional Commits), mirroring the per-module tag model of `tf-modules`.
@@ -50,7 +50,7 @@ Then declare the packages in `package.json`:
 ```jsonc
 {
   "dependencies": {
-    "@quynhonsemiconductor/identity": "^7.1.0",
+    "@quynhonsemiconductor/identity": "^8.0.0",
   },
 }
 ```
