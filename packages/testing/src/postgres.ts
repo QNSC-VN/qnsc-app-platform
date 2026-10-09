@@ -71,8 +71,15 @@ export async function startPostgres(options: StartPostgresOptions = {}): Promise
   let container = new GenericContainer(options.image ?? POSTGRES_IMAGE)
     .withEnvironment({ POSTGRES_DB: database, POSTGRES_USER: user, POSTGRES_PASSWORD: password })
     .withExposedPorts(5432)
-    // initdb logs the readiness line twice: once for the bootstrap server, once for the real one.
-    .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
+    // initdb logs the readiness line twice (bootstrap server, then the real one), and the bootstrap
+    // server listens on a socket only. The log proves the server is up inside the container, not that
+    // the port Docker maps on the host accepts connections yet; `forListeningPorts` checks that too.
+    .withWaitStrategy(
+      Wait.forAll([
+        Wait.forListeningPorts(),
+        Wait.forLogMessage(/database system is ready to accept connections/, 2),
+      ]),
+    )
     .withStartupTimeout(120_000);
 
   let caCertPem: string | undefined;

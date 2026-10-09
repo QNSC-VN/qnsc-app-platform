@@ -37,6 +37,23 @@ describe.skipIf(!enabled)('startValkey', () => {
     expect(await valkey.command('INFO', 'server')).toMatch(/valkey_version:8\./);
   });
 
+  it('accepts a connection the instant start() returns, even when many start at once', async () => {
+    // Regression: start() used to return on the container's "ready" log line, before the port Docker
+    // maps on the host accepted connections. Measured on the old code with 16 parallel starts, 4-10
+    // of them got ECONNREFUSED on a connect made straight after start() returned.
+    const replies = await Promise.all(
+      Array.from({ length: 8 }, async () => {
+        const own = await startValkey();
+        try {
+          return await ping(own.host, own.port);
+        } finally {
+          await own.stop();
+        }
+      }),
+    );
+    expect(replies).toEqual(Array.from({ length: 8 }, () => '+PONG'));
+  }, 120_000);
+
   it('flush() removes every key', async () => {
     await valkey.command('SET', 'k', 'v');
     expect(await valkey.command('GET', 'k')).toBe('v');

@@ -280,9 +280,20 @@ describe.skipIf(!dockerOn)('built-in checks, against real PostgreSQL 18 and Valk
     expect(registry.has('database')).toBe(false);
   });
 
-  it('checks the cache when a Valkey URL is configured, and goes 503 when Valkey stops', async () => {
-    const own = await startValkey();
-    try {
+  // This test stops its Valkey, so it needs one of its own. That container is started in a hook, NOT
+  // in the test body: starting a container took 0.8 s to over 4 s when the machine was busy, and the
+  // test body runs under vitest's default 5 s timeout while its own poll below allows 10 s. Counting
+  // container start against that budget made it fail one run in about twenty-five.
+  describe('when Valkey stops', () => {
+    let own: ValkeyHarness;
+    beforeAll(async () => {
+      own = await startValkey();
+    }, 180_000);
+    afterAll(async () => {
+      await own?.stop().catch(() => undefined);
+    }, 60_000);
+
+    it('checks the cache when a Valkey URL is configured, and goes 503 when Valkey stops', async () => {
       const { app, registry } = await start(moduleWith(pg.env(), own.url));
       expect(registry.has('cache')).toBe(true);
       await expect.poll(async () => (await get(app, '/readyz')).statusCode).toBe(200);
@@ -295,9 +306,7 @@ describe.skipIf(!dockerOn)('built-in checks, against real PostgreSQL 18 and Valk
         cache: 'down',
         database: 'up',
       });
-    } finally {
-      await own.stop().catch(() => undefined);
-    }
+    }, 30_000);
   });
 
   it('does not check a cache that is not configured (optional mode, no URL)', async () => {
