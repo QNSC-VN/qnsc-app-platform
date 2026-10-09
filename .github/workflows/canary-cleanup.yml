@@ -49,7 +49,19 @@ jobs:
     timeout-minutes: 15
     permissions:
       packages: write
+      contents: read
+      pull-requests: read
     steps:
+      - name: Probe (temporary)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+        run: |
+          set +e
+          echo "--- list org packages"; gh api "/orgs/${ORG}/packages?package_type=npm&per_page=100" 2>&1 | head -c 600; echo
+          echo "--- list versions platform-cache"; gh api "/orgs/${ORG}/packages/npm/platform-cache/versions?per_page=100" --jq '.[].name' 2>&1 | head -c 600; echo
+          echo "--- repo-level"; gh api "/repos/${GITHUB_REPOSITORY}/contents/packages" --jq '.[].name' 2>&1 | head -c 300; echo
+          echo "--- pr files"; gh api "/repos/${GITHUB_REPOSITORY}/pulls/162/files" --jq '.[].filename' 2>&1 | head -c 300; echo
       - name: Delete
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
