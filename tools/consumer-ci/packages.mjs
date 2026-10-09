@@ -99,3 +99,16 @@ export function commitMessages(root, ref, dir) {
     .map((m) => m.trim())
     .filter(Boolean);
 }
+
+/**
+ * Every message that decides a package's next version: its commits since `ref`, plus the PR title.
+ *
+ * A squash merge uses the PR TITLE as the commit message, so a `feat!:` title is breaking even when
+ * no individual commit says so. The title speaks for the packages the PR touches, so it is added
+ * only for a package that has commits in the PR -- a title cannot bump a package it does not change.
+ */
+export function packageMessages(root, ref, dir, prTitle) {
+  const messages = commitMessages(root, ref, dir);
+  if (prTitle && messages.length > 0) messages.push(prTitle);
+  return messages;
+}

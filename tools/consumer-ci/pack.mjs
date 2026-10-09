@@ -2,6 +2,7 @@
 //
 //   node tools/consumer-ci/pack.mjs --out <dir>
 //   node tools/consumer-ci/pack.mjs --out <dir> --canary pr.12.abc1234 --changed-since origin/main
+//   ... --bump-since origin/main --pr-title "$PR_TITLE"   (breaking marker may live only in the title)
 //
 // Writes `<out>/manifest.json`: [{ name, dir, version, file }]. `version` is the version INSIDE the
 // tarball, so a canary build reports `7.1.0-pr.12.abc1234`, not `7.1.0`.
@@ -13,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { changedPackageDirs, commitMessages, listPackages, releaseVersion } from './packages.mjs';
+import { changedPackageDirs, listPackages, packageMessages, releaseVersion } from './packages.mjs';
 
 function option(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -27,6 +28,9 @@ const since = option('changed-since');
 // Version-bump base. A PR's package.json still carries the RELEASED version, so a breaking PR has to
 // be given the version it will get, or products on the old major would wrongly be tested against it.
 const bumpSince = option('bump-since') ?? since;
+// The PR title counts as one more commit message (a squash merge commits it), so `feat!:` in the
+// title alone is enough.
+const prTitle = option('pr-title');
 
 if (canary !== undefined && !/^pr\.\d+\.[0-9a-f]{7}$/.test(canary)) {
   process.stderr.write(`--canary must look like pr.<number>.<sha7>, got "${canary}"\n`);
@@ -45,7 +49,7 @@ for (const pkg of selected) {
   const file = join(cwd, 'package.json');
   const original = readFileSync(file, 'utf8');
   let version = bumpSince
-    ? releaseVersion(pkg.version, commitMessages(root, bumpSince, pkg.dir))
+    ? releaseVersion(pkg.version, packageMessages(root, bumpSince, pkg.dir, prTitle))
     : pkg.version;
   const rewritten = version !== pkg.version || canary !== undefined;
   try {

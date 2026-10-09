@@ -122,7 +122,9 @@ jobs:
       - name: Pack
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: node tools/consumer-ci/pack.mjs --out tarballs --bump-since "origin/${BASE_REF}"
+          # A squash merge commits the PR title, so a breaking marker may live only there.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node tools/consumer-ci/pack.mjs --out tarballs --bump-since "origin/${BASE_REF}" --pr-title "$PR_TITLE"
 
       # The consumer jobs install the PRODUCT's dependencies, not this repo's, so they have no
       # `semver`. Ship the link tool with the tarballs, together with the exact `semver` this

@@ -63,10 +63,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           set -euo pipefail
           label="pr.${PR_NUMBER}.${HEAD_SHA:0:7}"
-          node tools/consumer-ci/pack.mjs --out canary --canary "$label" --changed-since "origin/${BASE_REF}"
+          node tools/consumer-ci/pack.mjs --out canary --canary "$label" --changed-since "origin/${BASE_REF}" --pr-title "$PR_TITLE"
           echo "count=$(node -p "require('./canary/manifest.json').length")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

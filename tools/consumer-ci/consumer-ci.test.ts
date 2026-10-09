@@ -12,6 +12,7 @@ import {
   findManifests,
   isBreaking,
   listPackages,
+  packageMessages,
   releaseVersion,
 } from './packages.mjs';
 
@@ -220,6 +221,79 @@ describe('commitMessages', () => {
     expect(commitMessages(root, 'main', 'a')).toEqual(['feat(a)!: breaking in a']);
     expect(commitMessages(root, 'main', 'b')).toEqual(['fix(b): small']);
   });
+});
+
+describe('PR title as a commit message', () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], {
+      cwd,
+      encoding: 'utf8',
+    });
+
+  /** A repo with packages a (7.1.0) and b (2.0.0); on branch `pr`, only a has a (non-breaking) commit. */
+  function repoWithPr(): string {
+    const root = mkdtempSync(join(scratch, 'title-'));
+    git(root, 'init', '-q', '-b', 'main');
+    for (const [dir, version] of [
+      ['a', '7.1.0'],
+      ['b', '2.0.0'],
+    ] as const) {
+      mkdirSync(join(root, 'packages', dir), { recursive: true });
+      writeFileSync(
+        join(root, 'packages', dir, 'package.json'),
+        JSON.stringify({ name: `@quynhonsemiconductor/${dir}`, version, files: ['index.js'] }),
+      );
+      writeFileSync(join(root, 'packages', dir, 'index.js'), '1');
+    }
+    git(root, 'add', '.');
+    git(root, 'commit', '-q', '-m', 'chore: base');
+    git(root, 'checkout', '-q', '-b', 'pr');
+    writeFileSync(join(root, 'packages/a/index.js'), '2');
+    git(root, 'commit', '-qam', 'feat(a): add a thing');
+    return root;
+  }
+
+  it('adds the title for a package the PR touches', () => {
+    const root = repoWithPr();
+    expect(packageMessages(root, 'main', 'a', 'feat(a)!: rebuild')).toEqual([
+      'feat(a): add a thing',
+      'feat(a)!: rebuild',
+    ]);
+  });
+
+  it('does not add the title for a package the PR does not touch', () => {
+    const root = repoWithPr();
+    expect(packageMessages(root, 'main', 'b', 'feat(a)!: rebuild')).toEqual([]);
+  });
+
+  it('pack.mjs: a breaking marker only in the title makes the touched package the next major', () => {
+    const root = repoWithPr();
+    const out = join(root, 'out');
+    const run = (...extra: string[]) => {
+      execFileSync(
+        'node',
+        [join(repo, 'tools/consumer-ci/pack.mjs'), '--out', out, '--bump-since', 'main', ...extra],
+        {
+          cwd: root,
+          encoding: 'utf8',
+        },
+      );
+      const manifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8')) as {
+        dir: string;
+        version: string;
+      }[];
+      return Object.fromEntries(manifest.map((m) => [m.dir, m.version]));
+    };
+
+    expect(run()).toEqual({ a: '7.1.0', b: '2.0.0' });
+    expect(run('--pr-title', 'feat(a): add a thing')).toEqual({ a: '7.1.0', b: '2.0.0' });
+    // a is touched by the PR, b is not: only a is bumped.
+    expect(run('--pr-title', 'feat(a)!: rebuild a')).toEqual({ a: '8.0.0', b: '2.0.0' });
+    // package.json is restored after packing.
+    expect(JSON.parse(readFileSync(join(root, 'packages/a/package.json'), 'utf8')).version).toBe(
+      '7.1.0',
+    );
+  }, 120_000);
 });
 
 describe('listPackages', () => {
