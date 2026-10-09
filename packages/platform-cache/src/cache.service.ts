@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  type OnApplicationShutdown,
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
@@ -21,7 +22,7 @@ import { CACHE_OPTIONS, type CacheMode, type CacheModuleOptions } from './cache.
  * shared Valkey instance.
  */
 @Injectable()
-export class CacheService implements OnModuleInit, OnModuleDestroy {
+export class CacheService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
   private readonly logger = new Logger(CacheService.name);
   private client: Redis | null = null;
   private readonly mode: CacheMode;
@@ -62,7 +63,27 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     this.client.on('ready', () => this.logger.log('Cache ready'));
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /**
+   * @deprecated The connection now closes in `onApplicationShutdown` so jobs can finish first;
+   * this method does nothing and will be removed in the next major.
+   *
+   * Kept as a no-op so a product that called `onModuleDestroy()` itself (a test teardown, a manual
+   * close) keeps compiling and running. Nest still calls it, first of the close hooks, and it
+   * must NOT close the client: jobs and in-flight requests are still using it at that point.
+   */
+  onModuleDestroy(): void {
+    // Intentionally empty. See onApplicationShutdown().
+  }
+
+  /**
+   * Quit in `onApplicationShutdown`, NOT `onModuleDestroy`. Nest's `close()` runs the hooks in
+   * this order: `onModuleDestroy`, `beforeApplicationShutdown`, close the HTTP server,
+   * `onApplicationShutdown`. Anything that stops work using the cache (a job runner, in
+   * `beforeApplicationShutdown`) or serves requests that use it (the HTTP drain) must finish
+   * first; a destroy hook runs before all of them, so the client used to be gone while jobs and
+   * in-flight requests were still reading and locking through it.
+   */
+  async onApplicationShutdown(): Promise<void> {
     await this.client?.quit();
   }
 
