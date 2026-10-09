@@ -1,6 +1,6 @@
 # 0001. Use pg-boss as the job queue behind `platform-jobs`
 
-- **Status:** Proposed — verdict **PASS**; the platform lead accepts or rejects it by merging this PR
+- **Status:** **Accepted** (2026-10-09, platform lead) — verdict **PASS**. WP-7 builds `platform-jobs` on pg-boss with the decisions below.
 - **Date:** 2026-10-09
 - **Work package:** WP-6 (builds WP-7; informs WP-8 and WP-9)
 - **Deciders:** platform lead (`@quynhonsemiconductor/platform-infra`)
@@ -230,6 +230,31 @@ and the dead-letter count, which is `ready` on the dead-letter queue, so an aler
   minute; timezone arithmetic was checked by preview, not by waiting a day.
 - **Table bloat over weeks.** 10 minutes of load is not a month of retention.
 - **pg-boss 12.37.1.** All runs used 12.37.0.
+
+## Decisions by the platform lead (2026-10-09)
+
+1. **`persistQueueStats`: always off.** The app role never owns the `pgboss` schema (the migrator
+   role does), and one supervision mechanism is enough: queue depth, oldest-job age, failures,
+   retries and dead-letter counts come from the OpenTelemetry metrics. No per-product exception.
+2. **Idempotency key → job id**, not `singletonKey` (finding F6). `APP-PLATFORM-PLAN.md` §6.7 is
+   updated accordingly.
+3. **Per-queue retention is required.** Queues declare `retention` (completed / failed /
+   dead-letter). `mail.send` deletes completed jobs immediately and keeps failed or dead-lettered jobs
+   at most 24 h (identity ADR 0002 decision 4). Because deleting a completed job also removes the
+   job-id dedupe, the `mail.send` handler checks its own idempotency store (key
+   `purpose:userId:sha256(token)` from identity) before sending.
+4. **Drain-safe retries:** the minimum `retryLimit` is 1 for every queue, because a pod drain costs
+   the interrupted job one attempt (finding). A queue that truly must not retry declares it
+   explicitly and accepts dead-lettering on drain.
+5. **Fetching is batched with burst on** (pg-boss moves one job per second per queue by default);
+   long jobs use a heartbeat (30 s) rather than relying on the lease alone.
+6. **Defaults for `retryLimit`, `retryDelay`/backoff and `concurrency`** are chosen by the WP-7
+   author from the findings, documented with their rationale in the package README, and overridable
+   per queue. They are starting points, re-tuned after the first month on the server.
+7. pg-boss types are not re-exported from `platform-jobs` (they need `skipLibCheck`).
+8. Not verified here, to verify on the server before the first product depends on it: CloudNativePG
+   (and a PgBouncer Pooler if one is ever added), a real kubelet drain, table growth over weeks, and
+   the Grafana Cloud dashboards over the OTLP metrics.
 
 ## Alternatives considered
 
