@@ -1,6 +1,6 @@
 # 0002. Build identity v8 on Better Auth (WP-9 spike result: pass)
 
-- **Status:** Proposed — verdict **PASS**. The platform lead flips this to Accepted on merge; WP-10 does not start before that.
+- **Status:** **Accepted** (2026-10-09, platform lead) — verdict **PASS**. Conditional: manual checks M1–M4 must pass against the real QNSC tenant before `identity` `8.0.0` is released, and M6 re-runs criterion 9 once WP-7/WP-8 land. WP-10 may start now.
 - **Date:** 2026-10-09
 - **Work package:** WP-9 (`APP-PLATFORM-PLAN.md` §6.9; spike per `APP-PLATFORM-IDENTITY-V8-PLAN.md` §8.1)
 - **Deciders:** platform lead (`@quynhonsemiconductor/platform-infra`)
@@ -239,6 +239,38 @@ The mock IdP shows how Better Auth handles a conforming IdP. It cannot show what
 - **M6.** Re-run `test/c09` against the real `platform-jobs` (WP-7) and `platform-mail` (WP-8). The
   conclusions depend on "enqueue through a `DbExecutor`", which the WP-6 prototype shares, but the
   idempotency mechanism there is a deterministic job id rather than this stub's unique index.
+
+## Decisions by the platform lead (2026-10-09)
+
+These close the questions this spike left open. WP-10 implements them; the conformance kit asserts
+each one.
+
+1. **SSO client secret (D15): encrypt in the column.** The package wraps reads and writes of
+   `sso_provider.oidc_config` so the client secret is stored as `enc:v1:<base64(iv|ciphertext|tag)>`
+   (AES-256-GCM). The key comes from env `IDENTITY_ENCRYPTION_KEY` (32 random bytes, base64), delivered
+   from Azure Key Vault through External Secrets; the `v1` prefix is the key version for rotation
+   (decrypt with any configured key, encrypt with the newest). Plain text is never logged or returned by
+   any API. A per-organisation Key Vault secret resolver was rejected: every enterprise customer's SSO
+   setup would need an operator action in Key Vault. Conformance test: after registering a provider, the
+   raw row contains no plain-text secret, and sign-in still works.
+2. **Squatting on unverified accounts (D11): three rules, all mechanism in the package.**
+   - Password sign-up is **refused** for the staff domain(s) and for every domain an organisation has
+     verified for SSO; the response tells the user to use their company sign-in.
+   - An **unverified** password account proves nothing. When a user signs in with a provider that
+     asserts a verified email (Entra, Google, verified SSO) and the only existing account for that email
+     is unverified and has never had a session, that account is deleted (audit event
+     `account.unverified_replaced`) and sign-in continues as a new user.
+   - Unverified accounts are purged **72 hours** after creation by a `platform-jobs` schedule.
+3. **Tenant check and B2B guests (M1).** The package enforces `tid` = the configured tenant for the
+   staff preset. Whether B2B **guests** of that tenant may sign in is product policy (option
+   `staff.allowGuests`, default `false`): rova sets it to `true` for vendors; opshub keeps `false`.
+4. **Bearer links in job payloads (follow-up 3).** Reset and verification links are bearer tokens in
+   clear in the `mail.send` job row. `mail.send` deletes completed jobs immediately and keeps failed or
+   dead-lettered jobs at most 24 hours; reset tokens stay at 15 minutes. No payload encryption.
+5. **IdP registration (D15 `providersLimit`).** Default deny: only an organisation owner/admin can
+   register an SSO provider, and only for a verified domain.
+6. D7 (`timestamptz`, `/readyz` check) and D10 (timing pad) are decided by the WP-10 author and recorded
+   in the WP-10 PR; flag either if it changes a public API.
 
 ## Alternatives considered
 
