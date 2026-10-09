@@ -58,7 +58,7 @@ export async function registerAuthHandler(fastify: FastifyInstance, auth: Identi
           if (key.toLowerCase() !== 'set-cookie') void reply.header(key, value);
         });
         if (cookies.length > 0) void reply.header('set-cookie', cookies);
-        // nosemgrep: javascript.express.security.audit.xss.direct-response-write -- proxies auth.handler's Response verbatim with its own Content-Type; no user HTML is rendered
+        // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write -- proxies auth.handler's Response verbatim with its own Content-Type; no user HTML is rendered
         return reply.send(response.body ? Buffer.from(await response.arrayBuffer()) : null);
       },
     });

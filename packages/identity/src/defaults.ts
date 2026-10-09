@@ -45,14 +45,19 @@ export const DEFAULTS = Object.freeze({
       windowSeconds: 3600,
     }),
     /**
-     * A KNOWN DEVICE (OWASP): a signed, HttpOnly cookie set on a successful sign-in. A request that
-     * carries a valid one for the account skips the account-wide delay and ceiling (which anyone can
-     * exhaust from many addresses) and is limited only per device.
+     * A KNOWN DEVICE (OWASP): a signed, HttpOnly cookie set on a successful sign-in (see
+     * `known-device.ts`: server-side expiry, bound to the credential). A request that carries a valid
+     * one for the account skips the account-wide delay and ceiling (which anyone can exhaust from many
+     * addresses) and is limited per device, and 20 attempts an hour across all of the account's devices.
      */
     knownDevice: Object.freeze({
       maxAgeSeconds: 90 * 24 * 3600,
+      /** Per device. */
       maxAttempts: 5,
       windowSeconds: 15 * 60,
+      /** All valid devices of one account together; past it a cookie is treated as absent. */
+      accountMaxAttempts: 20,
+      accountWindowSeconds: 3600,
     }),
   }),
   /** Reset requests and verification re-sends, per email address; over the limit is silent (D14). */
