@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { changedPackageDirs, listPackages } from './packages.mjs';
+import { changedPackageDirs, commitMessages, listPackages, releaseVersion } from './packages.mjs';
 
 function option(name) {
   const i = process.argv.indexOf(`--${name}`);
@@ -24,6 +24,9 @@ const root = process.cwd();
 const out = resolve(option('out') ?? 'tarballs');
 const canary = option('canary');
 const since = option('changed-since');
+// Version-bump base. A PR's package.json still carries the RELEASED version, so a breaking PR has to
+// be given the version it will get, or products on the old major would wrongly be tested against it.
+const bumpSince = option('bump-since') ?? since;
 
 if (canary !== undefined && !/^pr\.\d+\.[0-9a-f]{7}$/.test(canary)) {
   process.stderr.write(`--canary must look like pr.<number>.<sha7>, got "${canary}"\n`);
@@ -41,10 +44,13 @@ for (const pkg of selected) {
   const cwd = join(root, 'packages', pkg.dir);
   const file = join(cwd, 'package.json');
   const original = readFileSync(file, 'utf8');
-  let version = pkg.version;
+  let version = bumpSince
+    ? releaseVersion(pkg.version, commitMessages(root, bumpSince, pkg.dir))
+    : pkg.version;
+  const rewritten = version !== pkg.version || canary !== undefined;
   try {
-    if (canary) {
-      version = `${pkg.version}-${canary}`;
+    if (canary) version = `${version}-${canary}`;
+    if (rewritten) {
       const json = JSON.parse(original);
       json.version = version;
       writeFileSync(file, `${JSON.stringify(json, null, 2)}\n`);
@@ -58,7 +64,7 @@ for (const pkg of selected) {
     manifest.push({ name: pkg.name, dir: pkg.dir, version, file: tarball.split('/').pop() });
   } finally {
     // Never leave the rewritten version behind in the working tree.
-    if (canary) writeFileSync(file, original);
+    if (rewritten) writeFileSync(file, original);
   }
 }
 

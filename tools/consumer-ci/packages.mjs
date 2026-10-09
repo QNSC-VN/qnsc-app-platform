@@ -5,6 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import semver from 'semver';
 
 /** Every publishable package under `<root>/packages`: `{ dir, name, version }`. */
 export function listPackages(root) {
@@ -61,4 +62,40 @@ export function findManifests(root) {
 /** Posix-style relative path, for stable log output. */
 export function rel(root, path) {
   return relative(root, path).split(sep).join('/');
+}
+
+/**
+ * Is this commit message a breaking change by Conventional Commits? `type!:` / `type(scope)!:` in the
+ * subject, or a `BREAKING CHANGE:` / `BREAKING-CHANGE:` footer.
+ */
+export function isBreaking(message) {
+  const subject = message.split('\n', 1)[0] ?? '';
+  return /^\w+(\([^)]*\))?!:/.test(subject) || /^BREAKING[ -]CHANGE:/m.test(message);
+}
+
+/**
+ * The version release-please would give a package on merge, as far as RANGES are concerned.
+ *
+ * A pull request does not change `version` in package.json -- release-please does that after the
+ * merge -- so a `feat!:` PR against identity 7.1.0 would otherwise be packed as 7.1.0, look
+ * "in range" for every product on ^7.1.0, and break them all. Only a breaking change can leave a
+ * caret range, so only that is modelled: a major bump, or a minor bump below 1.0.0 (this repo sets
+ * `bump-minor-pre-major`). Anything else keeps the current version.
+ */
+export function releaseVersion(current, messages) {
+  if (!messages.some(isBreaking)) return current;
+  return semver.inc(current, semver.major(current) === 0 ? 'minor' : 'major');
+}
+
+/** Commit messages on HEAD but not on `ref` that touch `packages/<dir>`. */
+export function commitMessages(root, ref, dir) {
+  const out = execFileSync(
+    'git',
+    ['log', '--no-merges', '--format=%B%x00', `${ref}..HEAD`, '--', `packages/${dir}`],
+    { cwd: root, encoding: 'utf8' },
+  );
+  return out
+    .split('\0')
+    .map((m) => m.trim())
+    .filter(Boolean);
 }
