@@ -12,7 +12,8 @@
  * `OTEL_ENABLED=true` in `.env`, `startOtel()` saw it unset and did nothing at all. Proven
  * by contrast against a live collector — `.env` alone produced zero exported series, the
  * same value exported in the shell produced 219. Deployed environments never noticed
- * because ECS injects real environment variables rather than a file.
+ * because a container platform (Kubernetes) injects real environment variables rather than a
+ * file.
  *
  * A LEAF MODULE ON PURPOSE: it imports nothing but `node:process`. Reaching it through the
  * `@quynhonsemiconductor/platform-runtime/load-env` subpath rather than the package root is what
@@ -29,7 +30,7 @@ import process from 'node:process';
 try {
   process.loadEnvFile();
 } catch {
-  // No `.env` — the normal case in CI and in a deployed task, where the environment is
+  // No `.env` — the normal case in CI and in a deployed container, where the environment is
   // injected directly. Nothing to do, and nothing worth logging: a logger here would be
   // another import competing with the instrumentation this file exists to unblock.
 }

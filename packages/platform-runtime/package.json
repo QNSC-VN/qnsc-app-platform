@@ -1,7 +1,7 @@
 {
   "name": "@quynhonsemiconductor/platform-runtime",
   "version": "0.1.2",
-  "description": "Shared runtime primitives for QNSC product backends: env loading, typed config, exclusive scheduled jobs, and request-arrival timing.",
+  "description": "Shared runtime primitives for QNSC product backends: env loading, typed config, /livez and /readyz, graceful shutdown for pod drains, exclusive scheduled jobs, and request-arrival timing.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -36,21 +36,31 @@
     "@nestjs/common": ">=11",
     "@nestjs/config": ">=4",
     "@quynhonsemiconductor/observability": ">=0.2.0",
-    "@quynhonsemiconductor/platform-cache": ">=3.0.0",
+    "@quynhonsemiconductor/platform-cache": ">=3.1.1",
     "fastify": ">=5",
-    "zod": ">=4"
+    "zod": ">=4",
+    "@quynhonsemiconductor/platform-db": ">=0.1.0"
   },
   "peerDependenciesMeta": {
     "fastify": {
+      "optional": true
+    },
+    "@quynhonsemiconductor/platform-db": {
       "optional": true
     }
   },
   "devDependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-fastify": "11.2.7",
     "@quynhonsemiconductor/observability": "workspace:^",
     "@quynhonsemiconductor/platform-cache": "workspace:^",
+    "@quynhonsemiconductor/platform-db": "workspace:^",
+    "@quynhonsemiconductor/testing": "workspace:*",
+    "@types/pg": "8.23.1",
     "fastify": "^5.12.5",
+    "pg": "8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^4.4.3"
