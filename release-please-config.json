@@ -84,6 +84,5 @@
     }
   },
   "pull-request-title-pattern": "chore(release): ${component} ${version}",
-  "pull-request-header": "🤖 Opened by Release Please. One pull request for every pending package release: merging it tags each `<package>-v<version>` and the publish workflow pushes each package to GitHub Packages.",
-  "group-pull-request-title-pattern": "chore(release): publish app-platform packages"
+  "pull-request-header": "🤖 Opened by Release Please. One pull request for every pending package release: merging it tags each `<package>-v<version>` and the publish workflow pushes each package to GitHub Packages."
 }
