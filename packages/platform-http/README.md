@@ -1,22 +1,68 @@
 # @quynhonsemiconductor/platform-http
 
-Shared Fastify/NestJS HTTP bootstrap for QNSC product backends: CORS policy,
-cookie configuration, security headers, standard error codes, and OpenTelemetry
-wiring.
+The HTTP contract every QNSC product backend shares, and that the frontends depend on: the **error
+taxonomy and its status mapping**, the **global exception filter** that renders one error envelope,
+**pagination**, the **client address**, the **rate-limit guard** and **idempotency interceptor**, the
+HTTP **access-log interceptor**, the request-context accessor, and input sanitising.
 
-> **Phase 1 skeleton.** The concrete implementation is extracted from the product
-> repos in Phase 2 of the Identity Platform Migration Plan.
+| in this package                                                                                       | in your product                                        |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `DomainException` + subclasses, `ErrorCategory` → status table, transport-level codes                 | your domain error **codes** (an append-only catalogue) |
+| `GlobalExceptionFilter`: the one wire envelope `{ error: { code, message, details, correlationId } }` | which exceptions your code throws                      |
+| cursor and offset pagination (`PageQuerySchema`, `buildPageResult`, `encodeCursor` …)                 | which endpoints paginate, and their sort keys          |
+| `clientIp(req)`: `cf-connecting-ip` → `x-forwarded-for` → socket                                      | nothing: stop reading `req.ip` / `x-real-ip`           |
+| `RateLimitGuard`, `@RateLimit(tier)`, tiers (`DEFAULT`, `STRICT`, `AUTH_LOGIN`, `AUTH_REFRESH`)       | **which route gets which tier**                        |
+| `IdempotencyInterceptor` (`Idempotency-Key` on `POST`/`PUT`)                                          | which routes opt in                                    |
+| `HttpLoggingInterceptor` (one summary line per request; skips probe paths)                            | your log field names for anything else                 |
+| `sanitizeString` / `sanitizeObject` (XSS stripping ahead of validation)                               | where it is applied                                    |
+
+Divergence here is a **cross-repo contract break**: both frontends branch on the error `code`, so a 409 in
+one product that is a 422 in another is a bug, not a style difference
+([ADMISSION-TEST.md](../../docs/ADMISSION-TEST.md)). The wire behaviour is specified in
+[PLATFORM-CONTRACT.md](../../docs/PLATFORM-CONTRACT.md) §7–§9.
 
 ## Install
 
 ```ini
 # .npmrc
-@qnsc:registry=https://npm.pkg.github.com
+@quynhonsemiconductor:registry=https://npm.pkg.github.com
 ```
 
 ```bash
 pnpm add @quynhonsemiconductor/platform-http
 ```
+
+Peer dependencies: `@nestjs/common`, `@nestjs/core`, `@nestjs/swagger` (`>=11`); `fastify` (`>=5`);
+`ioredis`, `nestjs-zod`, `zod`; `@quynhonsemiconductor/platform-cache` (`>=2.0.0`) and
+`@quynhonsemiconductor/observability` (`>=0.2.1`).
+
+## Subpaths
+
+None: a single entry point (`.`). The two pagination styles share names (`buildPageResult`, `PagedResult`),
+so they are exported as namespaces: `cursorPagination` and `offsetPagination`.
+
+## Error envelope
+
+```ts
+throw new NotFoundException('WORK_ITEM_NOT_FOUND', 'Work item not found'); // → 404
+```
+
+```json
+{
+  "error": {
+    "code": "WORK_ITEM_NOT_FOUND",
+    "message": "Work item not found",
+    "details": [],
+    "correlationId": "…"
+  }
+}
+```
+
+The category fixes the status (`NOT_FOUND` 404, `CONFLICT` 409, `VALIDATION_FAILED` 422,
+`PERMISSION_DENIED` 403, `PRECONDITION_FAILED` 412, `RATE_LIMITED` 429, `UNAUTHORIZED` 401, `INTERNAL`
+500). Register `GlobalExceptionFilter` once as `APP_FILTER`. Internal detail never reaches the wire.
+A framework `HttpException` maps to the code of the same name (`HttpErrorCodes`); `503` is
+`SERVICE_UNAVAILABLE`, not `INTERNAL_ERROR`.
 
 ## Client address
 
@@ -85,3 +131,26 @@ the query string removed. Passing `skipPaths` replaces that default.
 
 This makes `@quynhonsemiconductor/observability` (`>=0.2.1`) a peer dependency. All three
 products already install it.
+
+## Testing your code
+
+The guard, the interceptor and the filter are plain Nest providers. Unit-test a guard by constructing it
+with a stub `CacheService` (`consumeRateLimit` is the only method it calls); test the interceptor the same
+way with `{ instance: { get, set } }`. For behaviour against a real server (the sliding window itself),
+see `platform-cache`. There is no `/testing` subpath.
+
+## Known limits
+
+- **NestJS + Fastify only.** The guard and interceptors are Nest constructs; the Express adapter is not
+  supported.
+- **Rate limiting and idempotency need a reachable cache.** A cache that goes away at request time
+  **fails open** (reported as `securityFailOpen: "rate_limit"`); in production the application refuses to
+  start without one unless `RATE_LIMIT_MODE` / `IDEMPOTENCY_MODE` say so.
+- **`cf-connecting-ip` is trusted.** That is correct only if the pods are reachable solely through
+  Cloudflare Tunnel (see the assumption above).
+- Correlation ids are **read** from `X-Correlation-Id` for logging; seeding the request context and
+  generating an id when it is absent is still done in each product's middleware (open question Q2 in the
+  contract).
+- The rate-limit tiers are fixed (`DEFAULT`, `STRICT`, `AUTH_LOGIN`, `AUTH_REFRESH`). `@RateLimit(tier)`
+  selects one by name and `@SkipRateLimit()` opts a route out; a product cannot define a tier of its own
+  without a change here. Which route gets which tier is the product's.
