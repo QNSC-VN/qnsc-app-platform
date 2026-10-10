@@ -48,19 +48,39 @@ export function signDeviceValue(secret: string, name: string, payload: string): 
   return `${payload}.${mac(secret, `${name}\n${payload}`).toString('base64url')}`;
 }
 
-/** Keyed fingerprint of everything that must invalidate a remembered device when it changes. */
-async function epochOf(ctx: Ctx, userId: string): Promise<string | undefined> {
+/** What the epoch is made of, read once so a decision and the cookie it mints agree (see `bumpAndReissue`). */
+export interface EpochInputs {
+  userUpdatedAt: Date;
+  password: string;
+  credentialUpdatedAt: Date;
+}
+
+export async function readEpochInputs(ctx: Ctx, userId: string): Promise<EpochInputs | undefined> {
   const ia = ctx.context.internalAdapter;
   const [user, accounts] = await Promise.all([ia.findUserById(userId), ia.findAccounts(userId)]);
   const credential = accounts.find((a) => a.providerId === 'credential');
   if (!user || !credential) return undefined;
+  return {
+    userUpdatedAt: new Date(user.updatedAt),
+    password: credential.password ?? '',
+    credentialUpdatedAt: new Date(credential.updatedAt),
+  };
+}
+
+/** Keyed fingerprint of everything that must invalidate a remembered device when it changes. */
+function fingerprint(secret: string, userId: string, inputs: EpochInputs): string {
   const material = [
     userId,
-    credential.password ?? '',
-    new Date(credential.updatedAt).toISOString(),
-    new Date(user.updatedAt).toISOString(),
+    inputs.password,
+    inputs.credentialUpdatedAt.toISOString(),
+    inputs.userUpdatedAt.toISOString(),
   ].join('\n');
-  return mac(ctx.context.secret, `epoch\n${material}`).subarray(0, 16).toString('base64url');
+  return mac(secret, `epoch\n${material}`).subarray(0, 16).toString('base64url');
+}
+
+async function epochOf(ctx: Ctx, userId: string, known?: EpochInputs): Promise<string | undefined> {
+  const inputs = known ?? (await readEpochInputs(ctx, userId));
+  return inputs ? fingerprint(ctx.context.secret, userId, inputs) : undefined;
 }
 
 interface Parsed {
@@ -99,6 +119,8 @@ export async function validDevice(
   ctx: Ctx,
   userId: () => Promise<string | undefined>,
   now: () => number = () => Math.floor(Date.now() / 1000),
+  /** Judge the cookie against THIS snapshot of the epoch inputs instead of reading them again. */
+  inputs?: EpochInputs,
 ): Promise<{ deviceId: string; iat: number } | undefined> {
   const device = await parse(ctx);
   if (!device) return undefined;
@@ -106,7 +128,7 @@ export async function validDevice(
   if (age > DEFAULTS.lockout.knownDevice.maxAgeSeconds || age < -CLOCK_SKEW_SECONDS)
     return undefined;
   if ((await userId()) !== device.userId) return undefined;
-  const epoch = await epochOf(ctx, device.userId);
+  const epoch = await epochOf(ctx, device.userId, inputs);
   return epoch && equal(epoch, device.epoch)
     ? { deviceId: device.deviceId, iat: device.iat }
     : undefined;
@@ -117,8 +139,9 @@ async function writeDevice(
   userId: string,
   deviceId: string,
   iat: number,
+  epochInputs?: EpochInputs,
 ): Promise<boolean> {
-  const epoch = await epochOf(ctx, userId);
+  const epoch = await epochOf(ctx, userId, epochInputs);
   if (!epoch) return false; // no password account: nothing to throttle, nothing to remember
   const cookie = ctx.context.createAuthCookie(COOKIE, {
     maxAge: DEFAULTS.lockout.knownDevice.maxAgeSeconds,
@@ -144,16 +167,42 @@ export async function rememberDevice(ctx: Ctx, userId: string): Promise<void> {
 }
 
 /**
- * Re-issue THIS browser's cookie under the user's current epoch, keeping its device id and its
- * original `iat` (so the per-device counter carries on and the cookie does not live longer). Used after
- * "sign out OTHER sessions", which bumps the epoch for every device but the one asking.
+ * "Sign out OTHER sessions": bump the epoch so every other device's cookie dies, and re-issue THIS
+ * browser's cookie under the new one (same device id, same original `iat`, so it neither resets its
+ * per-device counter nor lives longer).
+ *
+ * The re-issue happens only if THIS call performed the bump. The bump is a compare-and-set on
+ * `user.updatedAt` from the value `inputs` was read at; if another bump (a second concurrent "other
+ * sessions", the admin's revoke-all) got there first this one re-issues nothing, and the cookie is
+ * minted from `inputs` plus the value just written rather than from a fresh read, so a password change
+ * that landed in between (it moves the credential part of the epoch) makes the new cookie dead on
+ * arrival. Two devices racing therefore end with at most one cookie, never two.
  */
-export async function reissueDevice(
+export async function bumpAndReissue(
   ctx: Ctx,
   userId: string,
   device: { deviceId: string; iat: number },
+  inputs: EpochInputs,
 ): Promise<void> {
-  await writeDevice(ctx, userId, device.deviceId, device.iat);
+  const next = new Date(Math.max(Date.now(), inputs.userUpdatedAt.getTime() + 1));
+  const won = await ctx.context.adapter.updateMany({
+    model: 'user',
+    where: [
+      { field: 'id', value: userId },
+      { field: 'updatedAt', value: inputs.userUpdatedAt },
+    ],
+    update: { updatedAt: next },
+  });
+  if (won === 0) {
+    // Lost to another bump, which already killed the other devices. But if nothing moved (the stored
+    // value has more precision than a JS Date, say) NO bump happened, and the others must still die.
+    const now = await ctx.context.internalAdapter.findUserById(userId);
+    if (now && new Date(now.updatedAt).getTime() === inputs.userUpdatedAt.getTime()) {
+      await bumpDeviceEpoch(ctx, userId);
+    }
+    return;
+  }
+  await writeDevice(ctx, userId, device.deviceId, device.iat, { ...inputs, userUpdatedAt: next });
 }
 
 /**

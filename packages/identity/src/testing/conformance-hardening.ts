@@ -1100,4 +1100,174 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
       expect(res.setCookie.some((l) => /known_device=/.test(l))).toBe(false);
     });
   });
+
+  describe('review R1 + R2: the re-issue is validated, and it cannot race', () => {
+    let stack: Stack;
+    t.beforeAll(async () => {
+      stack = await startStack(infra);
+    });
+    t.afterAll(() => stack?.stop());
+
+    const generation = async (subject: string) =>
+      Number(await stack.get(lockoutKeys.gen(subject))) || 0;
+    const floodCeiling = async (email: string) =>
+      stack.seedCounter(
+        lockoutKeys.account('signin', await generation(email), email),
+        DEFAULTS.lockout.perAccount.ceiling,
+        3600,
+      );
+    const newUser = async () => {
+      const email = uniqueEmail('reissue');
+      const password = strongPassword();
+      await verifiedUser(stack, email, password, expect);
+      return { email, password };
+    };
+    /** A browser with a session AND a known-device cookie (one sign-in gives both). */
+    const device = async (email: string, password: string) => {
+      const client = stack.client();
+      expect((await signIn(client, email, password)).status).toBe(200);
+      const name = Object.keys(client.cookies).find((n) => n.endsWith('.known_device'))!;
+      return { client, name, cookie: () => client.cookies[name]! };
+    };
+    const bypasses = async (
+      email: string,
+      password: string,
+      cookie: { name: string; value: string },
+    ) => {
+      await floodCeiling(email);
+      const browser = stack.client({ ip: `198.51.100.${100 + Math.floor(Math.random() * 100)}` });
+      browser.setCookies({ [cookie.name]: cookie.value });
+      return (await signIn(browser, email, password)).status === 200;
+    };
+    const mintsCookie = (res: { setCookie: string[] }) =>
+      res.setCookie.some((l) => /known_device=/.test(l));
+
+    describe('R1: nothing is re-issued unless the cookie asking is valid, for THIS user, now', () => {
+      it("(a) X's session carrying Y's valid cookie: nothing minted, Y unaffected", async () => {
+        const x = await newUser();
+        const y = await newUser();
+        const theirs = await device(y.email, y.password);
+        const session = await device(x.email, x.password);
+        session.client.setCookies({ ...session.client.cookies, [theirs.name]: theirs.cookie() });
+        const res = await session.client.post(`${API}/revoke-other-sessions`, {});
+        expect(res.status, res.body).toBe(200);
+        expect(mintsCookie(res)).toBe(false);
+        expect(
+          await bypasses(y.email, y.password, { name: theirs.name, value: theirs.cookie() }),
+        ).toBe(true);
+      });
+
+      it("(b) X's own stale-epoch cookie (the password changed since): nothing minted, Y unaffected", async () => {
+        const x = await newUser();
+        const y = await newUser();
+        const stale = await device(x.email, x.password);
+        const staleValue = stale.cookie();
+        const changer = await device(x.email, x.password);
+        const next = strongPassword();
+        expect(
+          (
+            await changer.client.post(`${API}/change-password`, {
+              currentPassword: x.password,
+              newPassword: next,
+            })
+          ).status,
+        ).toBe(200);
+        const session = stack.client();
+        expect((await signIn(session, x.email, next)).status).toBe(200);
+        session.setCookies({ ...session.cookies, [stale.name]: staleValue });
+        const res = await session.post(`${API}/revoke-other-sessions`, {});
+        expect(res.status, res.body).toBe(200);
+        expect(mintsCookie(res)).toBe(false);
+        const other = await device(y.email, y.password);
+        expect(
+          await bypasses(y.email, y.password, { name: other.name, value: other.cookie() }),
+        ).toBe(true);
+      });
+
+      it("(c) X's own cookie with an over-age iat: nothing minted, Y unaffected", async () => {
+        const x = await newUser();
+        const y = await newUser();
+        const session = await device(x.email, x.password);
+        const [, userId, deviceId, , epoch] = session.cookie().split('.') as [
+          string,
+          string,
+          string,
+          string,
+          string,
+        ];
+        const old = Math.floor(Date.now() / 1000) - DEFAULTS.lockout.knownDevice.maxAgeSeconds - 10;
+        const aged = signDeviceValue(
+          stack.env[DEFAULTS.secretEnv]!,
+          session.name,
+          ['v2', userId, deviceId, old, epoch].join('.'),
+        );
+        session.client.setCookies({ ...session.client.cookies, [session.name]: aged });
+        const res = await session.client.post(`${API}/revoke-other-sessions`, {});
+        expect(res.status, res.body).toBe(200);
+        expect(mintsCookie(res)).toBe(false);
+        const other = await device(y.email, y.password);
+        expect(
+          await bypasses(y.email, y.password, { name: other.name, value: other.cookie() }),
+        ).toBe(true);
+      });
+    });
+
+    describe('R2: two things racing cannot both leave a cookie behind', () => {
+      it('two devices calling "sign out other sessions" at once: at most one cookie survives', async () => {
+        const outcomes: number[] = [];
+        for (let trial = 0; trial < 8; trial += 1) {
+          const { email, password } = await newUser();
+          const a = await device(email, password);
+          const b = await device(email, password);
+          const [ra, rb] = await Promise.all([
+            a.client.post(`${API}/revoke-other-sessions`, {}),
+            b.client.post(`${API}/revoke-other-sessions`, {}),
+          ]);
+          expect([ra.status, rb.status].every((c) => c === 200 || c === 401)).toBe(true);
+          let alive = 0;
+          for (const d of [a, b]) {
+            if (await bypasses(email, password, { name: d.name, value: d.cookie() })) alive += 1;
+          }
+          outcomes.push(alive);
+        }
+        expect(
+          Math.max(...outcomes),
+          `survivors per trial: ${outcomes.join(',')}`,
+        ).toBeLessThanOrEqual(1);
+      }, 120_000);
+
+      it('"sign out other sessions" racing a password change: no cookie survives', async () => {
+        // Deterministic interleaving: a trigger makes the DELETE of the other sessions take 600 ms, and
+        // the password change lands inside that window, i.e. AFTER the revoke has taken its snapshot and
+        // BEFORE it re-issues. (Without the CAS-and-snapshot design the re-issue re-read the epoch and
+        // minted a cookie that was valid under the NEW password.)
+        const { email, password } = await newUser();
+        const a = await device(email, password);
+        const b = await device(email, password);
+        const changer = stack.client();
+        expect((await signIn(changer, email, password)).status).toBe(200);
+        const next = strongPassword();
+        await stack.pool.query(`
+          create or replace function identity.slow_delete() returns trigger language plpgsql as $$
+          begin perform pg_sleep(0.6); return null; end $$;
+          create trigger slow_delete after delete on identity.session
+            for each statement execute function identity.slow_delete();`);
+        try {
+          const revoke = a.client.post(`${API}/revoke-other-sessions`, {});
+          await new Promise((r) => setTimeout(r, 200));
+          const changed = await changer.post(`${API}/change-password`, {
+            currentPassword: password,
+            newPassword: next,
+          });
+          expect(changed.status, changed.body).toBe(200);
+          expect((await revoke).status).toBe(200);
+        } finally {
+          await stack.pool.query(`drop trigger if exists slow_delete on identity.session`);
+        }
+        for (const d of [a, b]) {
+          expect(await bypasses(email, next, { name: d.name, value: d.cookie() })).toBe(false);
+        }
+      }, 60_000);
+    });
+  });
 }
