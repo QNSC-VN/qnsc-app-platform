@@ -142,9 +142,21 @@ describe('the mail.send queue configuration', () => {
       completed: 'immediate',
       failed: 86_400,
       deadLetter: 86_400,
+      pending: 86_400,
     });
     expect(Object.isFrozen(MAIL_QUEUE_CONFIG)).toBe(true);
     expect(Object.isFrozen(MAIL_QUEUE_CONFIG.retention)).toBe(true);
+  });
+
+  it('bounds a job nobody processed to 24 h as well (pg-boss would keep a bearer link 14 days), and that outlives every retry', () => {
+    expect(MAIL_QUEUE_CONFIG.retention.pending).toBe(86_400);
+    // A retry does not extend a job's deadline, so the window must cover the longest the retries can
+    // take: (retryLimit + 1) x the attempt ceiling + retryLimit x the longest backoff.
+    // plus 75 s per attempt, the lateness with which pg-boss notices that one expired.
+    const longestLife =
+      (MAIL_QUEUE_CONFIG.retryLimit + 1) * (MAIL_QUEUE_CONFIG.expireInSeconds + 75) +
+      MAIL_QUEUE_CONFIG.retryLimit * MAIL_QUEUE_CONFIG.retryDelayMaxSeconds;
+    expect(longestLife).toBeLessThan(MAIL_QUEUE_CONFIG.retention.pending);
   });
 
   it('retries long enough that a ten-minute outage or sustained throttling cannot dead-letter auth mail', () => {
