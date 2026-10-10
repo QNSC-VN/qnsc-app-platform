@@ -6,7 +6,7 @@ import { uuidv7 } from 'uuidv7';
 import { reservedDomainCheck } from './reserved';
 import { purgeWith, replaceUnverifiedAccount, type AccountContext } from './accounts';
 import { DEFAULTS, type Preset } from './defaults';
-import { noopSink, type IdentityLogger, type SecurityEventSink } from './events';
+import { consoleLogger, noopSink, type IdentityLogger, type SecurityEventSink } from './events';
 import { accountLockout } from './lockout';
 import { perEmailLimiter } from './mail-limit';
 import { AuthMail } from './mail-port';
@@ -140,7 +140,12 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
   };
   const staffDomains = o.staff?.domains ?? [];
   const storage = valkeySecondaryStorage(o.cache, o.onStorageDegraded);
-  const mail = new AuthMail(o.mail.jobs, o.mail.templates, perEmailLimiter(storage));
+  const mail = new AuthMail(
+    o.mail.jobs,
+    o.mail.templates,
+    perEmailLimiter(storage),
+    o.logger ?? consoleLogger,
+  );
 
   // Assigned once below; the closures that read it are built first and only run later.
   // eslint-disable-next-line prefer-const

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { hash as argon2hash } from '@node-rs/argon2';
+import { DEFAULTS } from '../defaults';
+import { signDeviceValue } from '../known-device';
+import { lockoutKeys } from '../lockout';
 import { verifiedUser, signIn } from './flows';
 import {
   API,
@@ -785,5 +788,183 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
       const fresh = stack.events.slice(before).filter((e) => e.detail?.['method'] === 'sso');
       expect(fresh.map((e) => e.name)).toEqual(['sign_in.success', 'sign_in.failure']);
     });
+  });
+
+  describe('review S5b: a known-device cookie is bound to the credential and expires server-side', () => {
+    let stack: Stack;
+    t.beforeAll(async () => {
+      stack = await startStack(infra);
+    });
+    t.afterAll(() => stack?.stop());
+
+    const generation = async (subject: string) =>
+      Number(await stack.get(lockoutKeys.gen(subject))) || 0;
+    const floodCeiling = async (email: string) =>
+      stack.seedCounter(
+        lockoutKeys.account('signin', await generation(email), email),
+        DEFAULTS.lockout.perAccount.ceiling,
+        3600,
+      );
+    /** Sign in on a fresh browser: each one is handed its own known-device cookie. */
+    const mint = async (email: string, password: string) => {
+      const c = stack.client();
+      expect((await signIn(c, email, password)).status).toBe(200);
+      const entry = Object.entries(c.cookies).find(([name]) => name.endsWith('.known_device'));
+      expect(entry, 'a successful sign-in mints a cookie').toBeDefined();
+      return { client: c, name: entry![0], value: entry![1] };
+    };
+    /**
+     * Does this cookie still bypass the account-wide ceiling? The ceiling is exhausted first, so the
+     * RIGHT password is refused (429) unless the cookie is honoured (200).
+     */
+    const bypasses = async (
+      email: string,
+      password: string,
+      cookie: { name: string; value: string },
+    ) => {
+      await floodCeiling(email);
+      const browser = stack.client({ ip: `198.51.100.${100 + Math.floor(Math.random() * 100)}` });
+      browser.setCookies({ [cookie.name]: cookie.value });
+      return (await signIn(browser, email, password)).status === 200;
+    };
+    const newUser = async () => {
+      const email = uniqueEmail('bind');
+      const password = strongPassword();
+      await verifiedUser(stack, email, password, expect);
+      return { email, password };
+    };
+
+    it('control: a fresh cookie bypasses the exhausted ceiling', async () => {
+      const { email, password } = await newUser();
+      expect(await bypasses(email, password, await mint(email, password))).toBe(true);
+    });
+
+    it('an old cookie gets no bypass after change-password', async () => {
+      const { email, password } = await newUser();
+      const old = await Promise.all([
+        mint(email, password),
+        mint(email, password),
+        mint(email, password),
+      ]);
+      const owner = stack.client();
+      await signIn(owner, email, password);
+      const next = strongPassword();
+      const changed = await owner.post(`${API}/change-password`, {
+        currentPassword: password,
+        newPassword: next,
+        revokeOtherSessions: true,
+      });
+      expect(changed.status, changed.body).toBe(200);
+      const fresh = await mint(email, next); // minted AFTER the change, before the ceiling is exhausted
+      for (const cookie of old) expect(await bypasses(email, next, cookie)).toBe(false);
+      expect(await bypasses(email, next, fresh)).toBe(true);
+    });
+
+    it('an old cookie gets no bypass after a password reset', async () => {
+      const { email, password } = await newUser();
+      const old = await mint(email, password);
+      await stack.client().post(`${API}/request-password-reset`, { email, redirectTo: '/r' });
+      const mail = (await stack.mail()).filter(
+        (m) => m.to === email && m.category === 'auth.reset-password',
+      );
+      const token = new URL(mail.at(-1)!.text).pathname.split('/').pop()!;
+      const next = strongPassword();
+      expect(
+        (await stack.client().post(`${API}/reset-password`, { token, newPassword: next })).status,
+      ).toBe(200);
+      expect(await bypasses(email, next, old)).toBe(false);
+    });
+
+    it('an old cookie gets no bypass after "sign out everywhere" or the admin\'s revoke-all', async () => {
+      const own = await newUser();
+      const ownCookie = await mint(own.email, own.password);
+      const session = stack.client();
+      await signIn(session, own.email, own.password);
+      expect((await session.post(`${API}/revoke-sessions`, {})).status).toBe(200);
+      expect(await bypasses(own.email, own.password, ownCookie)).toBe(false);
+
+      const target = await newUser();
+      const targetCookie = await mint(target.email, target.password);
+      const adminEmail = uniqueEmail('admin');
+      const adminPassword = strongPassword();
+      await verifiedUser(stack, adminEmail, adminPassword, expect);
+      await stack.pool.query(`update identity."user" set role = 'admin' where email = $1`, [
+        adminEmail,
+      ]);
+      const admin = stack.client();
+      await signIn(admin, adminEmail, adminPassword);
+      const targetId = (
+        await stack.pool.query<{ id: string }>(`select id from identity."user" where email = $1`, [
+          target.email,
+        ])
+      ).rows[0]!.id;
+      expect(
+        (await admin.post(`${API}/admin/revoke-user-sessions`, { userId: targetId })).status,
+      ).toBe(200);
+      expect(await bypasses(target.email, target.password, targetCookie)).toBe(false);
+    });
+
+    it('a cookie older than the server-side maximum gets no bypass, whatever the browser kept', async () => {
+      const { email, password } = await newUser();
+      const real = await mint(email, password);
+      const secret = stack.env[DEFAULTS.secretEnv]!;
+      const [, userId, deviceId, , epoch] = real.value.split('.') as [
+        string,
+        string,
+        string,
+        string,
+        string,
+      ];
+      const reissue = (iat: number, name = real.name) =>
+        signDeviceValue(secret, name, ['v2', userId, deviceId, iat, epoch].join('.'));
+      const now = Math.floor(Date.now() / 1000);
+      const max = DEFAULTS.lockout.knownDevice.maxAgeSeconds;
+      // the forgery is sound: a value signed with the same iat as the real one still bypasses
+      expect(await bypasses(email, password, { name: real.name, value: reissue(now - 60) })).toBe(
+        true,
+      );
+      expect(
+        await bypasses(email, password, { name: real.name, value: reissue(now - max - 10) }),
+      ).toBe(false);
+      expect(await bypasses(email, password, { name: real.name, value: reissue(now + 3600) })).toBe(
+        false,
+      );
+    });
+
+    it('domain separation: a value tagged for another cookie name, or an old-format cookie, is no cookie', async () => {
+      const { email, password } = await newUser();
+      const real = await mint(email, password);
+      const secret = stack.env[DEFAULTS.secretEnv]!;
+      const payload = real.value.slice(0, real.value.lastIndexOf('.'));
+      const foreign = signDeviceValue(secret, '__Secure-conformance.session_data', payload);
+      expect(await bypasses(email, password, { name: real.name, value: foreign })).toBe(false);
+      const userId = payload.split('.')[1]!;
+      expect(
+        await bypasses(email, password, {
+          name: real.name,
+          value: `${userId}:${'a'.repeat(24)}.c2ln`,
+        }),
+      ).toBe(false);
+    });
+
+    it('all valid devices together are capped: 20 failures an hour, then cookies count for nothing', async () => {
+      const { email, password } = await newUser();
+      const cookies = await Promise.all(Array.from({ length: 5 }, () => mint(email, password)));
+      await floodCeiling(email); // so a request judged "no cookie" is refused
+      const attempt = async (cookie: { name: string; value: string }, n: number) => {
+        const browser = stack.client({ ip: `198.51.100.${n + 1}` });
+        browser.setCookies({ [cookie.name]: cookie.value });
+        return (await signIn(browser, email, strongPassword())).status;
+      };
+      const { maxAttempts, accountMaxAttempts } = DEFAULTS.lockout.knownDevice;
+      let n = 0;
+      for (const cookie of cookies.slice(0, 4)) {
+        for (let i = 0; i < maxAttempts; i += 1) expect(await attempt(cookie, n++)).toBe(401);
+      }
+      expect(n).toBe(accountMaxAttempts);
+      // a fifth device, a first attempt: the account's device budget is spent, the ceiling decides
+      expect(await attempt(cookies[4]!, n++)).toBe(429);
+      expect(await attempt(cookies[0]!, n++)).toBe(429);
+    }, 60_000);
   });
 }

@@ -6,6 +6,7 @@ import {
   type EmailMessage,
   type JobEnqueue,
 } from './ports';
+import { consoleLogger, MAIL_ENQUEUE_FAILED, type IdentityLogger } from './events';
 import { currentAuthTransaction } from './tx-context';
 
 /** What Better Auth hands an email callback. */
@@ -42,6 +43,7 @@ export class AuthMail {
     /** Per-email cap (D14). Resolves false to drop the mail silently. */
     private readonly allow: (purpose: MailPurpose, email: string) => Promise<boolean> = async () =>
       true,
+    private readonly logger: IdentityLogger = consoleLogger,
   ) {}
 
   sendVerification(input: AuthMailInput): Promise<void> {
@@ -71,10 +73,24 @@ export class AuthMail {
     if (!(await this.allow(purpose, user.email))) return;
     const idempotencyKey = mailIdempotencyKey(purpose, user.id, token);
     const message: EmailMessage = { to: user.email, ...rendered, category, idempotencyKey };
-    await this.jobs.send(MAIL_QUEUE, message, {
-      tx: currentAuthTransaction(),
-      idempotencyKey,
-      priority: AUTH_MAIL_PRIORITY,
-    });
+    try {
+      await this.jobs.send(MAIL_QUEUE, message, {
+        tx: currentAuthTransaction(),
+        idempotencyKey,
+        priority: AUTH_MAIL_PRIORITY,
+      });
+    } catch (error) {
+      // Better Auth swallows what a callback throws and answers 200, so a product whose `mail.send` is
+      // not registered would look healthy while sending nothing. Say so, then rethrow so the enclosing
+      // transaction still sees the failure. Fields are the queue, the purpose and the error's class:
+      // never the address, the token, the link, or the error's message (a database error can quote them).
+      this.logger.error(`${MAIL_ENQUEUE_FAILED}: could not enqueue ${purpose} on ${MAIL_QUEUE}`, {
+        code: MAIL_ENQUEUE_FAILED,
+        queue: MAIL_QUEUE,
+        purpose,
+        error: error instanceof Error ? error.name : 'unknown',
+      });
+      throw error;
+    }
   }
 }

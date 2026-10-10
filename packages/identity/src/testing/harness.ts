@@ -58,7 +58,11 @@ export interface Stack {
   jobs: TestJobs;
   events: SecurityEvent[];
   /** What was routed to the `logger` option (Better Auth's warnings and errors). */
-  logs: Array<{ level: 'warn' | 'error'; message: string }>;
+  logs: Array<{
+    level: 'warn' | 'error';
+    message: string;
+    fields?: Record<string, string | number | boolean> | undefined;
+  }>;
   env: NodeJS.ProcessEnv;
   origin: string;
   client(defaults?: { ip?: string; origin?: string }): TestClient;
@@ -161,8 +165,8 @@ export async function startStack(
         ...(options.onStorageDegraded ? { onStorageDegraded: options.onStorageDegraded } : {}),
         events: { emit: (e) => void events.push(e) },
         logger: {
-          warn: (message) => void logs.push({ level: 'warn', message }),
-          error: (message) => void logs.push({ level: 'error', message }),
+          warn: (message, fields) => void logs.push({ level: 'warn', message, fields }),
+          error: (message, fields) => void logs.push({ level: 'error', message, fields }),
         },
         env,
       },

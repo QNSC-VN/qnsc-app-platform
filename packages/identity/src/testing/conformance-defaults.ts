@@ -571,7 +571,7 @@ export function defaultsConformance(t: TestApi, infra: ConformanceInfra): void {
       const password = strongPassword();
       const owner = await verifiedUser(stack, email, password, expect);
       const jar = deviceJar(owner);
-      const deviceId = decodeURIComponent(Object.values(jar)[0]!).split('.')[0]!.split(':')[1]!;
+      const deviceId = Object.values(jar)[0]!.split('.')[2]!; // v2.<user>.<device>.<iat>.<epoch>.<tag>
       await stack.seedCounter(
         lockoutKeys.device('signin', await generation(email), email, deviceId),
         DEFAULTS.lockout.knownDevice.maxAttempts,

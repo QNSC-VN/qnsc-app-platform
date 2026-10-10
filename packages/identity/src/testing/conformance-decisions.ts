@@ -367,7 +367,7 @@ export function decisionsConformance(t: TestApi, infra: ConformanceInfra): void 
       expect(AUTH_MAIL_PRIORITY).toBe(10);
     });
 
-    it('fails closed: with mail.send not registered in the process, nothing is enqueued and nothing falls back to another queue', async () => {
+    it('fails closed and LOUDLY: with mail.send not registered in the process, nothing is enqueued, nothing falls back, and the error is logged', async () => {
       const unregistered = await startStack(infra, { registeredQueues: ['some.other.queue'] });
       try {
         const email = uniqueEmail('closed');
@@ -378,6 +378,23 @@ export function decisionsConformance(t: TestApi, infra: ConformanceInfra): void 
         expect(res.status).toBe(200);
         const { rows } = await unregistered.pool.query(`select 1 from identity_test_jobs`);
         expect(rows).toHaveLength(0);
+        // ...and a misconfigured product shows up in the logs on day one: one ERROR line with a stable
+        // code, the queue and the purpose; no address, no token, no link, no error message.
+        const failures = unregistered.logs.filter(
+          (l) => l.fields?.['code'] === 'identity.mail_enqueue_failed',
+        );
+        expect(failures).toHaveLength(1);
+        expect(failures[0]!.level).toBe('error');
+        expect(failures[0]!.fields).toEqual({
+          code: 'identity.mail_enqueue_failed',
+          queue: 'mail.send',
+          purpose: 'verify-email',
+          error: 'Error',
+        });
+        const everything = JSON.stringify(unregistered.logs);
+        expect(everything.includes(email)).toBe(false);
+        expect(everything.includes('token=')).toBe(false);
+        expect(everything.includes('verify-email?')).toBe(false);
       } finally {
         await unregistered.stop();
       }

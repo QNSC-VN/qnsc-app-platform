@@ -1,8 +1,9 @@
-import { createHash, randomBytes } from 'node:crypto';
-import { APIError, createAuthMiddleware } from 'better-auth/api';
+import { createHash } from 'node:crypto';
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
 import type { BetterAuthPlugin } from 'better-auth';
 import { DEFAULTS } from './defaults';
 import { emitSafely, type SecurityEventSink } from './events';
+import { bumpDeviceEpoch, knownDeviceId, rememberDevice } from './known-device';
 
 const digest = (value: string): string =>
   createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
@@ -14,6 +15,8 @@ export const lockoutKeys = {
     `lockout:${kind}:acct:${gen}:${digest(subject)}`,
   accountAndIp: (kind: string, gen: number, subject: string, ip: string) =>
     `lockout:${kind}:ip:${gen}:${digest(subject)}:${ip}`,
+  devices: (kind: string, gen: number, subject: string) =>
+    `lockout:${kind}:devs:${gen}:${digest(subject)}`,
   device: (kind: string, gen: number, subject: string, deviceId: string) =>
     `lockout:${kind}:dev:${gen}:${digest(subject)}:${deviceId}`,
 };
@@ -52,14 +55,22 @@ async function admit(
   const { perAccountAndIp, perAccount, knownDevice } = DEFAULTS.lockout;
   const gen = await generation(storage, subject);
   if (deviceId) {
-    // A known device is limited per device and nothing else: the account-wide delay and ceiling are
-    // exactly what a flood of guesses from other addresses exhausts, and they must not reach the owner.
-    const mine = await storage.increment(
-      lockoutKeys.device(kind, gen, subject, deviceId),
-      knownDevice.windowSeconds,
+    // A known device is limited per device: the account-wide delay and ceiling are exactly what a flood
+    // of guesses from other addresses exhausts, and they must not reach the owner. But the cookie is a
+    // bypass, so ALL valid devices of the account share a budget; past it a cookie counts for nothing
+    // and the request is judged like any other.
+    const together = await storage.increment(
+      lockoutKeys.devices(kind, gen, subject),
+      knownDevice.accountWindowSeconds,
     );
-    if (mine > knownDevice.maxAttempts) await refuse();
-    return;
+    if (together <= knownDevice.accountMaxAttempts) {
+      const mine = await storage.increment(
+        lockoutKeys.device(kind, gen, subject, deviceId),
+        knownDevice.windowSeconds,
+      );
+      if (mine > knownDevice.maxAttempts) await refuse();
+      return;
+    }
   }
   const here = await storage.increment(
     lockoutKeys.accountAndIp(kind, gen, subject, ip),
@@ -78,42 +89,6 @@ async function admit(
   }
 }
 
-type Ctx = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
-const DEVICE_COOKIE = 'known_device';
-const DEVICE_VALUE = /^([^:]+):([A-Za-z0-9_-]{22,})$/;
-
-/** The (user, device) in a validly SIGNED known-device cookie, or nothing (absent, forged, malformed). */
-async function readDevice(ctx: Ctx): Promise<{ userId: string; deviceId: string } | undefined> {
-  const cookie = ctx.context.createAuthCookie(DEVICE_COOKIE);
-  const value = await ctx.getSignedCookie(cookie.name, ctx.context.secret); // false/null when absent or forged
-  const m = typeof value === 'string' ? DEVICE_VALUE.exec(value) : null;
-  return m ? { userId: m[1]!, deviceId: m[2]! } : undefined;
-}
-
-/** The device id of a known-device cookie that belongs to THIS user; a cookie of another account is no cookie. */
-async function knownDeviceId(
-  ctx: Ctx,
-  userId: () => Promise<string | undefined>,
-): Promise<string | undefined> {
-  const device = await readDevice(ctx);
-  if (!device) return undefined; // the common case costs no lookup
-  return (await userId()) === device.userId ? device.deviceId : undefined;
-}
-
-/** Set the cookie after a completed sign-in, unless this browser already has one for the user. */
-async function rememberDevice(ctx: Ctx, userId: string): Promise<void> {
-  if (await knownDeviceId(ctx, async () => userId)) return;
-  const cookie = ctx.context.createAuthCookie(DEVICE_COOKIE, {
-    maxAge: DEFAULTS.lockout.knownDevice.maxAgeSeconds,
-  });
-  await ctx.setSignedCookie(
-    cookie.name,
-    `${userId}:${randomBytes(18).toString('base64url')}`,
-    ctx.context.secret,
-    cookie.attributes,
-  );
-}
-
 /** Forget every counter of `subject`: bump the generation the keys carry. */
 export async function clearAttempts(storage: Storage, subject: string): Promise<void> {
   const gen = await generation(storage, subject);
@@ -128,6 +103,7 @@ export async function clearAttempts(storage: Storage, subject: string): Promise<
  */
 export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
   const resetUser = new WeakMap<Request, string>();
+  const revokedUser = new WeakMap<Request, string>();
   const refuse = async (): Promise<never> => {
     await emitSafely(sink, { name: 'account.locked' });
     throw APIError.from('TOO_MANY_REQUESTS', {
@@ -166,6 +142,14 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
           }),
         },
         {
+          // "Sign out everywhere" must also forget the remembered devices (see known-device.ts).
+          matcher: (ctx) => ctx.path === '/revoke-sessions',
+          handler: createAuthMiddleware(async (ctx) => {
+            const session = await getSessionFromCtx(ctx);
+            if (session && ctx.request) revokedUser.set(ctx.request, session.user.id);
+          }),
+        },
+        {
           // Remember whose reset this is while the token still exists; cleared on success below.
           matcher: (ctx) => ctx.path === '/reset-password',
           handler: createAuthMiddleware(async (ctx) => {
@@ -182,6 +166,23 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
         },
       ],
       after: [
+        {
+          matcher: (ctx) =>
+            ctx.path === '/revoke-sessions' || ctx.path === '/admin/revoke-user-sessions',
+          handler: createAuthMiddleware(async (ctx) => {
+            if (ctx.context.returned instanceof Error) return;
+            const body = ctx.body as { userId?: unknown } | undefined;
+            const userId =
+              ctx.path === '/admin/revoke-user-sessions'
+                ? typeof body?.userId === 'string'
+                  ? body.userId
+                  : undefined
+                : ctx.request
+                  ? revokedUser.get(ctx.request)
+                  : undefined;
+            if (userId) await bumpDeviceEpoch(ctx, userId);
+          }),
+        },
         {
           matcher: (ctx) => ctx.path === '/sign-in/email',
           handler: createAuthMiddleware(async (ctx) => {

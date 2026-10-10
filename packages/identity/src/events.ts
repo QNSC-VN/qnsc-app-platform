@@ -47,6 +47,22 @@ export async function emitSafely(
  * Better Auth never logs a password or a token in them.
  */
 export interface IdentityLogger {
-  warn(message: string): void;
-  error(message: string): void;
+  warn(message: string, fields?: LogFields): void;
+  error(message: string, fields?: LogFields): void;
 }
+
+/** Structured fields for a log line: bounded identifiers only, never an address or a token. */
+export type LogFields = Record<string, string | number | boolean>;
+
+/** Used when a product passes no `logger`. */
+export const consoleLogger: IdentityLogger = {
+  warn: (message, fields) => console.warn(message, fields ?? ''),
+  error: (message, fields) => console.error(message, fields ?? ''),
+};
+
+/**
+ * Logged at ERROR when an auth email could not be enqueued (for example `mail.send` was never
+ * registered in this process). Better Auth swallows the throw and answers as if nothing were wrong, so
+ * this line is the only sign; alert on it.
+ */
+export const MAIL_ENQUEUE_FAILED = 'identity.mail_enqueue_failed';
