@@ -1,5 +1,16 @@
 # Changelog
 
+## [8.0.1](https://github.com/quynhonsemiconductor/app-platform/compare/identity-v8.0.0...identity-v8.0.1) (2026-10-10)
+
+
+### 🐛 Bug Fixes
+
+* **identity:** add the contract error envelope to every /api/auth error ([#203](https://github.com/quynhonsemiconductor/app-platform/issues/203)) ([16ee1f7](https://github.com/quynhonsemiconductor/app-platform/commit/16ee1f742e76838352ccb606c87494b959288604))
+* **identity:** answer 5xx when the sign-up transaction cannot commit ([#200](https://github.com/quynhonsemiconductor/app-platform/issues/200)) ([48c1527](https://github.com/quynhonsemiconductor/app-platform/commit/48c1527c5e7ffccf4e45a5a0945b5f1b02c5ee20))
+* **identity:** enforce the staff cap when a session is read ([#198](https://github.com/quynhonsemiconductor/app-platform/issues/198)) ([4a1a136](https://github.com/quynhonsemiconductor/app-platform/commit/4a1a136db4e59026f47648907f9ff8dcd2424151))
+* **identity:** refuse to revoke all sessions without the cache, and hide staff sessions past their cap ([#207](https://github.com/quynhonsemiconductor/app-platform/issues/207)) ([56117f7](https://github.com/quynhonsemiconductor/app-platform/commit/56117f71249028a025132cb43408bae68e3d2c07))
+* **identity:** stop rewriting clamped staff sessions on every get-session ([#189](https://github.com/quynhonsemiconductor/app-platform/issues/189)) ([48c04a8](https://github.com/quynhonsemiconductor/app-platform/commit/48c04a83a9e8ed458e69caab6e0e294b24f3967f))
+
 ## [8.0.0](https://github.com/quynhonsemiconductor/app-platform/compare/identity-v7.1.0...identity-v8.0.0) (2026-10-10)
 
 
