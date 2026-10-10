@@ -44,6 +44,11 @@ concurrency:
   # several times within seconds. Those runs QUEUE (at most one more waits, and the newest replaces an
   # older waiting one) instead of cancelling a run that is already under way; the last one to run sees
   # every package of the release. A pull request still cancels its own earlier run.
+  #
+  # So a queued `workflow_run` run that shows up as CANCELLED is expected, not a failure: GitHub
+  # concurrency collapses the queue to the latest pending run. Seen on the 8.0.1 / 0.1.2 release, which
+  # published three packages: of the three runs, one was cancelled in favour of the newest, and both that
+  # ran saw the same, complete set of versions (identity 8.0.1, platform-jobs 0.1.2, platform-mail 0.1.2).
   group: reference-consumer-${{ github.event_name == 'workflow_run' && 'published' || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_run' }}
 

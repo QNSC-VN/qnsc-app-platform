@@ -31,8 +31,8 @@ importers:
         specifier: 1.9.1
         version: 1.9.1
       '@quynhonsemiconductor/identity':
-        specifier: 8.0.0
-        version: 8.0.0(3d5671313e5adc25193b7afdcaf21e52)
+        specifier: 8.0.1
+        version: 8.0.1(3d5671313e5adc25193b7afdcaf21e52)
       '@quynhonsemiconductor/observability':
         specifier: 0.2.2
         version: 0.2.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.1)(@opentelemetry/auto-instrumentations-node@0.81.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1)))(@opentelemetry/exporter-metrics-otlp-http@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-node@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(nestjs-pino@4.6.1(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2))
@@ -46,11 +46,11 @@ importers:
         specifier: 4.2.0
         version: 4.2.0(9a0720011de38e7825111af4afbd27d5)
       '@quynhonsemiconductor/platform-jobs':
-        specifier: 0.1.1
-        version: 0.1.1(9eb1d8dc640fb23f24b20a4e9ddac992)
+        specifier: 0.1.2
+        version: 0.1.2(9eb1d8dc640fb23f24b20a4e9ddac992)
       '@quynhonsemiconductor/platform-mail':
-        specifier: 0.1.1
-        version: 0.1.1(1bffc48ece9178f2307d3c73660293a5)
+        specifier: 0.1.2
+        version: 0.1.2(af83919ef860ddffa6546388077877f5)
       '@quynhonsemiconductor/platform-runtime':
         specifier: 0.1.3
         version: 0.1.3(bc3fdb789979bd4305bf68c65575c4ed)
@@ -1010,8 +1010,8 @@ packages:
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
 
-  '@quynhonsemiconductor/identity@8.0.0':
-    resolution: {integrity: sha512-lnv9bAhl8Ase7gfe35UrgZQWwUQaEPFiioIW6mlMUoWWYyTBqUWweY8Y+XjOCcxJEvahFff+bfTEbym1oT+Byg==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/identity/8.0.0/0a60c579f2114b0202f0925494e55294976435b5}
+  '@quynhonsemiconductor/identity@8.0.1':
+    resolution: {integrity: sha512-KcnN3hGwPMf+KGUS/t0D3uOK23E45XPjIN0Vzzke6pk/ZTCgB1QBgjwDA8sVq7eUHZVnBZPkhm4o0BUHCqB7gw==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/identity/8.0.1/19bee04eeb551ffc2195b32b77506572cd086855}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@nestjs/core': '>=11'
@@ -1066,8 +1066,8 @@ packages:
       nestjs-zod: '>=5'
       zod: '>=4'
 
-  '@quynhonsemiconductor/platform-jobs@0.1.1':
-    resolution: {integrity: sha512-daDCMb+p2172MGQdhs9tOcqzerwtx13iPQ9frcEYIO2835fBeLz80BYj5DymjJFWwIjmNH/kwYz2JEYgWp9Urg==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-jobs/0.1.1/89990b4b3134cdbcbc9f4f96941bbdb73bb4429a}
+  '@quynhonsemiconductor/platform-jobs@0.1.2':
+    resolution: {integrity: sha512-TfUtXlCGu7ryN4RKPlNbOCea+KIKn/K+HxHh/VzDHxZuQwH1eANfJqlfqVkoPcP9wowB4e60wznsXKcl+k3+fw==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-jobs/0.1.2/60c58141dcb4ad4a1eb51635f3baed4bd3c46a87}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@nestjs/core': '>=11'
@@ -1076,14 +1076,14 @@ packages:
       drizzle-orm: '>=0.45 <1'
       pg: '>=8.11'
 
-  '@quynhonsemiconductor/platform-mail@0.1.1':
-    resolution: {integrity: sha512-8ZhNJ7jbHjbL8eHQYdJuV/eieWt+iQPQrd5nDYby/o+OdAtxzAlmTV5oBAuIs+6z0y6qGoHsWyXMnAgKddrsXw==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-mail/0.1.1/845e73e35f1bd17401ca89f2e57feb48aa4f3909}
+  '@quynhonsemiconductor/platform-mail@0.1.2':
+    resolution: {integrity: sha512-elSnjtOrJMirtTguUMXPdMdPYo1mywhMmcI3p8t1/AR1G1vsiYaJMBEVksXzEOBI7tGV5unE2qzl6v3BnQUbxA==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-mail/0.1.2/4aefffd2e3728228442cd6548b63fdc354805e79}
     peerDependencies:
       '@azure/identity': '>=4.4'
       '@nestjs/common': '>=11'
       '@nestjs/core': '>=11'
       '@quynhonsemiconductor/observability': '>=0.2.0'
-      '@quynhonsemiconductor/platform-jobs': '>=0.1.0'
+      '@quynhonsemiconductor/platform-jobs': '>=0.1.2'
       nodemailer: '>=6.9'
 
   '@quynhonsemiconductor/platform-runtime@0.1.3':
@@ -3925,7 +3925,7 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@quynhonsemiconductor/identity@8.0.0(3d5671313e5adc25193b7afdcaf21e52)':
+  '@quynhonsemiconductor/identity@8.0.1(3d5671313e5adc25193b7afdcaf21e52)':
     dependencies:
       '@better-auth/core': 1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.6.5))(jose@6.2.4)(kysely@0.29.6)(nanostores@1.5.5)
       '@better-auth/drizzle-adapter': 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.6.5))(jose@6.2.4)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.3(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.1))
@@ -4007,7 +4007,7 @@ snapshots:
       nestjs-zod: 5.4.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.6.5)
       zod: 4.6.5
 
-  '@quynhonsemiconductor/platform-jobs@0.1.1(9eb1d8dc640fb23f24b20a4e9ddac992)':
+  '@quynhonsemiconductor/platform-jobs@0.1.2(9eb1d8dc640fb23f24b20a4e9ddac992)':
     dependencies:
       '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -4020,13 +4020,13 @@ snapshots:
       - '@opentelemetry/api'
       - pg-native
 
-  '@quynhonsemiconductor/platform-mail@0.1.1(1bffc48ece9178f2307d3c73660293a5)':
+  '@quynhonsemiconductor/platform-mail@0.1.2(af83919ef860ddffa6546388077877f5)':
     dependencies:
       '@azure/identity': 4.13.3
       '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@quynhonsemiconductor/observability': 0.2.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.1)(@opentelemetry/auto-instrumentations-node@0.81.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1)))(@opentelemetry/exporter-metrics-otlp-http@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-node@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(nestjs-pino@4.6.1(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2))
-      '@quynhonsemiconductor/platform-jobs': 0.1.1(9eb1d8dc640fb23f24b20a4e9ddac992)
+      '@quynhonsemiconductor/platform-jobs': 0.1.2(9eb1d8dc640fb23f24b20a4e9ddac992)
       nodemailer: 10.0.16
 
   '@quynhonsemiconductor/platform-runtime@0.1.3(bc3fdb789979bd4305bf68c65575c4ed)':

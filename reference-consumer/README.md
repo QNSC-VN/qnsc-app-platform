@@ -6,9 +6,9 @@ installs them.
 
 ```
 request (enableCorrelationId)
-  -> identity sign-up                         @quynhonsemiconductor/identity       8.0.0
-  -> mail.send enqueued in the SAME tx        @quynhonsemiconductor/platform-jobs  0.1.1   (pg-boss)
-  -> worker process (ROLE=worker)             @quynhonsemiconductor/platform-mail  0.1.1   (ledger in Valkey)
+  -> identity sign-up                         @quynhonsemiconductor/identity       8.0.1
+  -> mail.send enqueued in the SAME tx        @quynhonsemiconductor/platform-jobs  0.1.2   (pg-boss)
+  -> worker process (ROLE=worker)             @quynhonsemiconductor/platform-mail  0.1.2   (ledger in Valkey)
   -> smtp transport -> Mailpit                @quynhonsemiconductor/platform-http  4.2.0   (the correlation id)
 ```
 
@@ -67,7 +67,10 @@ To check a newer release, bump the pins in `package.json`, then reinstall **with
 without the injected COMMIT failure the same sign-up succeeds and sends; with the ledger wiped a re-enqueued
 key sends a second mail.
 
-`test/characterization.test.ts` pins two behaviours the documentation does not mention (see the issues below).
+`test/regressions.test.ts` pins the fixes for two behaviours this check found (#191, #192; see the issues below). It began as a
+characterization of the bugs; when identity 8.0.1, platform-jobs 0.1.2 and platform-mail 0.1.2 fixed them, the assertions were
+flipped: an unprocessed `mail.send` job is kept at most 24 h, and a sign-up whose enqueue fails in SQL answers `500` with the
+hybrid error body and creates no user and no job.
 
 `test/known-limits.test.ts` (opt-in, `M6_SLOW=1`) pins the behaviour at the documented limits: a drain that
 runs **out of budget** after the sink stored a message but before the client was told sends it twice (about
@@ -77,13 +80,14 @@ runs **out of budget** after the sink stored a message but before the client was
 
 ## Findings
 
-Reported as issues in this repository; none is fixed here (this change is tests and docs).
+Reported as issues in this repository. #191 and #192 are fixed in the releases named below and are now regression tests; the
+rest are open or documented as limits.
 
 | Issue                                                                   | Finding                                                                                                                                                                                                                                                  | Evidence                                                                                                                      |
 | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | [#190](https://github.com/quynhonsemiconductor/app-platform/issues/190) | **The `platform-mail` README's NestJS example does not boot.** `createValkeyMailState(cache.instance)` inside `useFactory` throws `client is not available`: `CacheService` creates its client in `onModuleInit`, after every provider is built.         | Reproduced against the published packages and a real Valkey; only a lazy lookup boots. `src/infra.ts` carries the workaround. |
-| [#191](https://github.com/quynhonsemiconductor/app-platform/issues/191) | **A failed SQL enqueue inside the sign-up transaction answers `200` with a user that does not exist.** Better Auth swallows the callback's error, the aborted transaction's COMMIT is a silent ROLLBACK.                                                 | `test/characterization.test.ts`                                                                                               |
-| [#192](https://github.com/quynhonsemiconductor/app-platform/issues/192) | **An unprocessed `mail.send` job is kept 14 days with the verification link in clear**, not the 24 h that ADR 0002 decision 4 bounds.                                                                                                                    | `test/characterization.test.ts`                                                                                               |
+| [#191](https://github.com/quynhonsemiconductor/app-platform/issues/191) | **A failed SQL enqueue inside the sign-up transaction answered `200` with a user that does not exist.** Better Auth swallows the callback's error, the aborted transaction's COMMIT is a silent ROLLBACK. **Fixed** in identity 8.0.1: it answers `500`. | `test/regressions.test.ts`                                                                                                    |
+| [#192](https://github.com/quynhonsemiconductor/app-platform/issues/192) | **An unprocessed `mail.send` job was kept 14 days with the verification link in clear**, not the 24 h that ADR 0002 decision 4 bounds. **Fixed** in platform-jobs 0.1.2 / platform-mail 0.1.2 (`retention.pending`).                                     | `test/regressions.test.ts`                                                                                                    |
 | [#193](https://github.com/quynhonsemiconductor/app-platform/issues/193) | **pnpm 11 ignores `${NODE_AUTH_TOKEN}` in a project `.npmrc`**, which is what the install snippets in the root and identity READMEs said. **Fixed** (docs): the root README's "Authenticating to GitHub Packages", pointed to from every package README. | `ERR_PNPM_FETCH_401` and pnpm's warning, reproduced here                                                                      |
 | [#195](https://github.com/quynhonsemiconductor/app-platform/issues/195) | **A drain that runs out of budget with a lost acknowledgement sends twice**, and the SMTP transport cannot be aborted once a send has started. The documented "no exactly-once" limit, now with a trigger.                                               | `test/known-limits.test.ts`                                                                                                   |
 | [#196](https://github.com/quynhonsemiconductor/app-platform/issues/196) | **Errors on `/api/auth/*` are not the platform envelope** (`{message, code}`), and a failed COMMIT answers `500` with a `null` body; the cause reaches stderr but not the structured log.                                                                | measured, see the issue                                                                                                       |
