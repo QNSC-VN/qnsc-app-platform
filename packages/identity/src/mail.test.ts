@@ -39,6 +39,37 @@ describe('mail', () => {
     expect(sent[0]!.options?.idempotencyKey).toBe(mailIdempotencyKey('verify-email', 'u', 't'));
   });
 
+  it('logs identity.mail_enqueue_failed at ERROR and rethrows when the queue refuses, with no address or token in it', async () => {
+    const logged: Array<{ message: string; fields?: Record<string, unknown> | undefined }> = [];
+    const boom = new TypeError(
+      'queue "mail.send" is not registered; for a@b.test token=secret-token',
+    );
+    const mail = new AuthMail(
+      { send: async () => Promise.reject(boom) },
+      templates,
+      async () => true,
+      { warn: () => undefined, error: (message, fields) => void logged.push({ message, fields }) },
+    );
+    await expect(
+      mail.sendPasswordReset({
+        user: { id: 'u', email: 'a@b.test', name: 'A' },
+        url: 'https://x/reset/secret-token',
+        token: 'secret-token',
+      }),
+    ).rejects.toBe(boom);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.fields).toEqual({
+      code: 'identity.mail_enqueue_failed',
+      queue: 'mail.send',
+      purpose: 'reset-password',
+      error: 'TypeError',
+    });
+    const everything = JSON.stringify(logged);
+    for (const secret of ['a@b.test', 'secret-token', 'https://x/reset', 'is not registered']) {
+      expect(everything.includes(secret), secret).toBe(false);
+    }
+  });
+
   it('drops mail silently once an address is over its hourly cap', async () => {
     const counts = new Map<string, number>();
     const allow = perEmailLimiter({

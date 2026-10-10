@@ -31,4 +31,23 @@ describe('observability wiring', () => {
     logger.error('boom');
     expect(seen).toEqual(['warn:better-auth:Invalid password', 'error:better-auth:boom']);
   });
+
+  it("passes identity's own structured fields through, so an alert can match on `code`", () => {
+    const lines: Array<{ object: Record<string, unknown>; message: string }> = [];
+    const logger = identityLoggerFrom({
+      warn: () => undefined,
+      error: (object, message) => void lines.push({ object, message }),
+    });
+    logger.error('identity.mail_enqueue_failed: could not enqueue verify-email on mail.send', {
+      code: 'identity.mail_enqueue_failed',
+      queue: 'mail.send',
+      purpose: 'verify-email',
+    });
+    expect(lines[0]!.object).toEqual({
+      source: 'identity',
+      code: 'identity.mail_enqueue_failed',
+      queue: 'mail.send',
+      purpose: 'verify-email',
+    });
+  });
 });

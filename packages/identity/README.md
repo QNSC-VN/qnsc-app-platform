@@ -159,6 +159,11 @@ the product and `platform-mail` agree on one shape.
 
 ### Logs and security events
 
+If an auth email cannot be enqueued (typically `mail.send` was never registered in this process), Better Auth swallows the
+throw and the request still answers 200. Identity therefore logs one **ERROR** line with the stable code
+`identity.mail_enqueue_failed` and the fields `queue`, `purpose` and the error's class (never an address, a token, a link
+or the error's message), then rethrows. **Alert on that code**: it is the only sign a product's mail is not being sent.
+
 Pass `logger` (`{ warn, error }`) to receive Better Auth's own warnings and errors, and `events` to receive the security
 events (`sign_in.success`/`failure` for password, social and SSO sign-ins, `account.locked`, `password.reset*`,
 `sessions.revoked`, `admin.user_banned`, `account.unverified_replaced`/`purged`). `/nest` has adapters for

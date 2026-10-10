@@ -32,7 +32,10 @@ export function identityLoggerFrom(logger: {
   error(object: Record<string, unknown>, message: string): void;
 }): IdentityLogger {
   return {
-    warn: (message) => logger.warn({ source: 'better-auth' }, message),
-    error: (message) => logger.error({ source: 'better-auth' }, message),
+    // A line with fields is identity's own (e.g. `identity.mail_enqueue_failed`); without, it is Better Auth's.
+    warn: (message, fields) =>
+      logger.warn({ source: fields ? 'identity' : 'better-auth', ...fields }, message),
+    error: (message, fields) =>
+      logger.error({ source: fields ? 'identity' : 'better-auth', ...fields }, message),
   };
 }
