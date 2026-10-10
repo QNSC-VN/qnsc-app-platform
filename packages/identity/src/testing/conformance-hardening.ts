@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createAuthClient } from 'better-auth/client';
 import { createServer } from 'node:http';
 import { hash as argon2hash } from '@node-rs/argon2';
 import { revokeAllSessions } from '../create-identity';
@@ -24,6 +25,25 @@ import {
   ssoSignIn,
   type TestApi,
 } from './support';
+
+/** Triggers that make the sign-up fail in SQL on demand (identity#191, #196): by the address's prefix. */
+const FORCED_FAILURES_SQL = `
+        -- the enqueue fails IN SQL, inside the sign-up transaction
+        create function boom_enqueue() returns trigger language plpgsql as $$
+        begin
+          if new.data->>'to' like 'boom-enqueue-%' then raise exception 'forced enqueue failure'; end if;
+          return new;
+        end $$;
+        create trigger boom_enqueue_t before insert on identity_test_jobs
+          for each row execute function boom_enqueue();
+        -- COMMIT itself fails: a deferred constraint trigger raises when the transaction commits
+        create function boom_commit() returns trigger language plpgsql as $$
+        begin
+          if new.email like 'boom-commit-%' then raise exception 'forced commit failure'; end if;
+          return null;
+        end $$;
+        create constraint trigger boom_commit_t after insert on identity."user"
+          deferrable initially deferred for each row execute function boom_commit();`;
 
 /**
  * Findings of the review of PR #168. Each `it` fails against the code as first submitted; the name
@@ -858,7 +878,7 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
         ]) {
           const res = await owner.post(`${API}/sso/register`, reg(organizationId, base));
           expect(res.status, base).toBe(400);
-          expect(res.json(), base).toEqual({
+          expect(res.json(), base).toMatchObject({
             code: 'SSO_URL_NOT_ALLOWED',
             message: 'That URL is not allowed for SSO.',
           });
@@ -898,7 +918,9 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
             oidcConfig: { tokenEndpoint },
           });
           expect(res.status, tokenEndpoint).toBe(400);
-          expect(res.json(), tokenEndpoint).toMatchObject({ code: 'SSO_URL_NOT_ALLOWED' });
+          expect(res.json(), tokenEndpoint).toMatchObject({
+            error: { code: 'SSO_URL_NOT_ALLOWED' },
+          });
         }
         const reserved = await owner.post(`${API}/sso/update-provider`, {
           providerId: 'inward',
@@ -1677,23 +1699,7 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
     let stack: Stack;
     t.beforeAll(async () => {
       stack = await startStack(infra, { presets: ['public'] });
-      await stack.pool.query(`
-        -- the enqueue fails IN SQL, inside the sign-up transaction
-        create function boom_enqueue() returns trigger language plpgsql as $$
-        begin
-          if new.data->>'to' like 'boom-enqueue-%' then raise exception 'forced enqueue failure'; end if;
-          return new;
-        end $$;
-        create trigger boom_enqueue_t before insert on identity_test_jobs
-          for each row execute function boom_enqueue();
-        -- COMMIT itself fails: a deferred constraint trigger raises when the transaction commits
-        create function boom_commit() returns trigger language plpgsql as $$
-        begin
-          if new.email like 'boom-commit-%' then raise exception 'forced commit failure'; end if;
-          return null;
-        end $$;
-        create constraint trigger boom_commit_t after insert on identity."user"
-          deferrable initially deferred for each row execute function boom_commit();`);
+      await stack.pool.query(FORCED_FAILURES_SQL);
     });
     t.afterAll(() => stack?.stop());
 
@@ -1841,6 +1847,121 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
       expect(ok.status).toBe(200);
       expect(await users(email)).toBe(1);
       expect(await jobs(email)).toBe(1);
+    });
+  });
+
+  describe('identity#196: /api/auth errors carry the contract envelope next to Better Auth’s own body, and a failed COMMIT says what failed', () => {
+    let stack: Stack;
+    t.beforeAll(async () => {
+      stack = await startStack(infra, { presets: ['public'] });
+      await stack.pool.query(FORCED_FAILURES_SQL);
+    });
+    t.afterAll(() => stack?.stop());
+
+    const id = () => `req-${randomUUID().slice(0, 8)}`;
+    type Hybrid = { code: string; message: string; error: Record<string, unknown> };
+    const hybrid = (res: { body: string }) => JSON.parse(res.body) as Hybrid;
+
+    it('a wrong password: 401, Better Auth’s code and message at the top level exactly as before, the envelope in `error`', async () => {
+      const email = uniqueEmail('wrong');
+      const password = strongPassword();
+      await verifiedUser(stack, email, password, expect);
+      const corr = id();
+      const res = await stack
+        .client()
+        .post(
+          `${API}/sign-in/email`,
+          { email, password: `${password}x` },
+          { 'x-correlation-id': corr },
+        );
+      expect(res.status).toBe(401);
+      const body = hybrid(res);
+      expect(body.code).toBe('INVALID_EMAIL_OR_PASSWORD');
+      expect(body.message).toBe('Invalid email or password');
+      expect(body.error).toEqual({
+        code: 'INVALID_EMAIL_OR_PASSWORD',
+        message: 'Invalid email or password',
+        details: [],
+        correlationId: corr,
+      });
+      expect(Object.keys(body).sort()).toEqual(['code', 'error', 'message']);
+    });
+
+    it('a validation failure stays 400 VALIDATION_ERROR at the top level; `error` is VALIDATION_FAILED with the issues', async () => {
+      const corr = id();
+      const res = await stack
+        .client()
+        .post(
+          `${API}/sign-up/email`,
+          { email: 'not-an-address', password: strongPassword(), name: 'x' },
+          { 'x-correlation-id': corr },
+        );
+      expect(res.status).toBe(400);
+      const body = hybrid(res);
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.message).toMatch(/body\.email/);
+      expect(body.error['code']).toBe('VALIDATION_FAILED');
+      expect(body.error['correlationId']).toBe(corr);
+      const issues = body.error['details'] as Array<{ path: string; message: string }>;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.path).toBe('body.email');
+    });
+
+    it('an unknown route is 404 with a code at both levels, and "unknown" without a correlation id in context', async () => {
+      const res = await stack.client().get(`${API}/no-such-endpoint`);
+      expect(res.status).toBe(404);
+      const body = hybrid(res);
+      expect(body.code).toBe('NOT_FOUND');
+      expect(body.error).toMatchObject({
+        code: 'NOT_FOUND',
+        details: [],
+        correlationId: 'unknown',
+      });
+    });
+
+    it('a redirect (a verify-email link) is not an error response and is left untouched', async () => {
+      const redirect = await stack.client().get(`${API}/verify-email?token=nope&callbackURL=/`);
+      expect(redirect.status).toBeGreaterThanOrEqual(300);
+      expect(redirect.status).toBeLessThan(400);
+      expect(redirect.location).toBeTruthy();
+    });
+
+    it('the REAL better-auth/client still surfaces error.code, error.message and status for a wrong password, as on 8.0.0', async () => {
+      const email = uniqueEmail('client');
+      const password = strongPassword();
+      await verifiedUser(stack, email, password, expect);
+      const client = createAuthClient({
+        baseURL: stack.origin,
+        fetchOptions: {
+          headers: { origin: stack.origin, [DEFAULTS.clientIpHeader]: '10.196.0.1' },
+          customFetchImpl: (input: unknown, init?: RequestInit) =>
+            stack.auth.handler(new Request(input as string, init)),
+        },
+      });
+      const { data, error } = await client.signIn.email({ email, password: `${password}x` });
+      expect(data).toBeNull();
+      expect(error?.status).toBe(401);
+      expect(error?.code).toBe('INVALID_EMAIL_OR_PASSWORD');
+      expect(error?.message).toBe('Invalid email or password');
+      // and the envelope is there for a frontend that wants the correlation id
+      expect((error as { error?: { correlationId?: string } } | null)?.error?.correlationId).toBe(
+        'unknown',
+      );
+    });
+
+    it('a failed COMMIT is a 500 whose body is never empty or null (its log line is pinned under identity#191)', async () => {
+      const email = `boom-commit-${randomUUID().slice(0, 8)}@users.identity.test`;
+      const res = await stack
+        .client()
+        .post(`${API}/sign-up/email`, { email, password: strongPassword(), name: 'x' });
+      expect(res.status).toBe(500);
+      expect(res.body).not.toBe('');
+      expect(res.body).not.toBe('null');
+      expect(hybrid(res)).toMatchObject({
+        code: 'INTERNAL_ERROR',
+        message: 'An unexpected error occurred',
+        error: { code: 'INTERNAL_ERROR' },
+      });
     });
   });
 }
