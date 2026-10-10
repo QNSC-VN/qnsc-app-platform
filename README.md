@@ -40,12 +40,29 @@ and why each current exception is one.
 ## Consuming these packages
 
 Packages are published to **GitHub Packages** under the `@quynhonsemiconductor` scope. In a
-consumer repo (`rova`, `opshub`, `solodesk`), add an `.npmrc`:
+consumer repo (`rova`, `opshub`, `solodesk`), add an `.npmrc` with the registry **only**:
 
 ```ini
 @quynhonsemiconductor:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
 ```
+
+### Authenticating to GitHub Packages
+
+The token (a GitHub token with `read:packages`) goes in a **user-level** npmrc, never in the project's
+`.npmrc`. **pnpm 11 ignores a token line in a project `.npmrc`** (`//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}`,
+which is what these READMEs used to show) and answers `ERR_PNPM_FETCH_401`; pnpm 10 still accepts it. The forms
+below work on **both**; each was run on pnpm 10.33.2 and 11.28.5 from a clean `HOME` and a clean environment.
+
+| Where               | How                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A developer machine | Create `~/.npmrc` with a restrictive mode: `( umask 077; printf '//npm.pkg.github.com/:_authToken=%s\n' "$TOKEN" >> ~/.npmrc )`. To keep the secret out of the file, write the placeholder instead (`//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}`) and export `NODE_AUTH_TOKEN`: a **user-level** file expands it, a project file does not.                                         |
+| GitHub Actions      | `actions/setup-node` with `registry-url: https://npm.pkg.github.com` and `scope: '@quynhonsemiconductor'`, and `NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` on the install step (job permission `packages: read`). It writes a user-level npmrc that expands `NODE_AUTH_TOKEN`, which is the layout run above as `NPM_CONFIG_USERCONFIG`; this repo's `publish.yml` uses it with pnpm 11. |
+| Any other CI        | Write the same line to a file outside the workspace and point `NPM_CONFIG_USERCONFIG` at it.                                                                                                                                                                                                                                                                                                |
+| A Docker build      | Mount the token as a BuildKit secret and write `~/.npmrc` **inside the same `RUN`** as the install, removing it afterwards: `RUN --mount=type=secret,id=node_auth_token ( umask 077; printf '//npm.pkg.github.com/:_authToken=%s\n' "$(cat /run/secrets/node_auth_token)" > "$HOME/.npmrc" ) && pnpm install --frozen-lockfile && rm -f "$HOME/.npmrc"`. Built with both pnpm versions.     |
+
+`pnpm config set //npm.pkg.github.com/:_authToken "$TOKEN"` also works on both, but it puts the secret on a command
+line, and under the default umask it leaves it in a world-readable file: `auth.ini` (mode 644) on pnpm 11, and
+npm's debug log under `~/.npm/_logs/` (mode 644) on pnpm 10. Prefer the file.
 
 Then declare the packages in `package.json`:
 
