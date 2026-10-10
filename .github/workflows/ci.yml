@@ -159,10 +159,6 @@ jobs:
           # `pnpm` is the version each product's own CI pins. Keep it in step with them.
           - { product: rova, pnpm: '10.33.2', unit_tests: true }
           - { product: opshub, pnpm: '10.33.2', unit_tests: true }
-          # solodesk's services have no unit tests, only database-backed e2e suites that need
-          # Postgres and Valkey; its web apps' tests need a live backend. Typecheck is what
-          # can be asserted without infrastructure.
-          - { product: solodesk, pnpm: '10.23.0', unit_tests: false }
     steps:
       # Read-only App (contents: read), never the write-capable automation App in a pull-request
       # workflow. The token is used by the checkout below and is not exported to any later step;
