@@ -21,7 +21,8 @@ export const MAIL_QUEUE = 'mail.send';
  * so they cannot disagree — `platform-jobs` throws when one queue is defined twice differently.
  *
  * - **Redrive.** `canRedrive` forbids redriving `auth.*` dead letters ({@link mailCanRedrive}).
- * - **Retention.** Auth emails carry bearer links (verification, password reset) in clear in the
+ * - **Retention.** An unprocessed job is deleted after 24 h too (`pending`), not pg-boss's 14 days.
+ *   Auth emails carry bearer links (verification, password reset) in clear in the
  *   job payload, so a completed job is deleted at once, and a failed or dead-lettered one is kept
  *   at most 24 h (ADR 0001 decision 3; identity ADR 0002 decision 4).
  * - **Lease and heartbeat.** `expireInSeconds` is the ceiling on one attempt, including its wait
@@ -39,7 +40,16 @@ export const MAIL_QUEUE_CONFIG = Object.freeze({
   retryLimit: 10,
   retryDelaySeconds: 10,
   retryDelayMaxSeconds: 900,
-  retention: Object.freeze({ completed: 'immediate', failed: 86_400, deadLetter: 86_400 }),
+  // `pending` bounds a job nobody PROCESSED: without it pg-boss keeps one for 14 days, with its
+  // bearer link in the payload (ADR 0002 decision 4 says 24 h). It must cover the retries (platform-jobs
+  // refuses a window shorter than the longest they can take; here that is about 3.7 hours), because a
+  // retry does not extend a job's deadline.
+  retention: Object.freeze({
+    completed: 'immediate',
+    failed: 86_400,
+    deadLetter: 86_400,
+    pending: 86_400,
+  }),
   // Authentication mail is never redriven (see {@link mailCanRedrive}). Not stored in the database:
   // every process that may redrive defines the queue from this object, as the enqueue-only
   // `createMailQueue` does, and `platform-jobs` refuses two definitions that disagree on having one.

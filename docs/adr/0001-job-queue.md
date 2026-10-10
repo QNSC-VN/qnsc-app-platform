@@ -306,6 +306,22 @@ Also decided:
   `queue.lag_seconds` = age of the oldest ready job) through `observability`'s `QueueMetrics`, with
   pg-boss's own `pgboss.*` instruments and `pgboss.queue.oldest_ready_age` as extras.
 
+## Amendment 2026-10-10 (jobs nobody processed; issue #192)
+
+The retention of decision 3 covered jobs that are _finished_ and dead-letter copies. It missed a third
+kind: a job that is **never fetched** (no worker, a worker that is down) or is waiting to be retried is
+deleted by pg-boss at its own `keep_until`, which defaults to **14 days**, so a `mail.send` job kept its
+bearer link in clear for up to 14 days against the 24 h that identity ADR 0002 decision 4 sets.
+`platform-jobs` adds `retention.pending` (seconds; maps to the queue's `retentionSeconds`; default
+unchanged) and `platform-mail` sets it to 24 h. What pg-boss does, verified against PostgreSQL 18: the
+deadline is `start_after + pending`, fixed when the job is inserted and copied unchanged on every retry
+(**a retry does not extend it**, so a queue whose window is shorter than its retries can take, with
+the lateness of expiry detection added, is refused); a job being processed is never deleted by it; there is no dead-letter copy; changing the
+setting does not touch jobs already waiting. A worker deletes the drops when it starts and every minute, under pg-boss's own deletion lock, and
+reports them (a count per queue, never a payload, and `queue.pending_dropped`) for the queues that
+set it. The report is best effort and a **lower bound**: pg-boss's own maintenance, every 15 minutes
+on any worker, deletes expired jobs silently, and whoever deletes first wins.
+
 ## Amendment 2026-10-10 (WP-8 `platform-mail`; its author)
 
 Written by the author of `platform-mail` against `platform-jobs` as merged. It records what the mail

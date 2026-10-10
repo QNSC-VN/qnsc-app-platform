@@ -42,6 +42,8 @@ export interface MakeJobsOptions {
   monitorIntervalSeconds?: number;
   /** Deletion of finished jobs (the package fixes 900 s). */
   maintenanceIntervalSeconds?: number;
+  /** How often a worker looks for jobs that waited past retention.pending (the package fixes 60 s). */
+  pendingSweepSeconds?: number;
   env?: Record<string, string>;
 }
 
@@ -146,6 +148,9 @@ export async function startJobsDb(): Promise<JobsDb> {
             : {}),
           ...(options.maintenanceIntervalSeconds !== undefined
             ? { maintenanceIntervalSeconds: options.maintenanceIntervalSeconds }
+            : {}),
+          ...(options.pendingSweepSeconds !== undefined
+            ? { pendingSweepSeconds: options.pendingSweepSeconds }
             : {}),
         },
       });

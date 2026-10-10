@@ -21,6 +21,7 @@ import { idempotencyId } from './idempotency';
 import { EFFECT_TABLE } from './install';
 import { registerOldestReadyAge } from './metrics';
 import { redriveDeadLetters, type SendInto } from './redrive';
+import { PENDING_SWEEP_SECONDS, PendingMetrics, sweepPending } from './pending';
 import type {
   HandleOptions,
   JobContext,
@@ -56,6 +57,7 @@ export interface CreateJobsOptions {
     monitorIntervalSeconds?: number;
     maintenanceIntervalSeconds?: number;
     drainTimeoutMs?: number;
+    pendingSweepSeconds?: number;
   };
 }
 
@@ -119,6 +121,9 @@ export class JobsImpl implements Jobs {
   private purgeTimer: NodeJS.Timeout | undefined;
   private readonly queueMetrics = new QueueMetrics();
   private readonly drainTimeoutMs: number;
+  private readonly pendingSweepMs: number;
+  private readonly pendingMetrics = new PendingMetrics();
+  private sweepTimer: NodeJS.Timeout | undefined;
 
   constructor(options: CreateJobsOptions) {
     this.pool = options.pool;
@@ -126,8 +131,9 @@ export class JobsImpl implements Jobs {
     this.logger = options.logger ?? console;
     this.role = roleFrom(this.env);
     const instanceName = this.env['OTEL_SERVICE_NAME']?.trim() || this.role;
-    const { drainTimeoutMs, ...bossInternal } = options.internal ?? {};
+    const { drainTimeoutMs, pendingSweepSeconds, ...bossInternal } = options.internal ?? {};
     this.drainTimeoutMs = drainTimeoutMs ?? DRAIN_TIMEOUT_MS;
+    this.pendingSweepMs = (pendingSweepSeconds ?? PENDING_SWEEP_SECONDS) * 1000;
     this.boss = new PgBoss(
       bossOptions({
         role: this.role,
@@ -174,6 +180,7 @@ export class JobsImpl implements Jobs {
     }
     this.state = 'stopped';
     if (this.purgeTimer) clearInterval(this.purgeTimer);
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
     // `close: false`: the pool is the caller's, and is ended after this returns.
     await this.boss.stop({ graceful: true, close: false, timeout: timeoutMs });
   }
@@ -544,6 +551,31 @@ export class JobsImpl implements Jobs {
       (error) =>
         this.logger.warn(`Could not read the oldest ready job age: ${describe(error).message}`),
     );
+
+    // Watch the queues that set `retention.pending`: delete what waited past its deadline ourselves
+    // (the same deletion pg-boss does, silently, every 15 minutes) so that the loss is reported.
+    const sweep = async () => {
+      const watched = [...this.queues.values()].filter((q) => q.pendingWatch).map((q) => q.name);
+      try {
+        for (const [queue, count] of await sweepPending(this.pool, watched)) {
+          this.pendingMetrics.record(queue, count);
+          const window = this.queues.get(queue)?.queue.retentionSeconds;
+          this.logger.warn(
+            `${count} job${count === 1 ? '' : 's'} on "${queue}" waited past retention.pending (${window} s) ` +
+              'without being processed and ' +
+              (count === 1 ? 'was' : 'were') +
+              ' deleted',
+          );
+        }
+      } catch (error) {
+        this.logger.warn(`Could not sweep unprocessed jobs: ${describe(error).message}`);
+      }
+    };
+    // Once at once, before the interval: after an outage the backlog of expired jobs is already
+    // there, and pg-boss's own first pass (about 15 s after start) would delete it silently.
+    void sweep();
+    this.sweepTimer = setInterval(() => void sweep(), this.pendingSweepMs);
+    this.sweepTimer.unref();
 
     const purge = async () => {
       try {

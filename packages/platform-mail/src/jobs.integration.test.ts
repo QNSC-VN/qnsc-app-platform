@@ -118,8 +118,19 @@ describe.skipIf(!dockerOn)('platform-mail on platform-jobs and PostgreSQL', () =
         expire_seconds: MAIL_QUEUE_CONFIG.expireInSeconds,
         dead_letter: DLQ,
       });
+      // An unprocessed job is bounded to 24 h in the database, not pg-boss's 14 days.
+      const { rows: pending } = await env.adminPool.query<{ retention_seconds: number }>(
+        'SELECT retention_seconds FROM pgboss.queue WHERE name = $1',
+        [MAIL_QUEUE],
+      );
+      expect(pending[0]?.retention_seconds).toBe(86_400);
+      const id = (await mailApi.enqueue(sampleMessage({ idempotencyKey: 'from-api' })))!;
+      const { rows: window } = await env.adminPool.query<{ ttl: number }>(
+        'SELECT extract(epoch FROM keep_until - start_after)::int AS ttl FROM pgboss.job WHERE id = $1',
+        [id],
+      );
+      expect(window[0]?.ttl, 'a mail job may wait at most 24 h unprocessed').toBe(86_400);
 
-      await mailApi.enqueue(sampleMessage({ idempotencyKey: 'from-api' }));
       await drain(worker.jobs);
       expect(worker.sender.sent).toHaveLength(1);
     });
