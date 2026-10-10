@@ -1672,4 +1672,175 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
       }, 60_000);
     });
   });
+
+  describe('identity#191: a sign-up whose transaction cannot commit answers 5xx, never 200', () => {
+    let stack: Stack;
+    t.beforeAll(async () => {
+      stack = await startStack(infra, { presets: ['public'] });
+      await stack.pool.query(`
+        -- the enqueue fails IN SQL, inside the sign-up transaction
+        create function boom_enqueue() returns trigger language plpgsql as $$
+        begin
+          if new.data->>'to' like 'boom-enqueue-%' then raise exception 'forced enqueue failure'; end if;
+          return new;
+        end $$;
+        create trigger boom_enqueue_t before insert on identity_test_jobs
+          for each row execute function boom_enqueue();
+        -- COMMIT itself fails: a deferred constraint trigger raises when the transaction commits
+        create function boom_commit() returns trigger language plpgsql as $$
+        begin
+          if new.email like 'boom-commit-%' then raise exception 'forced commit failure'; end if;
+          return null;
+        end $$;
+        create constraint trigger boom_commit_t after insert on identity."user"
+          deferrable initially deferred for each row execute function boom_commit();`);
+    });
+    t.afterAll(() => stack?.stop());
+
+    const users = async (email: string) =>
+      Number(
+        (
+          await stack.pool.query(
+            `select count(*)::int as n from identity."user" where email = $1`,
+            [email],
+          )
+        ).rows[0].n,
+      );
+    const jobs = async (email: string) =>
+      Number(
+        (
+          await stack.pool.query(
+            `select count(*)::int as n from identity_test_jobs where data->>'to' = $1`,
+            [email],
+          )
+        ).rows[0].n,
+      );
+    type Envelope = {
+      code: string;
+      message: string;
+      error: { code: string; message: string; details: unknown[]; correlationId: string };
+    };
+    const expectEnvelope = (body: string, correlationId: string) => {
+      const parsed = JSON.parse(body) as Envelope;
+      // Better Auth's protocol (top-level code and message, which better-auth/client reads) PLUS the
+      // platform envelope: never a bare envelope, never an empty body.
+      expect(parsed).toEqual({
+        code: 'INTERNAL_ERROR',
+        message: 'An unexpected error occurred',
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'An unexpected error occurred',
+          details: [],
+          correlationId,
+        },
+      });
+      // no SQL, no trigger text, no user object
+      expect(body).not.toMatch(/forced|trigger|rollback|emailVerified|aborted/i);
+    };
+
+    for (const [name, prefix] of [
+      ['an SQL error in the mail enqueue (the transaction is poisoned)', 'boom-enqueue'],
+      ['a COMMIT that fails', 'boom-commit'],
+    ] as const) {
+      it(`${name}: 500 in the contract envelope with the request's correlation id, no user, no job`, async () => {
+        const email = `${prefix}-${randomUUID().slice(0, 8)}@users.identity.test`;
+        const id = `req-${randomUUID().slice(0, 8)}`;
+        const res = await stack
+          .client()
+          .post(
+            `${API}/sign-up/email`,
+            { email, password: strongPassword(), name: 'x' },
+            { 'x-correlation-id': id },
+          );
+        expect(res.status).toBe(500);
+        expect(res.headers.get('content-type')).toMatch(/application\/json/);
+        expectEnvelope(res.body, id);
+        expect(await users(email)).toBe(0);
+        expect(await jobs(email)).toBe(0);
+      });
+    }
+
+    it('without a correlation id in context the envelope says "unknown"', async () => {
+      const email = `boom-commit-${randomUUID().slice(0, 8)}@users.identity.test`;
+      const res = await stack
+        .client()
+        .post(`${API}/sign-up/email`, { email, password: strongPassword(), name: 'x' });
+      expect(res.status).toBe(500);
+      expectEnvelope(res.body, 'unknown');
+    });
+
+    it('server-side, auth.api.signUpEmail REJECTS instead of resolving with a user that was not written', async () => {
+      const email = `boom-enqueue-${randomUUID().slice(0, 8)}@users.identity.test`;
+      await expect(
+        stack.auth.api.signUpEmail({
+          body: { email, password: strongPassword(), name: 'x' },
+        }),
+      ).rejects.toBeDefined();
+      expect(await users(email)).toBe(0);
+    });
+
+    it('the enqueue failure is still logged, with the class of the error and nothing of the request', async () => {
+      const email = `boom-enqueue-${randomUUID().slice(0, 8)}@users.identity.test`;
+      const before = stack.logs.length;
+      await stack
+        .client()
+        .post(`${API}/sign-up/email`, { email, password: strongPassword(), name: 'x' });
+      const failures = stack.logs
+        .slice(before)
+        .filter((l) => l.fields?.['code'] === 'identity.mail_enqueue_failed');
+      expect(failures).toHaveLength(1);
+      expect(JSON.stringify(stack.logs.slice(before)).includes(email)).toBe(false);
+    });
+
+    it('a failed COMMIT logs WHAT failed (class, cause class, SQLSTATE) and the request id, never the message', async () => {
+      const email = `boom-commit-${randomUUID().slice(0, 8)}@users.identity.test`;
+      const id = `req-${randomUUID().slice(0, 8)}`;
+      const before = stack.logs.length;
+      const res = await stack
+        .client()
+        .post(
+          `${API}/sign-up/email`,
+          { email, password: strongPassword(), name: 'x' },
+          { 'x-correlation-id': id },
+        );
+      expect(res.status).toBe(500);
+      const lines = stack.logs.slice(before);
+      const failure = lines.find(
+        (l) => l.level === 'error' && l.fields?.['error'] === 'DrizzleQueryError',
+      );
+      expect(failure).toBeDefined(); // it used to be one line saying "Error"
+      expect(String(failure!.fields?.['cause'])).toMatch(/Error$/); // the driver's class
+      expect(failure!.fields).toMatchObject({
+        source: 'better-auth',
+        error: 'DrizzleQueryError',
+        errorCode: 'P0001', // what the forced trigger raised
+        correlationId: id,
+      });
+      const everything = JSON.stringify(lines);
+      expect(everything).not.toMatch(/forced commit failure|Failed query|select 1/i);
+      expect(everything.includes(email)).toBe(false);
+    });
+
+    it('the aborted transaction of an SQL error in the enqueue is described the same way (SQLSTATE 25P02)', async () => {
+      const email = `boom-enqueue-${randomUUID().slice(0, 8)}@users.identity.test`;
+      const before = stack.logs.length;
+      await stack
+        .client()
+        .post(`${API}/sign-up/email`, { email, password: strongPassword(), name: 'x' });
+      const failure = stack.logs
+        .slice(before)
+        .find((l) => l.level === 'error' && l.fields?.['error'] === 'AuthTransactionAbortedError');
+      expect(failure?.fields).toMatchObject({ cause: 'DrizzleQueryError', errorCode: '25P02' });
+    });
+
+    it('a healthy sign-up is unaffected: 200, the user, the job', async () => {
+      const email = uniqueEmail('healthy');
+      const ok = await stack
+        .client()
+        .post(`${API}/sign-up/email`, { email, password: strongPassword(), name: 'x' });
+      expect(ok.status).toBe(200);
+      expect(await users(email)).toBe(1);
+      expect(await jobs(email)).toBe(1);
+    });
+  });
 }

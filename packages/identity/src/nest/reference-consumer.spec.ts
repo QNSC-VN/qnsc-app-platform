@@ -345,6 +345,44 @@ describe.skipIf(!enabled)('reference consumer: identity inside Nest 11 + Fastify
     expect((await mailFor(without)).correlationId).toBe(bare.headers.get('x-correlation-id'));
   });
 
+  it('a sign-up whose transaction cannot commit is a 500 with Better Auth’s code and message and the contract envelope, carrying the id the response header carries (identity#191)', async () => {
+    await pool.query(`
+      create function ref_boom_commit() returns trigger language plpgsql as $$
+      begin
+        if new.email like 'boom-%' then raise exception 'forced commit failure'; end if;
+        return null;
+      end $$;
+      create constraint trigger ref_boom_commit_t after insert on identity."user"
+        deferrable initially deferred for each row execute function ref_boom_commit();`);
+    try {
+      const email = `boom-${randomUUID().slice(0, 6)}@users.reference.test`;
+      const res = await http().post('/api/auth/sign-up/email', {
+        email,
+        password: `pw-${randomUUID()}`,
+        name: 'R',
+      });
+      expect(res.status).toBe(500);
+      const id = res.headers.get('x-correlation-id');
+      expect(id).toBeTruthy();
+      expect(res.json()).toEqual({
+        code: 'INTERNAL_ERROR',
+        message: 'An unexpected error occurred',
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'An unexpected error occurred',
+          details: [],
+          correlationId: id,
+        },
+      });
+      const { rows } = await pool.query(`select 1 from identity."user" where email = $1`, [email]);
+      expect(rows).toHaveLength(0);
+    } finally {
+      await pool.query(
+        `drop trigger ref_boom_commit_t on identity."user"; drop function ref_boom_commit()`,
+      );
+    }
+  });
+
   it('is ready when the schema matches, and says why when it does not', async () => {
     expect(await checkIdentityReady(auth)).toEqual({ ok: true });
   });
