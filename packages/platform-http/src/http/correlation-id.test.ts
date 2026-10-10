@@ -218,7 +218,7 @@ class OpshubStyleMiddleware implements NestMiddleware {
   }
 }
 
-/** solodesk's middleware: trusts the raw header as it arrives, validates nothing, echoes nothing. */
+/** A product middleware that trusts the raw header as it arrives, validates nothing and echoes nothing. */
 @Injectable()
 class TrustingMiddleware implements NestMiddleware {
   use(
@@ -251,7 +251,7 @@ afterEach(async () => {
 interface BootOptions {
   /** Keep the product's own middleware, as a product mid-rollout would. */
   productMiddleware?: boolean;
-  /** A middleware that trusts the raw header, as solodesk's does. */
+  /** A middleware that trusts the raw header: no validation, no echo. */
   trustingMiddleware?: boolean;
   /** A middleware shaped like opshub's, which uses its own private store. */
   opshubMiddleware?: boolean;
@@ -475,7 +475,7 @@ describe('a product whose own middleware still sets the header (rollout in progr
   });
 
   it('stops a middleware that trusts the raw header from reflecting a bad one: it now reads the validated id', async () => {
-    // solodesk today reads the header with no validation. This hook writes the id it settled on back
+    // Such a middleware reads the header with no validation. This hook writes the id it settled on back
     // to the header, so that middleware never sees the raw input.
     const { url } = await boot({ trustingMiddleware: true });
     const bad = await getCtx(url, { 'x-correlation-id': 'has space' });

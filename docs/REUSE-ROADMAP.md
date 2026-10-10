@@ -6,9 +6,15 @@
 > `identity-drizzle` withdrawal (§0.0), the measurement method (§1) and the classification (§2). Read
 > those before proposing to promote anything. §3 describes a package that no longer exists.
 
+> **Update (2026-10-10): solodesk is retired.** Its repository is archived and it is no longer a consumer.
+> This document measures it as it stood on 2026-09-08, and those measurements stay as the record of how the
+> method was applied; do not read them as a description of a live product. What changes: nothing in §0–§2
+> depends on solodesk to hold, but steps that say "solodesk adopts first" (§4) and open questions about
+> solodesk (§8) are moot.
+
 > **Status:** WP-0 and WP-1 shipped **and adopted**; **WP-2 withdrawn**; **WP-3 measured and not needed** — **v4, supersedes v3**
 > **Date:** 2026-09-08
-> **Consumers:** `rova` · `opshub` · `solodesk` · Learning (new)
+> **Consumers:** `rova` · `opshub` · ~~`solodesk`~~ (retired 2026-10-10) · Learning (new)
 > **Related:** [ADMISSION-TEST.md](./ADMISSION-TEST.md) · [LOCAL-CREDENTIALS.md](./LOCAL-CREDENTIALS.md)
 
 ---
@@ -446,7 +452,7 @@ Steps:
 3. Add the §3.3 table builders.
 4. Port-conformance tests for every factory, following `domain-ports.test.ts` and `service-ports.test.ts`.
 5. A conformance case proving a consumer binding **nothing** still boots identically to today.
-6. **solodesk adopts first** — newest, fewest live users, already has the superset user repository.
+6. ~~**solodesk adopts first** — newest, fewest live users, already has the superset user repository.~~ (Moot: solodesk retired 2026-10-10.)
 7. opshub, then rova.
 8. Learning consumes with table builders from its first commit.
 9. Tag 1.0.0 when all four are on it.
@@ -540,7 +546,7 @@ Standing single-consumer exceptions: `oidc/` and `SSO_CONNECTION_REPOSITORY`. Th
 
 1. Does opshub's `auth_sessions` table differ structurally from rova's, or only in naming? Determines whether §3.2 column mapping suffices.
 2. Should `identity-drizzle` ship migrations or only table builders? Migrations are more turnkey for Learning but couple the package to each product's migration tooling.
-3. Does solodesk's module-scope `db` need the factory to accept both DI and direct forms?
+3. ~~Does solodesk's module-scope `db` need the factory to accept both DI and direct forms?~~ (Moot: solodesk retired 2026-10-10.)
 4. Who owns WP-2? It touches three live auth paths and needs one owner plus a per-product rollback plan.
 5. WP-6: converge the guard or delete it from the package?
 6. Is a fifth consumer expected? Hospital Camera AI's stack is undecided; if Python, none of this reaches it.

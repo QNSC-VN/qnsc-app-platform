@@ -66,7 +66,8 @@ schema, for instance). Product tables are passed in by the product or not used; 
 table in `platform-mail` because the job queue is the outbox.
 
 Packages built under P4, with their consumers: `platform-db` (all TypeScript products), `platform-jobs`
-and `platform-mail` (the LMS and solodesk first; rova and opshub at convergence), `identity` 8.
+and `platform-mail` (the LMS first; rova and opshub at convergence; solodesk, retired 2026-10-10, is no
+longer a consumer), `identity` 8.
 
 ## Current status per package
 

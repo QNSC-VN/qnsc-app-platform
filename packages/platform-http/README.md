@@ -143,15 +143,15 @@ logger reads. `observability` (`>=0.2.1`) was already a peer dependency.
    `REQUEST_CONTEXT` binding of `GlobalExceptionFilter` must read that same store, or the id is seeded
    where nothing looks:
 
-   | product  | reads today                                                                      | can delete its middleware                                   |
-   | -------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-   | rova     | `observability`'s store (its `request-context.ts` re-exports it)                 | yes                                                         |
-   | solodesk | this package's `RequestContextService`, which is now `observability`'s           | yes                                                         |
-   | opshub   | **its own** `AsyncLocalStorage` (`libs/platform/src/context/request-context.ts`) | **not yet**: first re-export `observability`'s, as rova did |
+   | product | reads today                                                                      | can delete its middleware                                   |
+   | ------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+   | rova    | `observability`'s store (its `request-context.ts` re-exports it)                 | yes                                                         |
+   | opshub  | **its own** `AsyncLocalStorage` (`libs/platform/src/context/request-context.ts`) | **not yet**: first re-export `observability`'s, as rova did |
 
    What is tested, and what is not. The tests in this repository use **copies shaped like** the products'
    middleware, not the products' own classes: one with rova's pattern and header handling, one that trusts
-   the raw header as solodesk's does, and one shaped like opshub's that enters **its own private store**.
+   the raw header and validates nothing (the shape solodesk had, before it was retired on 2026-10-10), and
+   one shaped like opshub's that enters **its own private store**.
    They pin: with the middleware kept there is one id in the response and in the product's own context for
    every kind of input; with it removed, opshub's private store sees nothing (the prerequisite above).
    Separately, rova's and opshub's actual middleware classes were booted once by hand, in throwaway specs
@@ -163,11 +163,13 @@ logger reads. `observability` (`>=0.2.1`) was already a peer dependency.
 
 What changes for a product that deletes its own middleware (each product's rule today is different):
 
-| product  | accepts today                                                       | also reads `X-Request-ID`     | after this package                            |
-| -------- | ------------------------------------------------------------------- | ----------------------------- | --------------------------------------------- |
-| rova     | `[A-Za-z0-9_-]{8,64}`                                               | yes, when the other is absent | wider class; `X-Request-ID` is no longer read |
-| opshub   | UUID-shaped only (`[0-9a-f-]{32,36}`); anything else is regenerated | no                            | non-UUID ids (ULIDs, `svc:req`) are now kept  |
-| solodesk | **anything**, unvalidated, and not echoed                           | no                            | validated, and echoed on the response         |
+| product | accepts today                                                       | also reads `X-Request-ID`     | after this package                            |
+| ------- | ------------------------------------------------------------------- | ----------------------------- | --------------------------------------------- |
+| rova    | `[A-Za-z0-9_-]{8,64}`                                               | yes, when the other is absent | wider class; `X-Request-ID` is no longer read |
+| opshub  | UUID-shaped only (`[0-9a-f-]{32,36}`); anything else is regenerated | no                            | non-UUID ids (ULIDs, `svc:req`) are now kept  |
+
+A product that trusts the raw header, validates nothing and echoes nothing (solodesk did; retired 2026-10-10)
+would go from "anything" to validated and echoed on the response. The tests keep that shape.
 
 `X-Request-ID` is not read here: the contract names one header.
 

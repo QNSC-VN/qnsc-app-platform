@@ -5,6 +5,13 @@
 > **Target:** convergence now; `identity` 7.1.0 promotion when the checklist is satisfied
 > **Related:** [ADMISSION-TEST.md](./ADMISSION-TEST.md) · [`packages/identity/README.md`](../packages/identity/README.md) · `solodesk/services/backend-api/src/modules/auth`
 
+> **Update (2026-10-10): solodesk is retired.** Its repository is archived (read-only), so the code this
+> document analyses can still be read there but is no longer maintained. Everything below that says what
+> SoloDesk "does" or "has" describes it as of 2026-09-07 and is kept as the record of that analysis.
+> Two actions are moot: "fix §6.1, §6.3, §6.4 **in SoloDesk**" (§7 step 1) and open question 5 (who owns the
+> §6 fixes in SoloDesk), because there is no live product to fix. The four gaps in §6 still describe what to
+> avoid if Learning builds from that reference.
+
 ---
 
 ## 0. What changed in v2
@@ -202,7 +209,7 @@ Cost parameters come from the library's defaults, so they shift silently on upgr
 
 ## 7. Recommended sequence
 
-1. **Fix §6.1, §6.3, §6.4 in SoloDesk.** They are defects today, independent of Learning. §6.2 is a decision to record, not necessarily to change.
+1. ~~**Fix §6.1, §6.3, §6.4 in SoloDesk.** They are defects today, independent of Learning. §6.2 is a decision to record, not necessarily to change.~~ (Moot: SoloDesk retired 2026-10-10.)
 2. **Learning builds its auth module from SoloDesk's**, hardened. Not a fork — a deliberate second implementation with the same shape, so convergence is visible.
 3. **Track the divergence.** When both have taken the same edit twice, the checklist is satisfied honestly.
 4. **Promote to `identity` 7.1.0:** `PasswordService` (parameterised), a `VerificationTokenService` behind a repository port, and the reset-revocation contract. All ports optional, so `rova` and `opshub` upgrade with no code change.
@@ -242,4 +249,4 @@ For Learning's implementation, and for the SoloDesk hardening in §6.
 2. **Passkeys at launch?** Still the one requirement that would favour Cognito. `@simplewebauthn/server` is the alternative.
 3. **Email transport** — `rova` provisions `aws_sesv2_email_identity` in Terraform and also carries `resend`. SoloDesk has its own path. Settle on one before Learning adds a fourth.
 4. **Is a cross-language password standard wanted** (§5.4), given KB is bcrypt-on-Python?
-5. **Who owns the §6 fixes in SoloDesk**, and on what timeline? They are live defects, not Learning's backlog.
+5. ~~**Who owns the §6 fixes in SoloDesk**, and on what timeline? They are live defects, not Learning's backlog.~~ (Moot: SoloDesk retired 2026-10-10.)
