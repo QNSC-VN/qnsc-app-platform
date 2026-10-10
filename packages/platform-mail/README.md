@@ -220,9 +220,27 @@ override. Bulk mail MUST stay at 0.
   - **Alert on `pgboss.queue.jobs{queue="mail.send.dlq",state="ready"} > 0`.** That is the signal; the
     dead-letter copy is deleted after 24 h.
   - **Authentication mail is never redriven.** Its link expires, and the user asks for a new one;
-    redriving a stale reset link only emails someone a dead link.
-  - Other categories wait for a redrive API in `platform-jobs` (not built yet). Until then a
-    dead-lettered digest or notification is lost after 24 h, and the alert is how you find out.
+    redriving a stale reset link only emails someone a dead link. This is enforced in the queue's
+    definition (`MAIL_QUEUE_CONFIG.canRedrive`, `mailCanRedrive`), not left to the operator: `auth.*` copies
+    stay in the dead-letter queue and are counted in `skipped`.
+  - **Other categories can be redriven** with [`jobs.redrive`](../platform-jobs/README.md#redriving-dead-letters)
+    once the cause is fixed (a mailbox permission, a Graph outage), inside the 24 h the copy lives.
+    The job comes back on `mail.send` with a fresh retry budget **and the same job id**, so the
+    `idempotencyKey` still deduplicates; the handler's ledger still refuses to send a message twice.
+    The payload is the message itself, so `filter.data` matches its fields exactly:
+
+    ```ts
+    await jobs.redrive('mail.send.dlq', {
+      limit: 50,
+      filter: { data: { category: 'digest.daily' } },
+    });
+    ```
+
+    An unfiltered `redrive('mail.send.dlq')` is safe: it returns `{ moved, skipped }`, moves the non-auth
+    copies and leaves every `auth.*` one to expire with its copy. The calling process must define the queue
+    (`createMailQueue(jobs)` does, with the rule), or nothing moves. Needs `platform-jobs` 0.1.2 or later (the release that carries `canRedrive`): an
+    older one would ignore the rule. There is no automatic redrive; someone decides, after the cause is gone,
+    or a redriven batch dead-letters again.
 - **Retryable** (`unauthenticated`, `throttled`, `unavailable`, `network`, `timeout`): thrown as they
   are; the queue retries with its backoff.
 - A throttled mailbox is not retried into: the cooldown makes every send wait out the `Retry-After`

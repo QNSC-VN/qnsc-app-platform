@@ -101,6 +101,10 @@ export interface ResolvedQueue {
   deadLetterQueue: { retentionSeconds: number; deleteAfterSeconds: number };
   /** Delete a job's row as soon as its handler succeeds (`retention.completed: 'immediate'`). */
   deleteOnSuccess: boolean;
+  /** Whether the queue is defined with a `canRedrive` rule (part of the definition: see the fingerprint). */
+  guarded: boolean;
+  /** The rule itself. In-process only: never stored, and left out of the fingerprint. */
+  canRedrive?: (data: unknown) => boolean;
   /** The configuration as given, normalised, for comparing two definitions of one queue. */
   fingerprint: string;
 }
@@ -217,7 +221,11 @@ export function resolveQueue(name: string, config: QueueConfig = {}): ResolvedQu
     config.retention,
   );
 
-  const resolved: Omit<ResolvedQueue, 'fingerprint'> = {
+  if (config.canRedrive !== undefined && typeof config.canRedrive !== 'function') {
+    throw new JobsConfigError(`Queue "${name}": canRedrive must be a function (data) => boolean.`);
+  }
+
+  const resolved: Omit<ResolvedQueue, 'fingerprint' | 'canRedrive'> = {
     name,
     deadLetter,
     queue: {
@@ -232,8 +240,15 @@ export function resolveQueue(name: string, config: QueueConfig = {}): ResolvedQu
     },
     deadLetterQueue: { retentionSeconds: deadLetterSeconds, deleteAfterSeconds: finishedSeconds },
     deleteOnSuccess,
+    // Whether there IS a rule is part of the definition: one process defining the queue without it
+    // would redrive what another forbids. (Which function it is cannot be compared.)
+    guarded: config.canRedrive !== undefined,
   };
-  return { ...resolved, fingerprint: JSON.stringify(resolved) };
+  return {
+    ...resolved,
+    ...(config.canRedrive ? { canRedrive: config.canRedrive } : {}),
+    fingerprint: JSON.stringify(resolved),
+  };
 }
 
 export function resolveHandler(queue: string, options: HandleOptions = {}): ResolvedHandler {

@@ -73,6 +73,17 @@ export interface QueueConfig {
   /** Dead-letter queue. Default `${queue}.dlq`, created for you. */
   deadLetter?: string;
   retention?: RetentionOptions;
+  /**
+   * Veto `redrive` for some of this queue's dead letters: return `false` for a payload that must
+   * NEVER be put back (for `platform-mail`, authentication mail: its link has expired and the user
+   * asks for a new one). It runs in the process that calls `redrive`, from the ORIGIN queue's
+   * definition there, like the handler; a copy it rejects (or that throws) stays in the dead-letter
+   * queue and is counted in `skipped`, never logged. It is not stored in the database, so every
+   * process that may redrive must define the queue with it (an enqueue-only definition does).
+   * Defining a queue with it in one place and without it in another throws, as any other
+   * disagreement does.
+   */
+  canRedrive?: (data: unknown) => boolean;
 }
 
 export interface HandleOptions extends QueueConfig {
@@ -108,6 +119,36 @@ export interface SendOptions {
 export interface ScheduleOptions {
   /** IANA time zone the cron expression is read in. Default `Asia/Ho_Chi_Minh`. */
   tz?: string;
+}
+
+/** Which dead-letter copies a redrive moves. All given conditions must hold. */
+export interface RedriveFilter {
+  /** Only these dead-letter copies (their ids in the dead-letter queue). */
+  ids?: string[];
+  /** Only copies that arrived in the dead-letter queue before this time. */
+  createdBefore?: Date;
+  /** Only copies that came from this queue, when a dead-letter queue collects from several. */
+  origin?: string;
+  /** Only copies whose payload CONTAINS this object (Postgres `@>`): `{ category: 'digest' }`. */
+  data?: object;
+}
+
+/** What a redrive did. */
+export interface RedriveResult {
+  /** Jobs moved back to their origin queue. */
+  moved: number;
+  /**
+   * Copies left in the dead-letter queue by POLICY: the origin queue's `canRedrive` rejected them, or
+   * the origin queue is not defined in the calling process, so its rule could not be applied.
+   * (Copies that cannot move for another reason are left in place and logged, not counted here.)
+   */
+  skipped: number;
+}
+
+export interface RedriveOptions {
+  /** At most this many jobs, oldest first. Default 100, maximum 10000: drain at a controlled rate. */
+  limit?: number;
+  filter?: RedriveFilter;
 }
 
 export type OnceResult<T> = { ran: true; value: T } | { ran: false };
@@ -160,6 +201,27 @@ export interface Jobs {
    * `ROLE=worker` process registers it. The queue is `name`; give it a `handle()`.
    */
   schedule(name: string, cron: string, data?: object, options?: ScheduleOptions): Promise<void>;
+
+  /**
+   * Moves dead-letter copies of `dlq` back to the queue they came from, with a **fresh retry budget**
+   * and the **same job id** (so `idempotencyKey` still deduplicates), and resolves to how many moved
+   * and how many were skipped by the origin queue's `canRedrive` policy.
+   * Oldest first, at most `limit` (default 100).
+   *
+   * Atomic per job and safe to run twice at once: a job moves in its own transaction, two redrives
+   * never move the same copy, and a copy that cannot move (its origin queue is gone, a job with its id
+   * exists, live or retained) stays in the dead-letter queue untouched and is logged. The redriven job takes the origin
+   * queue's CURRENT configuration, retention included, and its waiting window starts again (a new
+   * deadline, not what was left of the copy's). A copy already past its own deadline is ignored: it is
+   * about to be deleted and must not be revived. Rejects when `dlq` is not a dead-letter queue.
+   *
+   * The origin queue must be defined in the calling process (`handle()` or `defineQueue()`), because
+   * its `canRedrive` rule is applied from there: authentication mail is never redriven (its link has
+   * expired, and the user asks for a new one), and `platform-mail` says so in its queue definition.
+   *
+   * Implementing `Jobs` yourself is unsupported: use `@quynhonsemiconductor/platform-jobs/testing`.
+   */
+  redrive(dlq: string, options?: RedriveOptions): Promise<RedriveResult>;
 
   /**
    * Run a DATABASE effect at most once per `key`, however many times a job is delivered (jobs are

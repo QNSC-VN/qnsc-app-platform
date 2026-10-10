@@ -20,6 +20,7 @@ import { isPermanent } from './errors';
 import { idempotencyId } from './idempotency';
 import { EFFECT_TABLE } from './install';
 import { registerOldestReadyAge } from './metrics';
+import { redriveDeadLetters, type SendInto } from './redrive';
 import type {
   HandleOptions,
   JobContext,
@@ -27,6 +28,8 @@ import type {
   Jobs,
   OnceResult,
   QueueConfig,
+  RedriveOptions,
+  RedriveResult,
   ScheduleOptions,
   SendOptions,
 } from './types';
@@ -481,6 +484,31 @@ export class JobsImpl implements Jobs {
 
   private async applySchedule(schedule: ScheduledJob): Promise<void> {
     await this.boss.schedule(schedule.name, schedule.cron, schedule.data, { tz: schedule.tz });
+  }
+
+  // ── redrive ──────────────────────────────────────────────────────────────────────────────
+
+  redrive(dlq: string, options: RedriveOptions = {}): Promise<RedriveResult> {
+    assertQueueName(dlq);
+    if (this.state !== 'started') {
+      return Promise.reject(
+        new Error('platform-jobs is not started: call start() before redrive().'),
+      );
+    }
+    return redriveDeadLetters(
+      {
+        pool: this.pool,
+        warn: (message) => this.logger.warn(message),
+        policyFor: (origin) => {
+          const queue = this.queues.get(origin);
+          return queue === undefined ? undefined : (queue.canRedrive ?? null);
+        },
+        send: ((queue, data, sendOptions) =>
+          this.boss.send(queue, data, sendOptions as never)) as SendInto,
+      },
+      dlq,
+      options,
+    );
   }
 
   // ── once ─────────────────────────────────────────────────────────────────────────────────

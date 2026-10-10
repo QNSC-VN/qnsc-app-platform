@@ -45,7 +45,7 @@
     "@nestjs/common": ">=11",
     "@nestjs/core": ">=11",
     "@quynhonsemiconductor/observability": ">=0.2.0",
-    "@quynhonsemiconductor/platform-jobs": ">=0.1.0",
+    "@quynhonsemiconductor/platform-jobs": ">=0.1.2",
     "nodemailer": ">=6.9"
   },
   "peerDependenciesMeta": {
