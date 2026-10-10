@@ -25,7 +25,7 @@ import { withEncryptedSsoSecrets } from './sso-protect';
 import { ssoPlugin, type SsoHooks } from './sso';
 import { valkeySecondaryStorage, type StorageDegraded } from './storage';
 import { testLogin } from './test-login';
-import { staffSessionHooks } from './staff-session';
+import { staffRefreshGuard, staffSessionHooks } from './staff-session';
 import { withCallbackErrorCodes } from './callback-errors';
 import { withTimingFloor } from './timing';
 import { withTxCapture } from './tx-context';
@@ -274,6 +274,7 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
         : []),
       admin({ allowImpersonatingAdmins: false }),
       ...(publicPreset ? [twoFactor({ issuer: o.product })] : []),
+      ...(staffPreset ? [staffRefreshGuard({ staffDomains, getContext })] : []),
       accountLockout(sink),
       companyDomainSignUpGuard(isReserved),
       securityEvents(sink, onSinkError),

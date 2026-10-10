@@ -1,3 +1,5 @@
+import { createAuthMiddleware, setShouldSkipSessionRefresh } from 'better-auth/api';
+import type { BetterAuthPlugin } from 'better-auth';
 import { DEFAULTS } from './defaults';
 import { domainIn, emailDomain } from './domains';
 import type { AccountContext } from './accounts';
@@ -95,6 +97,73 @@ export function staffSessionHooks(policy: StaffSessionPolicy) {
           data: { expiresAt: earliest(data['expiresAt'], new Date(created.getTime() + capMs)) },
         };
       },
+    },
+  };
+}
+
+/** The slice of Better Auth's internal adapter the refresh guard needs. */
+interface SessionAdapter {
+  findSession(token: string): Promise<{
+    session: { createdAt: Date | string; expiresAt: Date | string };
+    user: { email: string };
+  } | null>;
+  findAccounts(userId: string): Promise<Array<{ providerId: string }>>;
+}
+
+/**
+ * A staff session never needs refreshing, so it must not be refreshed.
+ *
+ * Better Auth refreshes a session on `get-session` once `expiresAt - expiresIn + updateAge <= now`.
+ * For a staff session `expiresAt` is `createdAt + 12 h`, always at least as old as that threshold
+ * in an instance whose lifetime is the public 7 days, and after the first hour in a staff-only one.
+ * So every read of a staff session asked for a refresh to `now + 7 d`, which `update.before` above
+ * clamped back to the SAME `createdAt + 12 h`: a database UPDATE, two Valkey writes and a
+ * Set-Cookie per request, to change nothing. (Measured: see the PR for #N1.)
+ *
+ * The clamp stays as the guarantee, and is now idempotent: when the session Better Auth has just
+ * loaded is a staff session already at or under its cap, the refresh is switched off for that
+ * request (`setShouldSkipSessionRefresh`, Better Auth's own request-scoped switch). A session over
+ * its cap (created before the cap existed) is NOT skipped: the refresh runs once, is clamped, and
+ * the next read finds it at the cap. Public sessions keep their sliding refresh.
+ *
+ * The decision hangs on `findSession`, the one place the loaded session and its user are in hand
+ * without a second read; the staff test costs a query only when the session was about to refresh.
+ */
+export function staffRefreshGuard(policy: StaffSessionPolicy): BetterAuthPlugin {
+  const capMs = DEFAULTS.session.staff.expiresInSeconds * 1000;
+  const wrapped = new WeakSet<object>();
+
+  return {
+    id: 'qnsc-staff-refresh-guard',
+    hooks: {
+      before: [
+        {
+          matcher: () => true,
+          handler: createAuthMiddleware(async (ctx) => {
+            const adapter = ctx.context.internalAdapter as unknown as SessionAdapter;
+            if (wrapped.has(adapter)) return;
+            wrapped.add(adapter);
+            const { sessionConfig } = ctx.context;
+            const find = adapter.findSession.bind(adapter);
+            adapter.findSession = async (token) => {
+              const found = await find(token);
+              if (!found) return found;
+              const expiresAt = new Date(found.session.expiresAt).getTime();
+              const createdAt = new Date(found.session.createdAt).getTime();
+              // Not about to refresh, or past its cap: nothing to decide here.
+              const due = expiresAt - (sessionConfig.expiresIn - sessionConfig.updateAge) * 1000;
+              if (due > Date.now() || expiresAt > createdAt + capMs) return found;
+              const userId = (found.user as { id?: unknown }).id;
+              const staff =
+                domainIn(emailDomain(found.user.email), policy.staffDomains) ||
+                (typeof userId === 'string' &&
+                  (await adapter.findAccounts(userId)).some((a) => a.providerId === 'microsoft'));
+              if (staff) await setShouldSkipSessionRefresh(true);
+              return found;
+            };
+          }),
+        },
+      ],
     },
   };
 }

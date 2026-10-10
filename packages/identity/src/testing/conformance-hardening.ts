@@ -206,6 +206,165 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
       );
       expect(rows[0]!.over).toBeLessThanOrEqual(5);
     });
+
+    describe('N1: a staff session at its cap is not rewritten on every read', () => {
+      const sessionToken = (c: { cookies: Record<string, string> }) =>
+        decodeURIComponent(
+          Object.entries(c.cookies).find(([name]) => name.endsWith('session_token'))![1],
+        ).split('.')[0]!;
+      /** Count UPDATEs of identity.session from here on (the trigger lives for the stack's lifetime). */
+      const countWrites = async () => {
+        await stack.pool.query(`
+          create table if not exists session_writes (n serial);
+          create or replace function session_writes_f() returns trigger language plpgsql as $$
+            begin insert into session_writes default values; return null; end $$;
+          drop trigger if exists session_writes_t on identity.session;
+          create trigger session_writes_t after update on identity.session
+            for each row execute function session_writes_f();`);
+        const read = async () =>
+          Number(
+            (await stack.pool.query(`select count(*)::int as n from session_writes`)).rows[0].n,
+          );
+        return read;
+      };
+      /** Age ONE session in Postgres and in Valkey, as time passing would. */
+      const age = async (c: { cookies: Record<string, string> }, hours: number) => {
+        const token = sessionToken(c);
+        await stack.pool.query(
+          `update identity.session set created_at = created_at - make_interval(hours => $2),
+                  updated_at = updated_at - make_interval(hours => $2),
+                  expires_at = expires_at - make_interval(hours => $2) where token = $1`,
+          [token, hours],
+        );
+        const cached = await stack.get(token);
+        if (cached) {
+          const value = JSON.parse(cached);
+          for (const field of ['createdAt', 'updatedAt', 'expiresAt']) {
+            value.session[field] = new Date(
+              new Date(value.session[field]).getTime() - hours * 3600_000,
+            ).toISOString();
+          }
+          await stack.seedCounter(token, JSON.stringify(value), 6 * 86400);
+        }
+      };
+      const read10 = async (c: ReturnType<Stack['client']>) => {
+        let cookies = 0;
+        for (let i = 0; i < 10; i += 1) {
+          const res = await c.get(`${API}/get-session?disableCookieCache=true`);
+          expect(res.json()).not.toBeNull();
+          if (res.setCookie.some((line) => /session_token=/.test(line))) cookies += 1;
+        }
+        return cookies;
+      };
+
+      it('a clamped session read 10 times: 0 database writes, 0 cache writes, no Set-Cookie at all', async () => {
+        const { email, c } = await staffByDomainOnly();
+        const writes = await countWrites();
+        await age(c, 2); // past the 1 h updateAge: Better Auth wants to refresh it on every read
+        const token = sessionToken(c);
+        const before = await writes();
+        const cachedBefore = await stack.get(token);
+        expect(cachedBefore).not.toBeNull();
+        expect(await read10(c)).toBe(0);
+        expect(await writes()).toBe(before);
+        expect(await stack.get(token)).toBe(cachedBefore);
+        expect(await lifetime(email)).toBeLessThanOrEqual(12 * 3600 + 5);
+      });
+
+      it('the cap still holds: a refresh still cannot stretch a session past createdAt + 12 h, and a session past it is dead', async () => {
+        // A staff session whose stored expiry is beyond the cap (7 d) and which is due a refresh:
+        // the guard must NOT wave it through; the clamp runs, once, and brings it back to the cap.
+        const { email, c } = await staffByDomainOnly();
+        const token = sessionToken(c);
+        await stack.pool.query(
+          `update identity.session set expires_at = created_at + interval '7 days' where token = $1`,
+          [token],
+        );
+        await stack.flushCache();
+        await age(c, 25);
+        const writes = await countWrites();
+        const before = await writes();
+        const first = await c.get(`${API}/get-session?disableCookieCache=true`);
+        expect(first.status).toBe(200);
+        expect(await writes()).toBe(before + 1);
+        expect(await lifetime(email)).toBeLessThanOrEqual(12 * 3600 + 5);
+        // 25 h old, so over the 12 h cap: dead from here on, and nothing is written for it.
+        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        expect(await writes()).toBe(before + 1);
+      });
+
+      it("the guard is for staff only: a non-staff session, even a short one, is left to Better Auth's refresh", async () => {
+        const email = uniqueEmail('visitor');
+        const password = strongPassword();
+        await verifiedUser(stack, email, password, expect);
+        const c = stack.client();
+        expect((await signIn(c, email, password)).status).toBe(200);
+        await stack.pool.query(
+          `update identity.session set expires_at = created_at + interval '6 hours' where token = $1`,
+          [sessionToken(c)],
+        );
+        await stack.flushCache();
+        const writes = await countWrites();
+        const before = await writes();
+        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).status).toBe(200);
+        expect(await writes()).toBe(before + 1);
+      });
+
+      it('a public session keeps its sliding refresh: once when due, then quiet', async () => {
+        const email = uniqueEmail('visitor');
+        const password = strongPassword();
+        await verifiedUser(stack, email, password, expect);
+        const c = stack.client();
+        expect((await signIn(c, email, password)).status).toBe(200);
+        await age(c, 48);
+        const writes = await countWrites();
+        const before = await writes();
+        expect(await read10(c)).toBe(1);
+        expect(await writes()).toBe(before + 1);
+      });
+    });
+  });
+
+  describe('review N1 (staff-only instance): a Microsoft staff session at its cap is not rewritten either', () => {
+    it('read 10 times after the 1 h updateAge: 0 database writes, no Set-Cookie', async () => {
+      const idp = await startMockIdp();
+      const stack = await startStack(infra, { presets: ['staff'], staff: { authority: idp.base } });
+      try {
+        const email = `lead-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`;
+        const { client: c } = await microsoftSignIn(stack, idp, {
+          sub: 'n',
+          oid: randomUUID(),
+          tid: TEST_TENANT,
+          email,
+          name: 'L',
+        });
+        await stack.pool.query(`
+          create table session_writes (n serial);
+          create function session_writes_f() returns trigger language plpgsql as $$
+            begin insert into session_writes default values; return null; end $$;
+          create trigger session_writes_t after update on identity.session
+            for each row execute function session_writes_f();`);
+        await stack.pool.query(
+          `update identity.session set created_at = created_at - interval '2 hours',
+                  updated_at = updated_at - interval '2 hours', expires_at = expires_at - interval '2 hours'`,
+        );
+        await stack.flushCache();
+        const writes = async () =>
+          Number(
+            (await stack.pool.query(`select count(*)::int as n from session_writes`)).rows[0].n,
+          );
+        const before = await writes();
+        for (let i = 0; i < 10; i += 1) {
+          const res = await c.get(`${API}/get-session`);
+          expect(res.json()).not.toBeNull();
+          expect(res.setCookie.some((line) => /session_token=/.test(line))).toBe(false);
+        }
+        expect(await writes()).toBe(before);
+      } finally {
+        await stack.stop();
+        await idp.stop();
+      }
+    });
   });
 
   describe('review S3: an Entra identity never takes over an existing account by email', () => {

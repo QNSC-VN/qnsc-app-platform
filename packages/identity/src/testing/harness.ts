@@ -74,7 +74,7 @@ export interface Stack {
   keys(pattern: string): Promise<string[]>;
   ttl(fullKey: string): Promise<number>;
   /** Set a counter the package keeps in Valkey (full key without the product prefix), to reach a limit without minutes of requests. */
-  seedCounter(key: string, value: number, ttlSeconds?: number): Promise<unknown>;
+  seedCounter(key: string, value: number | string, ttlSeconds?: number): Promise<unknown>;
   /** Read a key the package keeps in Valkey (without the product prefix). */
   get(key: string): Promise<string | null>;
   /** Drop everything this stack cached in Valkey (sessions included): reads fall back to Postgres. */
