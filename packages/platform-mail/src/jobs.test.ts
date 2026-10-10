@@ -883,6 +883,86 @@ describe('a 429 waited out inside send() still backs the whole mailbox off (M-B)
   });
 });
 
+describe('an attempt aborted before the request is sent sends nothing (#195)', () => {
+  /** A job whose signal a drain has already aborted. */
+  const abortedJob = (data: EmailMessage) => ({
+    id: 'draining',
+    data,
+    attempt: 1,
+    signal: AbortSignal.abort(),
+  });
+
+  it('calls no transport at all — even one that ignores the signal — and releases the claim', async () => {
+    const state = new MemoryMailState();
+    let calls = 0;
+    // A custom sender that does not look at the signal: the guarantee must not depend on it.
+    const sender = {
+      mailbox: MAILBOX,
+      send: async () => {
+        calls += 1;
+        return { id: 'x', transport: 'custom' };
+      },
+    };
+    const handler = createMailHandler({ sender, state });
+    const message = sampleMessage({ idempotencyKey: 'drained-before-send' });
+
+    const error = await rejection(handler(abortedJob(message)));
+
+    expect(calls).toBe(0);
+    expect(error).toMatchObject({ code: 'timeout', retryable: true });
+    expect(error).not.toBeInstanceOf(PermanentJobError);
+    // The claim was released: the retry, on another worker, can take it and send.
+    expect((await state.claim(ledgerKey(MAILBOX, 'drained-before-send'), 30)).status).toBe(
+      'claimed',
+    );
+  });
+
+  it('does not start a send when the abort arrives during the wait for a slot', async () => {
+    const state = new MemoryMailState();
+    for (let i = 0; i < 5; i += 1) await state.takeSlot(MAILBOX); // the bucket is empty: the attempt must wait
+    const controller = new AbortController();
+    const sender = new MemoryEmailSender(MAILBOX);
+    const handler = createMailHandler({
+      sender,
+      state,
+      sleep: async () => {
+        controller.abort(); // SIGTERM arrives while the attempt sleeps for its slot
+        throw controller.signal.reason;
+      },
+    });
+
+    await rejection(
+      handler({
+        id: 'j',
+        data: sampleMessage({ idempotencyKey: 'drained-waiting' }),
+        attempt: 1,
+        signal: controller.signal,
+      }),
+    );
+
+    expect(sender.sent).toHaveLength(0);
+    expect((await state.claim(ledgerKey(MAILBOX, 'drained-waiting'), 30)).status).toBe('claimed');
+  });
+
+  it('is counted as a failed attempt, not as a duplicate or a success', async () => {
+    const { events, sender } = setup();
+    const handler = createMailHandler({
+      sender,
+      state: new MemoryMailState(),
+      telemetry: {
+        sent: (c) => events.push(`sent:${c}`),
+        duplicate: (c) => events.push(`duplicate:${c}`),
+        failed: (c, code) => events.push(`failed:${c}:${code}`),
+        paced: () => undefined,
+      },
+    });
+    await rejection(handler(abortedJob(sampleMessage())));
+
+    expect(events).toEqual(['failed:auth.verify-email:timeout']);
+    expect(sender.sent).toHaveLength(0);
+  });
+});
+
 describe('a payload correlation id is validated before it becomes the log context (L-2)', () => {
   it.each([
     ['5028 characters with a newline', `${'a'.repeat(5000)}\n${'b'.repeat(27)}`],

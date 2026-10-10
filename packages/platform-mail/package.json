@@ -68,6 +68,7 @@
     "@nestjs/core": "^11.0.0",
     "@quynhonsemiconductor/identity": "workspace:*",
     "@quynhonsemiconductor/observability": "workspace:^",
+    "@quynhonsemiconductor/platform-cache": "workspace:^",
     "@quynhonsemiconductor/platform-db": "workspace:^",
     "@quynhonsemiconductor/platform-jobs": "workspace:^",
     "@quynhonsemiconductor/testing": "workspace:*",

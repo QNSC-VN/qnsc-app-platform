@@ -613,6 +613,9 @@ subject, html, text, headers?, category, idempotencyKey, correlationId?`. Addres
   with the marker anyway. A service in another language keeps the same claim → call → record ledger
   wherever it keeps fast, expiring state. Losing it can cause one duplicate email, never a lost one
   (see the note in [§11](#11-cache)).
+- **Drain.** The job's abort signal ends a Graph request at every stage: before the request is sent
+  nothing is sent and the claim is released; once it is on the wire a lost acknowledgement still means a
+  second send (at-least-once, accepted).
 - **Correlation.** The worker continues the `correlationId` of the request that queued the email
   ([§7](#7-errors-and-http-behaviour)); without one the job's own `mail.send:<jobId>` applies.
 - **Telemetry.** `mail.sent`, `mail.duplicates`, `mail.failures` (labels `category`, closed `code`, plus `in_flight` for an attempt that met another attempt's claim),

@@ -220,27 +220,32 @@ describe.skipIf(!dockerOn)('platform-mail on platform-jobs and PostgreSQL', () =
   describe('priority', () => {
     it('an auth message enqueued after 50 bulk messages is sent first', async () => {
       const worker = await startWorker();
-      for (let i = 0; i < 50; i += 1) {
+      // All 51 in ONE transaction: they become visible together. The worker is already polling, and
+      // one that saw the bulk messages a moment before the auth one would (rightly) send them first,
+      // which would make this a race against the machine's speed instead of a test of the priority.
+      // Inside the transaction the auth message is still enqueued AFTER the fifty bulk ones.
+      await withTransaction(env.db, async (tx) => {
+        for (let i = 0; i < 50; i += 1) {
+          await worker.queue.enqueue(
+            sampleMessage({
+              category: 'digest.daily',
+              idempotencyKey: `bulk-${i}`,
+              subject: `bulk ${i}`,
+            }),
+            { tx },
+          );
+        }
         await worker.queue.enqueue(
           sampleMessage({
-            category: 'digest.daily',
-            idempotencyKey: `bulk-${i}`,
-            subject: `bulk ${i}`,
+            category: 'auth.reset-password',
+            idempotencyKey: 'reset-1',
+            subject: 'reset',
           }),
+          { tx },
         );
-      }
-      await worker.queue.enqueue(
-        sampleMessage({
-          category: 'auth.reset-password',
-          idempotencyKey: 'reset-1',
-          subject: 'reset',
-        }),
-      );
+      });
 
-      const rows = await jobRows(env.adminPool, MAIL_QUEUE);
-      expect(rows).toHaveLength(51);
-      expect(rows.filter((r) => r.priority === 10)).toHaveLength(1);
-
+      // (No row count here: the polling worker may already be taking them.)
       await drain(worker.jobs);
 
       expect(worker.sender.sent).toHaveLength(51);
