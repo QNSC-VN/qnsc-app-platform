@@ -1,0 +1,13 @@
+# Changelog
+
+## [0.1.1](https://github.com/quynhonsemiconductor/app-platform/compare/platform-mail-v0.1.0...platform-mail-v0.1.1) (2026-10-10)
+
+
+### ✨ Features
+
+* **platform-mail:** add the email transport package ([#172](https://github.com/quynhonsemiconductor/app-platform/issues/172)) ([23d15ba](https://github.com/quynhonsemiconductor/app-platform/commit/23d15ba829a682d96efd465af1e336ff3f393cf9))
+
+
+### 🐛 Bug Fixes
+
+* **platform-mail:** refuse test senders in production, renew the claim, back off in place ([#187](https://github.com/quynhonsemiconductor/app-platform/issues/187)) ([49f4d0f](https://github.com/quynhonsemiconductor/app-platform/commit/49f4d0f4da26fd47400d1e3d93ff52a4b0f65de0))

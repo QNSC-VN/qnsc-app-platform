@@ -1,6 +1,6 @@
 {
   "name": "@quynhonsemiconductor/observability",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Shared observability primitives for QNSC product backends: OpenTelemetry bootstrap, pino logger factory with redaction, and AsyncLocalStorage request/job context.",
   "license": "UNLICENSED",
   "main": "dist/index.js",

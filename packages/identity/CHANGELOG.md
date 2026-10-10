@@ -1,5 +1,25 @@
 # Changelog
 
+## [8.0.0](https://github.com/quynhonsemiconductor/app-platform/compare/identity-v7.1.0...identity-v8.0.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **identity:** nothing from 7.x is source-compatible. See packages/identity/MIGRATION-v7-to-v8.md.
+
+### ✨ Features
+
+* **identity:** carry the request's correlation id into auth mail ([#184](https://github.com/quynhonsemiconductor/app-platform/issues/184)) ([7537a83](https://github.com/quynhonsemiconductor/app-platform/commit/7537a838220110a9dff2231a06ac8f01a0386016))
+* **identity:** rebuild identity on Better Auth (8.0.0) ([#168](https://github.com/quynhonsemiconductor/app-platform/issues/168)) ([90d180c](https://github.com/quynhonsemiconductor/app-platform/commit/90d180cf263c228aa384f060347da2c88959e6be))
+
+
+### 🐛 Bug Fixes
+
+* **identity:** bind known-device cookies to the credential, expire them server-side, and log failed mail enqueues ([#176](https://github.com/quynhonsemiconductor/app-platform/issues/176)) ([bddcf00](https://github.com/quynhonsemiconductor/app-platform/commit/bddcf0099912711cd8615e659ccdd69923e0f6f8))
+* **identity:** charge the shared device budget only for attempts that pass, and bump the epoch on every kind of revoke ([#182](https://github.com/quynhonsemiconductor/app-platform/issues/182)) ([106a1a9](https://github.com/quynhonsemiconductor/app-platform/commit/106a1a9ff28e2758b65d18fd956b74cb4cee1d26))
+* **identity:** pin the re-issue checks and close the revoke-other-sessions race ([#185](https://github.com/quynhonsemiconductor/app-platform/issues/185)) ([251dd7a](https://github.com/quynhonsemiconductor/app-platform/commit/251dd7a1be2684a25f97ca4ca20945b9017c29c3))
+* **identity:** rely on the mail queue's retention and send auth mail with priority ([#180](https://github.com/quynhonsemiconductor/app-platform/issues/180)) ([6353f53](https://github.com/quynhonsemiconductor/app-platform/commit/6353f53a4e1e667a04b1e17746aa5e7cb07248ca))
+
 ## [7.1.0](https://github.com/quynhonsemiconductor/app-platform/compare/identity-v7.0.0...identity-v7.1.0) (2026-09-08)
 
 ### ✨ Features
