@@ -39,7 +39,16 @@ export const DEFAULTS = {
      * lingers. Alert on the dead-letter queue's depth; do not rely on this to "keep until handled".
      */
     deadLetter: 30 * DAY,
+    /** pg-boss's own default: how long a job nobody processed may wait. Explicit, so a queue converges to it. */
+    pending: 14 * DAY,
   },
+  /** Shorter than this is a typo (24 for 24 hours) that would delete jobs before anyone could fetch them. */
+  minPendingSeconds: 60,
+  /**
+   * How late pg-boss can notice that an attempt ran out of time (its monitor pass, 60 s, behind a
+   * supervise pass, 15 s): each attempt can outlive `expireInSeconds` by this much.
+   */
+  expiryDetectionSeconds: 75,
   /** Queue counts behind the depth gauge are only as fresh as this (F10). */
   superviseIntervalSeconds: 15,
   /**
@@ -95,6 +104,8 @@ export interface ResolvedQueue {
     retryBackoff: true;
     retryDelayMax: number;
     deleteAfterSeconds: number;
+    /** How long a job nobody processed may wait (pg-boss `retentionSeconds`). */
+    retentionSeconds: number;
     deadLetter: string;
   };
   /** Options for its dead-letter queue. */
@@ -105,6 +116,11 @@ export interface ResolvedQueue {
   guarded: boolean;
   /** The rule itself. In-process only: never stored, and left out of the fingerprint. */
   canRedrive?: (data: unknown) => boolean;
+  /**
+   * True only when the queue asked for `retention.pending`: those are the queues whose pending jobs a
+   * worker watches and reports; the others keep pg-boss's silent 14 days.
+   */
+  pendingWatch: boolean;
   /** The configuration as given, normalised, for comparing two definitions of one queue. */
   fingerprint: string;
 }
@@ -117,8 +133,18 @@ export interface ResolvedHandler {
 export function resolveRetention(
   queue: string,
   retention: RetentionOptions = {},
-): { deleteOnSuccess: boolean; finishedSeconds: number; deadLetterSeconds: number } {
-  const { completed, failed, deadLetter } = retention;
+): {
+  deleteOnSuccess: boolean;
+  finishedSeconds: number;
+  deadLetterSeconds: number;
+  pendingSeconds: number;
+  pendingExplicit: boolean;
+} {
+  const { completed, failed, deadLetter, pending } = retention;
+  const pendingSeconds =
+    pending === undefined
+      ? DEFAULTS.retention.pending
+      : integer(queue, 'retention.pending', pending, DEFAULTS.minPendingSeconds, 3650 * DAY);
   if (completed !== undefined && completed !== 'immediate') {
     integer(queue, 'retention.completed', completed, 1, 3650 * DAY);
   }
@@ -134,6 +160,8 @@ export function resolveRetention(
       // The rows that remain are failures; they live for `failed`.
       finishedSeconds: failed ?? DEFAULTS.retention.completed,
       deadLetterSeconds,
+      pendingSeconds,
+      pendingExplicit: pending !== undefined,
     };
   }
 
@@ -150,6 +178,8 @@ export function resolveRetention(
     finishedSeconds:
       (typeof completed === 'number' ? completed : failed) ?? DEFAULTS.retention.completed,
     deadLetterSeconds,
+    pendingSeconds,
+    pendingExplicit: pending !== undefined,
   };
 }
 
@@ -216,10 +246,27 @@ export function resolveQueue(name: string, config: QueueConfig = {}): ResolvedQu
     throw new JobsConfigError(`Queue "${name}": its dead-letter queue cannot be itself.`);
   }
 
-  const { deleteOnSuccess, finishedSeconds, deadLetterSeconds } = resolveRetention(
-    name,
-    config.retention,
-  );
+  const { deleteOnSuccess, finishedSeconds, deadLetterSeconds, pendingSeconds, pendingExplicit } =
+    resolveRetention(name, config.retention);
+
+  if (pendingExplicit) {
+    // A job is deleted at its OWN deadline, fixed when it was inserted and not extended by a retry.
+    // If the deadline is shorter than the least its retries can take, a job would be deleted while
+    // it is still being retried: refuse that, naming the numbers. This is a floor, not the exact
+    // time: it adds the lateness with which an expired attempt is noticed, once per attempt.
+    const detection = DEFAULTS.expiryDetectionSeconds;
+    const leastWindow =
+      (retryLimit + 1) * (expireInSeconds + detection) + retryLimit * retryDelayMax;
+    if (pendingSeconds < leastWindow) {
+      throw new JobsConfigError(
+        `Queue "${name}": retention.pending (${pendingSeconds} s) is shorter than the least that covers the ` +
+          `retries, (retryLimit + 1) x (expireInSeconds + ${detection}) + retryLimit x retryDelayMaxSeconds ` +
+          `= ${leastWindow} s (${detection} s is how late pg-boss can notice an attempt expired). ` +
+          'pg-boss deletes a waiting job at its own deadline, which a retry does not extend, so a job ' +
+          'would be deleted while still being retried. Raise retention.pending, or lower the retries.',
+      );
+    }
+  }
 
   if (config.canRedrive !== undefined && typeof config.canRedrive !== 'function') {
     throw new JobsConfigError(`Queue "${name}": canRedrive must be a function (data) => boolean.`);
@@ -236,6 +283,7 @@ export function resolveQueue(name: string, config: QueueConfig = {}): ResolvedQu
       retryBackoff: true,
       retryDelayMax,
       deleteAfterSeconds: finishedSeconds,
+      retentionSeconds: pendingSeconds,
       deadLetter,
     },
     deadLetterQueue: { retentionSeconds: deadLetterSeconds, deleteAfterSeconds: finishedSeconds },
@@ -243,6 +291,7 @@ export function resolveQueue(name: string, config: QueueConfig = {}): ResolvedQu
     // Whether there IS a rule is part of the definition: one process defining the queue without it
     // would redrive what another forbids. (Which function it is cannot be compared.)
     guarded: config.canRedrive !== undefined,
+    pendingWatch: pendingExplicit,
   };
   return {
     ...resolved,

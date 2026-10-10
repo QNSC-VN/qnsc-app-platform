@@ -15,7 +15,7 @@ const { callbacks, createObservableGauge } = vi.hoisted(() => {
   };
 });
 vi.mock('@quynhonsemiconductor/observability', () => ({
-  getMeter: () => ({ createObservableGauge }),
+  getMeter: () => ({ createObservableGauge, createCounter: () => ({ add() {} }) }),
   QueueMetrics: class {
     recordLag() {}
   },

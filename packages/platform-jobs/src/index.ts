@@ -21,6 +21,7 @@ export { currentCorrelationId } from './correlation';
 export { PermanentJobError } from './errors';
 export { idempotencyId } from './idempotency';
 export { OLDEST_READY_AGE_METRIC } from './metrics';
+export { PENDING_DROPPED_METRIC } from './pending';
 export type {
   HandleOptions,
   JobContext,

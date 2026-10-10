@@ -40,6 +40,33 @@ export interface RetentionOptions {
   /** Jobs that exhausted their retries stay in their queue this long. Default: follows `completed`, or 7 days. */
   failed?: number;
   /**
+   * How long a job that has not been PROCESSED may wait before it is deleted unprocessed (seconds).
+   * Default: pg-boss's 14 days. Set it for a queue whose payload must not linger: `platform-mail` sets
+   * 24 h, because an unprocessed `mail.send` job holds a bearer link in clear (ADR 0002 decision 4).
+   *
+   * Exactly what pg-boss does with it (verified by this package's tests):
+   * - Each job gets `keep_until = start_after + pending` when it is INSERTED, so a job deferred with
+   *   `startAfter` is not deleted before it is due: the window starts when it becomes due.
+   * - The deadline is the job's own, fixed at insert and COPIED on every retry: **retries do not extend
+   *   it**. A job still waiting to be retried (`retry`) when it passes is deleted, like one never
+   *   fetched (`created`).
+   * - A job being processed (`active`) is never deleted by it, however long it runs; when it then fails
+   *   into `retry` past the deadline, it is deleted. Finished jobs follow `completed`/`failed` instead.
+   * - Changing the value changes the queue for jobs inserted from then on; jobs already waiting keep
+   *   the deadline they were inserted with.
+   * - A deleted job is gone: no dead-letter copy. For a queue that sets this, a worker deletes them
+   *   when it starts and then every minute, and reports them: a warning with a count per queue (never a
+   *   payload) and the `queue.pending_dropped` counter. **The report is best effort and a LOWER BOUND**:
+   *   pg-boss's own maintenance (every 15 minutes, on any worker) deletes expired jobs silently too,
+   *   and whoever deletes first wins, so at least this many were dropped. A queue that does not set
+   *   `pending` keeps pg-boss's silent deletion.
+   * - It must cover the retries, or the queue is refused (a retry does not extend the deadline): at
+   *   least (retryLimit + 1) x (expireInSeconds + 75) + retryLimit x retryDelayMaxSeconds, where 75 s is
+   *   how late pg-boss can notice that an attempt expired.
+   * - Minimum 60 s (a typo such as 24 for 24 hours would delete jobs before anyone could fetch them).
+   */
+  pending?: number;
+  /**
    * How long a dead-letter copy waits to be handled or redriven before it is deleted.
    * Default 30 days. This is where a failure's payload and error are kept (the original row follows
    * `completed`), so it is also how long failed data lingers: keep it short for personal data.
