@@ -14,6 +14,7 @@ import {
   listPackages,
   packageMessages,
   releaseVersion,
+  tagExists,
 } from './packages.mjs';
 
 const repo = join(import.meta.dirname, '..', '..');
@@ -292,6 +293,94 @@ describe('PR title as a commit message', () => {
     // package.json is restored after packing.
     expect(JSON.parse(readFileSync(join(root, 'packages/a/package.json'), 'utf8')).version).toBe(
       '7.1.0',
+    );
+  }, 120_000);
+});
+
+describe('the release baseline: commits since the last release tag, not since the PR base', () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], {
+      cwd,
+      encoding: 'utf8',
+    });
+
+  /**
+   * main = release a-v1.0.0, then an UNRELEASED breaking change to `a` lands. A later PR (branch `pr`)
+   * touches only `b`. This is identity 8 on main followed by every other pull request.
+   */
+  function repoWithUnreleasedBreakingChange(): string {
+    const root = mkdtempSync(join(scratch, 'baseline-'));
+    git(root, 'init', '-q', '-b', 'main');
+    for (const [dir, version] of [
+      ['a', '1.0.0'],
+      ['b', '2.0.0'],
+    ] as const) {
+      mkdirSync(join(root, 'packages', dir), { recursive: true });
+      writeFileSync(
+        join(root, 'packages', dir, 'package.json'),
+        JSON.stringify({ name: `@quynhonsemiconductor/${dir}`, version, files: ['index.js'] }),
+      );
+      writeFileSync(join(root, 'packages', dir, 'index.js'), '1');
+    }
+    git(root, 'add', '.');
+    git(root, 'commit', '-q', '-m', 'chore: release');
+    git(root, 'tag', 'a-v1.0.0');
+    git(root, 'tag', 'b-v2.0.0');
+    writeFileSync(join(root, 'packages/a/index.js'), '2');
+    git(root, 'commit', '-qam', 'feat(a)!: unreleased breaking change, already on main');
+    git(root, 'checkout', '-q', '-b', 'pr');
+    writeFileSync(join(root, 'packages/b/index.js'), '2');
+    git(root, 'commit', '-qam', 'fix(b): small');
+    return root;
+  }
+
+  it('sees a breaking change that is on main but not released, though the PR never touched the package', () => {
+    const root = repoWithUnreleasedBreakingChange();
+    const messages = packageMessages(root, 'main', 'a', undefined, 'a-v1.0.0');
+    expect(messages).toEqual(['feat(a)!: unreleased breaking change, already on main']);
+    expect(releaseVersion('1.0.0', messages)).toBe('2.0.0');
+  });
+
+  it('without the tag it falls back to the PR base, which cannot see that change (the old behaviour)', () => {
+    const root = repoWithUnreleasedBreakingChange();
+    expect(packageMessages(root, 'main', 'a', undefined, 'a-v9.9.9')).toEqual([]);
+  });
+
+  it('still adds the PR title only for a package the PR touches', () => {
+    const root = repoWithUnreleasedBreakingChange();
+    expect(packageMessages(root, 'main', 'a', 'feat(b)!: x', 'a-v1.0.0')).toEqual([
+      'feat(a)!: unreleased breaking change, already on main',
+    ]);
+    expect(packageMessages(root, 'main', 'b', 'feat(b)!: x', 'b-v2.0.0')).toEqual([
+      'fix(b): small',
+      'feat(b)!: x',
+    ]);
+  });
+
+  it('tagExists is true for a tag and false for anything else', () => {
+    const root = repoWithUnreleasedBreakingChange();
+    expect(tagExists(root, 'a-v1.0.0')).toBe(true);
+    expect(tagExists(root, 'a-v0.0.1')).toBe(false);
+  });
+
+  it('pack.mjs packs the unreleased breaking package as the next major on a PR that does not touch it', () => {
+    const root = repoWithUnreleasedBreakingChange();
+    const out = join(root, 'out');
+    execFileSync(
+      'node',
+      [join(repo, 'tools/consumer-ci/pack.mjs'), '--out', out, '--bump-since', 'main'],
+      { cwd: root, encoding: 'utf8' },
+    );
+    const manifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8')) as {
+      dir: string;
+      version: string;
+    }[];
+    expect(Object.fromEntries(manifest.map((m) => [m.dir, m.version]))).toEqual({
+      a: '2.0.0',
+      b: '2.0.0',
+    });
+    expect(JSON.parse(readFileSync(join(root, 'packages/a/package.json'), 'utf8')).version).toBe(
+      '1.0.0',
     );
   }, 120_000);
 });
