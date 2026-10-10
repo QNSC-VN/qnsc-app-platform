@@ -143,7 +143,7 @@ jobs:
           if-no-files-found: error
 
   consumer:
-    name: Consumer · ${{ matrix.product }}
+    name: Consumer · ${{ matrix.product }} · pnpm ${{ matrix.pnpm }}
     needs: tarballs
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -157,12 +157,15 @@ jobs:
       matrix:
         include:
           # `pnpm` is the version each product's own CI pins. Keep it in step with them.
-          - { product: rova, pnpm: '10.33.2', unit_tests: true }
-          - { product: opshub, pnpm: '10.33.2', unit_tests: true }
+          - { product: rova, pnpm: '10.33.2', unit_tests: false }
+          - { product: rova, pnpm: '11.28.5', unit_tests: false }
+          - { product: opshub, pnpm: '10.33.2', unit_tests: false }
+          - { product: opshub, pnpm: '11.28.5', unit_tests: false }
           # solodesk's services have no unit tests, only database-backed e2e suites that need
           # Postgres and Valkey; its web apps' tests need a live backend. Typecheck is what
           # can be asserted without infrastructure.
           - { product: solodesk, pnpm: '10.23.0', unit_tests: false }
+          - { product: solodesk, pnpm: '11.28.5', unit_tests: false }
     steps:
       # Read-only App (contents: read), never the write-capable automation App in a pull-request
       # workflow. The token is used by the checkout below and is not exported to any later step;
@@ -193,7 +196,7 @@ jobs:
           name: consumer-tarballs
           path: tarballs
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@c0cc0dbf26e731b04b4470bec4d55aee148f8229
         with:
           node-version: '24'
           pnpm-version: ${{ matrix.pnpm }}
