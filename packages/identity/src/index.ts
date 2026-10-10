@@ -15,14 +15,13 @@ export {
 } from './create-identity';
 export { DEFAULTS, type Preset } from './defaults';
 export {
-  AUTH_MAIL_RETENTION,
+  AUTH_MAIL_PRIORITY,
   MAIL_QUEUE,
   type AuthEmailTemplates,
   type EmailMessage,
   type EmailSender,
   type JobEnqueue,
   type JobRegistry,
-  type JobRetention,
   type JobSendOptions,
   type RenderedEmail,
 } from './ports';

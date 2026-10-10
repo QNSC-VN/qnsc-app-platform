@@ -139,12 +139,18 @@ conformance kit uses is exported from `/testing`.
 
 Identity depends on two ports, never on the packages behind them:
 
-- **`JobEnqueue`** — `send(queue, data, { tx, idempotencyKey, retention })` (satisfied by `platform-jobs`). Auth emails
-  are **enqueued, never awaited**, on queue `mail.send`, with idempotency key `purpose:userId:sha256(token)`. The
-  sign-up verification mail joins Better Auth's own database transaction (rolled back with the user); the others
-  enqueue on their own. `retention` is `{ deleteWhenCompleted: true, keepFailedSeconds: 86400 }`: reset and
-  verification links are bearer tokens in clear in the job row, so the queue deletes completed jobs at once and
-  keeps failures at most 24 h.
+- **`JobEnqueue`** — `send(queue, data, { tx, idempotencyKey, priority })` (the real `platform-jobs` `Jobs` type is assignable
+  to it; `ports.types.test.ts` checks this at compile time). Auth emails are **enqueued, never awaited**, on queue
+  `mail.send`, with idempotency key `purpose:userId:sha256(token)` and **priority 10** (`AUTH_MAIL_PRIORITY`), so a bulk
+  digest on the same queue cannot delay a verification or reset mail. The sign-up verification mail joins Better Auth's own
+  database transaction (rolled back with the user); the others enqueue on their own.
+- **Retention is the queue's, not identity's.** Reset and verification links are bearer tokens in clear in the job row, so
+  how long a finished job is kept matters (ADR 0002, decision 4). `platform-jobs` has no per-send retention; it is
+  configured per queue, and `platform-mail` owns it for `mail.send` (`MAIL_QUEUE_CONFIG`: a completed job is deleted at
+  once, a failed or dead-lettered one is kept 24 h). That guarantee holds **only if `mail.send` is registered through
+  `platform-mail` in EVERY process that enqueues to it** (the API as well as the worker). An unregistered queue makes
+  `send` throw: it fails closed and never falls back to the library's defaults, which would keep the links for days.
+  Better Auth swallows a throwing email callback, so the sign-up still answers and the user can use "resend".
 - **`AuthEmailTemplates`** — the product renders `verifyEmail` and `resetPassword`.
 
 `EmailSender` and `EmailMessage` are exported as the **contract `platform-mail` implements** (`send(message) -> { id }`).

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  AUTH_MAIL_RETENTION,
+  AUTH_MAIL_PRIORITY,
   MAIL_QUEUE,
   type AuthEmailTemplates,
   type EmailMessage,
@@ -74,7 +74,7 @@ export class AuthMail {
     await this.jobs.send(MAIL_QUEUE, message, {
       tx: currentAuthTransaction(),
       idempotencyKey,
-      retention: AUTH_MAIL_RETENTION,
+      priority: AUTH_MAIL_PRIORITY,
     });
   }
 }

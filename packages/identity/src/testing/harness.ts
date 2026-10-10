@@ -46,6 +46,8 @@ export interface StackOptions {
   allowOrganizationCreation?: boolean;
   /** Point the app at a cache that is not there (an outage). The kit's own checks still use the real Valkey. */
   appValkeyUrl?: string;
+  /** Queues the job stand-in accepts (as `platform-jobs` accepts only defined ones). Default: all. */
+  registeredQueues?: string[];
 }
 
 export interface Stack {
@@ -107,7 +109,10 @@ export async function startStack(
   }
 
   const raw = new Redis(valkey.url);
-  const jobs = new TestJobs(db);
+  const jobs = new TestJobs(
+    db,
+    options.registeredQueues ? new Set(options.registeredQueues) : undefined,
+  );
   const events: SecurityEvent[] = [];
   const logs: Stack['logs'] = [];
   const env: NodeJS.ProcessEnv = {

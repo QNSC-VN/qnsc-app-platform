@@ -267,6 +267,14 @@ each one.
 4. **Bearer links in job payloads (follow-up 3).** Reset and verification links are bearer tokens in
    clear in the `mail.send` job row. `mail.send` deletes completed jobs immediately and keeps failed or
    dead-lettered jobs at most 24 hours; reset tokens stay at 15 minutes. No payload encryption.
+
+   > **Implementation note (2026-10-10; the decision above is unchanged).** The first implementation passed
+   > `retention` on every `send`. `platform-jobs` has no per-send retention, so it was silently ignored.
+   > Retention is per QUEUE and owned by `platform-mail` (`MAIL_QUEUE_CONFIG`: completed deleted at once,
+   > failed or dead-lettered kept 24 h). The guarantee therefore depends on `mail.send` being registered through
+   > `platform-mail` in every process that enqueues to it; an unregistered queue makes `send` fail closed and
+   > never falls back to defaults. Identity only sends auth mail with priority 10, so bulk mail cannot delay it.
+
 5. **IdP registration (D15 `providersLimit`).** Default deny: only an organisation owner/admin can
    register an SSO provider, and only for a verified domain.
 6. D7 (`timestamptz`, `/readyz` check) and D10 (timing pad) are decided by the WP-10 author and recorded

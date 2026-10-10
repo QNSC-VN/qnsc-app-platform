@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { purgeUnverifiedAccounts } from '../create-identity';
 import { registerIdentityJobs } from '../jobs';
 import { purgeUnverifiedAccounts as rootPurge } from '../index';
-import { AUTH_MAIL_RETENTION, MAIL_QUEUE } from '../ports';
+import { AUTH_MAIL_PRIORITY, MAIL_QUEUE } from '../ports';
 import { DEFAULTS } from '../defaults';
 import { mailIdempotencyKey } from '../mail-port';
 import { verifiedUser } from './flows';
@@ -349,18 +349,38 @@ export function decisionsConformance(t: TestApi, infra: ConformanceInfra): void 
     });
     afterAll(() => stack?.stop());
 
-    it('every auth mail asks the queue to delete on completion and keep failures at most 24 h', async () => {
-      expect(AUTH_MAIL_RETENTION).toEqual({ deleteWhenCompleted: true, keepFailedSeconds: 86400 });
-      await verifiedUser(stack, uniqueEmail('ret'), strongPassword(), expect);
-      const { rows } = await stack.pool.query<{
-        retention: unknown;
-        idempotency_key: string;
-        data: { text: string };
-      }>(`select retention, idempotency_key, data from identity_test_jobs where queue = $1`, [
-        MAIL_QUEUE,
-      ]);
+    it('auth mail is enqueued with priority 10 and WITHOUT any per-send retention (retention belongs to the queue)', async () => {
+      await verifiedUser(stack, uniqueEmail('prio'), strongPassword(), expect);
+      await stack
+        .client()
+        .post(`${API}/request-password-reset`, { email: uniqueEmail('x'), redirectTo: '/r' });
+      const { rows } = await stack.pool.query<{ options: Record<string, unknown>; queue: string }>(
+        `select options, queue from identity_test_jobs`,
+      );
       expect(rows.length).toBeGreaterThan(0);
-      for (const row of rows) expect(row.retention).toEqual(AUTH_MAIL_RETENTION);
+      for (const row of rows) {
+        expect(row.queue).toBe(MAIL_QUEUE);
+        // exactly the options platform-jobs understands; `retention` is not one of them and would be ignored
+        expect(Object.keys(row.options).sort()).toEqual(['idempotencyKey', 'priority']);
+        expect(row.options['priority']).toBe(AUTH_MAIL_PRIORITY);
+      }
+      expect(AUTH_MAIL_PRIORITY).toBe(10);
+    });
+
+    it('fails closed: with mail.send not registered in the process, nothing is enqueued and nothing falls back to another queue', async () => {
+      const unregistered = await startStack(infra, { registeredQueues: ['some.other.queue'] });
+      try {
+        const email = uniqueEmail('closed');
+        // Better Auth swallows a throwing callback (WP-9 D6): the request still answers, but no link exists anywhere.
+        const res = await unregistered
+          .client()
+          .post(`${API}/sign-up/email`, { email, password: strongPassword(), name: 'x' });
+        expect(res.status).toBe(200);
+        const { rows } = await unregistered.pool.query(`select 1 from identity_test_jobs`);
+        expect(rows).toHaveLength(0);
+      } finally {
+        await unregistered.stop();
+      }
     });
 
     it('the idempotency key is purpose:user:sha256(token) and never contains the token', async () => {
@@ -701,7 +721,7 @@ export function decisionsConformance(t: TestApi, infra: ConformanceInfra): void 
           [uniqueEmail('stale')],
         );
         const scheduled: Array<{ name: string; cron: string; tz?: string }> = [];
-        let handler: ((data: unknown) => Promise<void>) | undefined;
+        let handler: ((job: { data: unknown }) => Promise<void>) | undefined;
         await registerIdentityJobs(
           {
             schedule: (name, cron, _data, options) => {
@@ -716,7 +736,7 @@ export function decisionsConformance(t: TestApi, infra: ConformanceInfra): void 
         expect(scheduled).toEqual([
           { name: 'identity.purge-unverified', cron: '0 * * * *', tz: 'Asia/Ho_Chi_Minh' },
         ]);
-        await handler!({});
+        await handler!({ data: {} });
         const gone = await stack.pool.query(`select 1 from identity."user" where id = $1`, [
           stale.rows[0]!.id,
         ]);
