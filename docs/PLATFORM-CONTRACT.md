@@ -200,30 +200,35 @@ Names are a contract with the `qnsc-service` chart. **A rename on either side is
 change the chart and the package in the same release window. Unset means "use the default"; a
 required variable that is missing is a **startup error that names the variable**.
 
-| Group      | Variable                                                                                        | Default                  | Notes                                                                                                                                                                                                                        |
-| ---------- | ----------------------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Database   | `DATABASE_HOST`                                                                                 | — (required)             | CloudNativePG `<cluster>-rw` service                                                                                                                                                                                         |
-|            | `DATABASE_PORT`                                                                                 | `5432`                   |                                                                                                                                                                                                                              |
-|            | `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`                                           | — (required)             | user and password from the CNPG-generated Secret                                                                                                                                                                             |
-|            | `DATABASE_AUTH`                                                                                 | `password`               | only `password`; anything else (`iam`) is refused                                                                                                                                                                            |
-|            | `DATABASE_SSL_CA`                                                                               | — (required¹)            | **path** of the mounted CA file (`ca.crt` of the `<cluster>-ca` Secret)                                                                                                                                                      |
-|            | `DATABASE_SSL`                                                                                  | —                        | only `disable`, and only when `NODE_ENV` is not `production`                                                                                                                                                                 |
-|            | `DATABASE_READ_HOST`                                                                            | —                        | CNPG `-ro` service; unset until a replica exists                                                                                                                                                                             |
-|            | `DB_POOL_MAX`                                                                                   | `10`                     | keep `replicas × DB_POOL_MAX` under the role's `CONNECTION LIMIT`                                                                                                                                                            |
-|            | `DB_POOL_IDLE_TIMEOUT_MS`, `DB_POOL_CONNECT_TIMEOUT_MS`                                         | `30000`, `5000`          |                                                                                                                                                                                                                              |
-| Cache      | `REDIS_URL`                                                                                     | —                        | The product's Valkey. The name rova and opshub already read and the chart injects (decided 2026-10-10, Q1). **No package reads it**: the product reads it and passes the value to `CacheModule`. Required in `required` mode |
-| HTTP       | `RATE_LIMIT_MODE`                                                                               | `cache`                  | `cache` \| `edge-only` \| `disabled` ([§9](#9-rate-limiting-and-idempotency)). Unknown value = startup error                                                                                                                 |
-|            | `IDEMPOTENCY_MODE`                                                                              | `cache`                  | `cache` \| `disabled`                                                                                                                                                                                                        |
-|            | `CORRELATION_ID_MODE`                                                                           | `enabled`                | `enabled` \| `disabled` ([§7](#7-errors-and-http-behaviour)). `disabled` for a deployment whose product still seeds the correlation id itself. Unknown value = startup error                                                 |
-|            | `DISABLE_RATE_LIMIT`                                                                            | —                        | **deprecated** alias of `RATE_LIMIT_MODE=disabled`; ignored when `RATE_LIMIT_MODE` is set                                                                                                                                    |
-| Lifecycle  | `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_ENDPOINT_DELAY_MS`                                             | `25000`, `5000` in a pod | [§3](#3-shutdown)                                                                                                                                                                                                            |
-|            | `ROLE`                                                                                          | —                        | `worker` runs handlers and schedules; anything else only enqueues                                                                                                                                                            |
-|            | `NODE_ENV`                                                                                      | `development`            | `production` turns the production guards on                                                                                                                                                                                  |
-| Telemetry  | `OTEL_*`, `SERVICE_VERSION`, `DEPLOYMENT_ENV`, `K8S_POD_NAME`, `K8S_NAMESPACE`, `K8S_NODE_NAME` |                          | [§5](#5-telemetry)                                                                                                                                                                                                           |
-| Kubernetes | `KUBERNETES_SERVICE_HOST`                                                                       | set by the kubelet       | how a process knows it is in a pod                                                                                                                                                                                           |
-| Mail       | `MAIL_TRANSPORT`, `MAIL_GRAPH_SENDER`, …                                                        |                          | **Pending WP-8** — [§14](#14-email)                                                                                                                                                                                          |
-| Storage    | `S3_*`                                                                                          |                          | Product-owned (R2 through the S3 API) with per-product names (`S3_ATTACHMENTS_BUCKET`, …). **Not part of the contract until WP-17** (decided 2026-10-10, Q4)                                                                 |
-| AI         | `LITELLM_BASE_URL`, `LITELLM_API_KEY`                                                           | —                        | [§15](#15-ai)                                                                                                                                                                                                                |
+| Group      | Variable                                                                                        | Default                                       | Notes                                                                                                                                                                                                                        |
+| ---------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Database   | `DATABASE_HOST`                                                                                 | — (required)                                  | CloudNativePG `<cluster>-rw` service                                                                                                                                                                                         |
+|            | `DATABASE_PORT`                                                                                 | `5432`                                        |                                                                                                                                                                                                                              |
+|            | `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`                                           | — (required)                                  | user and password from the CNPG-generated Secret                                                                                                                                                                             |
+|            | `DATABASE_AUTH`                                                                                 | `password`                                    | only `password`; anything else (`iam`) is refused                                                                                                                                                                            |
+|            | `DATABASE_SSL_CA`                                                                               | — (required¹)                                 | **path** of the mounted CA file (`ca.crt` of the `<cluster>-ca` Secret)                                                                                                                                                      |
+|            | `DATABASE_SSL`                                                                                  | —                                             | only `disable`, and only when `NODE_ENV` is not `production`                                                                                                                                                                 |
+|            | `DATABASE_READ_HOST`                                                                            | —                                             | CNPG `-ro` service; unset until a replica exists                                                                                                                                                                             |
+|            | `DB_POOL_MAX`                                                                                   | `10`                                          | keep `replicas × DB_POOL_MAX` under the role's `CONNECTION LIMIT`                                                                                                                                                            |
+|            | `DB_POOL_IDLE_TIMEOUT_MS`, `DB_POOL_CONNECT_TIMEOUT_MS`                                         | `30000`, `5000`                               |                                                                                                                                                                                                                              |
+| Cache      | `REDIS_URL`                                                                                     | —                                             | The product's Valkey. The name rova and opshub already read and the chart injects (decided 2026-10-10, Q1). **No package reads it**: the product reads it and passes the value to `CacheModule`. Required in `required` mode |
+| HTTP       | `RATE_LIMIT_MODE`                                                                               | `cache`                                       | `cache` \| `edge-only` \| `disabled` ([§9](#9-rate-limiting-and-idempotency)). Unknown value = startup error                                                                                                                 |
+|            | `IDEMPOTENCY_MODE`                                                                              | `cache`                                       | `cache` \| `disabled`                                                                                                                                                                                                        |
+|            | `CORRELATION_ID_MODE`                                                                           | `enabled`                                     | `enabled` \| `disabled` ([§7](#7-errors-and-http-behaviour)). `disabled` for a deployment whose product still seeds the correlation id itself. Unknown value = startup error                                                 |
+|            | `DISABLE_RATE_LIMIT`                                                                            | —                                             | **deprecated** alias of `RATE_LIMIT_MODE=disabled`; ignored when `RATE_LIMIT_MODE` is set                                                                                                                                    |
+| Lifecycle  | `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_ENDPOINT_DELAY_MS`                                             | `25000`, `5000` in a pod                      | [§3](#3-shutdown)                                                                                                                                                                                                            |
+|            | `ROLE`                                                                                          | —                                             | `worker` runs handlers and schedules; anything else only enqueues                                                                                                                                                            |
+|            | `NODE_ENV`                                                                                      | `development`                                 | `production` turns the production guards on                                                                                                                                                                                  |
+| Telemetry  | `OTEL_*`, `SERVICE_VERSION`, `DEPLOYMENT_ENV`, `K8S_POD_NAME`, `K8S_NAMESPACE`, `K8S_NODE_NAME` |                                               | [§5](#5-telemetry)                                                                                                                                                                                                           |
+| Kubernetes | `KUBERNETES_SERVICE_HOST`                                                                       | set by the kubelet                            | how a process knows it is in a pod                                                                                                                                                                                           |
+| Mail       | `MAIL_TRANSPORT`                                                                                |                                               | `graph` \| `smtp`. **Required** (no default); `smtp` is refused when `NODE_ENV=production` ([§14](#14-email))                                                                                                                |
+|            | `MAIL_GRAPH_SENDER`                                                                             | — (required for `graph`)                      | the product's shared mailbox, a plain address                                                                                                                                                                                |
+|            | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`                                                            | — (required for `graph`)                      | the tenant and the product's **own** Entra app (its login app)                                                                                                                                                               |
+|            | `AZURE_FEDERATED_TOKEN_FILE`                                                                    | —                                             | path of the projected ServiceAccount token: workload identity federation, no stored secret. Wins over a client secret whenever it is set                                                                                     |
+|            | `AZURE_CLIENT_SECRET`                                                                           | —                                             | local testing only; **refused when `NODE_ENV=production`**                                                                                                                                                                   |
+|            | `MAIL_SMTP_HOST`, `MAIL_SMTP_PORT`, `MAIL_SMTP_FROM`                                            | `localhost`, `1025`, `noreply@localhost.test` | `smtp` only (Mailpit); non-production                                                                                                                                                                                        |
+| Storage    | `S3_*`                                                                                          |                                               | Product-owned (R2 through the S3 API) with per-product names (`S3_ATTACHMENTS_BUCKET`, …). **Not part of the contract until WP-17** (decided 2026-10-10, Q4)                                                                 |
+| AI         | `LITELLM_BASE_URL`, `LITELLM_API_KEY`                                                           | —                                             | [§15](#15-ai)                                                                                                                                                                                                                |
 
 ¹ Not needed when `DATABASE_SSL=disable`.
 
@@ -407,6 +412,11 @@ rate-limit state are never shared across products. Keys carry a per-product pref
 - The client connects eagerly and auto-pipelines commands issued in the same tick.
 - **The cache is never the source of truth.** Anything in it can be lost; the database is authoritative.
   Cache invalidation is synchronous after commit and best-effort, with a TTL as the backstop.
+  - _One deliberate exception in kind, not in rule:_ `platform-mail`'s **send ledger and pacing state**
+    live here ([§14](#14-email)). They are a **guard**, not a record: if they are lost the worst case is
+    one duplicate email, never a lost one, and the database still holds the job. They are not in the
+    database because the alternative, `jobs.once`, would hold a transaction open across the call to the
+    mail provider ([§13](#13-async-work) rule 2).
 - **Locks** are `SET NX PX` with an expiry, so a crashed holder cannot deadlock a job.
 - The client is released **after** work that uses it has stopped ([§3](#3-shutdown)).
 - Pub/sub is for ephemeral realtime signals only ([§13](#13-async-work)).
@@ -555,15 +565,55 @@ Applications**; no tenant-wide `Mail.Send`.
 - Templates and rendering are the product's. The platform receives finished HTML and text.
 - No bounce or complaint processing yet; non-delivery reports land in each product mailbox.
 
-### Pending WP-8 — `platform-mail`
+### `platform-mail` (WP-8)
 
-Not yet released. Decided: an `EmailSender` contract (`send(message) → result`, message =
-`to, cc?, bcc?, from?, replyTo?, subject, html, text, headers?, category, idempotencyKey`), the `graph`
-and `smtp` transports, a `mail.send` queue handler on `platform-jobs`, and an in-memory sender plus a
-conformance suite at `/testing`. Env names (`MAIL_TRANSPORT`, `MAIL_GRAPH_SENDER`, workload-identity
-federation for the pod's service account, no stored secret) are fixed when the package lands; this
-section is updated from the merged code, not from the plan. The manual check — one product's mailbox
-succeeds and another product's mailbox returns `403` — is run by the owner with real credentials.
+Implemented by `@quynhonsemiconductor/platform-mail` (0.1.x, not yet released); its README is the
+detail, this is the behaviour a service in any language must match.
+
+- **Contract.** `send(message) → { id, transport }`, with `message` = `to, cc?, bcc?, replyTo?, from?,
+subject, html, text, headers?, category, idempotencyKey, correlationId?`. Addresses are bare
+  `local@domain` (no display names, no control characters); at most 500 recipients; `from` is the
+  configured mailbox or omitted; `headers` are `x-` only and never `X-MS-Exchange-*` or
+  `X-Microsoft-*`; `category` is lower-case words (`auth.verify-email`) because it is a metric label;
+  `correlationId` follows [§7](#7-errors-and-http-behaviour). A message is validated before any
+  network call or database write; an error never contains the subject, a recipient, the body or a
+  credential.
+- **`graph`.** `POST /users/{MAIL_GRAPH_SENDER}/sendMail`, `saveToSentItems: false`, an app-only token
+  from workload identity federation (`AZURE_FEDERATED_TOKEN_FILE`); a client secret is refused in
+  production. Graph's JSON body carries one part, so the **HTML is sent and the plain-text
+  alternative is not**. Inside one send, `429`, `502`, `503` and `504` — responses on which Graph did
+  not accept the message — are retried up to 3 attempts, honouring `Retry-After` up to 30 s, else
+  backoff with jitter. A timeout or a `500` is not retried in place: the message may have been
+  accepted.
+- **The `mail.send` queue.** One definition (`MAIL_QUEUE_CONFIG`) used by the worker and by every
+  process that only enqueues: completed jobs deleted at once, failed and dead-lettered kept at most
+  24 h (the payload carries bearer links), a 300 s lease with a 30 s heartbeat, **10 retries from 10 s
+  doubling to 15 min — at least an hour in the worst case** — so a ten-minute cache outage or sustained
+  throttling does not dead-letter a password reset. **Priority:** `auth.*` messages are 10, everything
+  else 0, and bulk mail stays at 0. A failure retrying cannot fix (HTTP 400, 403, 404, 413, an invalid
+  message) is a `PermanentJobError`: dead-lettered at once, no retries.
+- **Pacing.** About **20 messages a minute per sender mailbox** (a bucket of 20 a minute with a burst
+  of 5, so at most 25 in any minute, under Exchange's ~30), shared by every worker. A `429` starts a
+  **mailbox-wide cooldown** for its `Retry-After` (60 s if none, at most 10 min) that every worker
+  honours before sending. `Retry-After` does not reschedule the job.
+- **Idempotency.** The handler claims a ledger entry for the message (the sender mailbox and a hash of
+  `idempotencyKey`) **before** it sends, records the delivery after, and releases the claim on
+  failure: a duplicate key is one email, whether the message was enqueued twice, the job was delivered
+  twice or two workers raced. It is at-least-once, not exactly-once: Graph has no idempotency key, so
+  a lost acknowledgement can send a message twice, which is the chosen failure for authentication
+  mail (a duplicate over a lost link).
+- **The ledger is in the product's Valkey, not in `jobs.once`.** `once()` runs its effect inside a
+  database transaction and holds it, and the row lock, for as long as the effect runs; an HTTP call to
+  Graph there is exactly what [§13](#13-async-work) rule 2 forbids, and it could not be made atomic
+  with the marker anyway. A service in another language keeps the same claim → call → record ledger
+  wherever it keeps fast, expiring state. Losing it can cause one duplicate email, never a lost one
+  (see the note in [§11](#11-cache)).
+- **Correlation.** The worker continues the `correlationId` of the request that queued the email
+  ([§7](#7-errors-and-http-behaviour)); without one the job's own `mail.send:<jobId>` applies.
+- **Telemetry.** `mail.sent`, `mail.duplicates`, `mail.failures` (labels `category`, closed `code`),
+  `mail.pacing_wait_ms`. Log lines carry the category and the error code, never an address.
+- The manual check — one product's mailbox succeeds and another product's mailbox returns `403` — is
+  run by the owner with real credentials ([package README](../packages/platform-mail/README.md)).
 
 ## 15. AI
 

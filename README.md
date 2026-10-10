@@ -22,6 +22,7 @@ product's `libs/`.
 | [`@quynhonsemiconductor/platform-runtime`](packages/platform-runtime) | `.env` loading (subpath, pre-OTel), env validation + typed config, leader-elected scheduled jobs, request-arrival timing                                                                                                                              | `platform-runtime-v*` |
 | [`@quynhonsemiconductor/platform-db`](packages/platform-db)           | PostgreSQL connection layer: password auth from the CloudNativePG secret, TLS verified against the cluster CA, pool, readiness ping, advisory lock, `DbExecutor` + `withTransaction`. Drizzle at `/drizzle`, NestJS at `/nest`                        | `platform-db-v*`      |
 | [`@quynhonsemiconductor/platform-jobs`](packages/platform-jobs)       | Durable jobs on Postgres + pg-boss: transactional enqueue through `DbExecutor`, worker-only handlers (`ROLE=worker`), schedules, per-queue retention, graceful stop. NestJS at `/nest`, test helpers at `/testing`. Products never import `pg-boss`   | `platform-jobs-v*`    |
+| [`@quynhonsemiconductor/platform-mail`](packages/platform-mail)       | Email transport: `EmailSender` contract, Microsoft Graph (one mailbox per product), non-production SMTP, rate-limited idempotent `mail.send` handler. NestJS at `/nest`                                                                               | `platform-mail-v*`    |
 
 Each package is versioned and released **independently** via release-please
 (Conventional Commits), mirroring the per-module tag model of `tf-modules`.
@@ -146,6 +147,7 @@ packages/
   platform-db/       @quynhonsemiconductor/platform-db
   platform-jobs/     @quynhonsemiconductor/platform-jobs
   platform-http/     @quynhonsemiconductor/platform-http
+  platform-mail/     @quynhonsemiconductor/platform-mail
   platform-runtime/  @quynhonsemiconductor/platform-runtime
   testing/           @quynhonsemiconductor/testing   (private, never published)
 tools/

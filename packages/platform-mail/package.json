@@ -1,0 +1,85 @@
+{
+  "name": "@quynhonsemiconductor/platform-mail",
+  "version": "0.1.0",
+  "description": "Email transport for QNSC product backends: the EmailSender contract, Microsoft Graph (one mailbox per product) and a non-production SMTP transport, and a rate-limited, idempotent mail.send job handler. NestJS at /nest, test doubles and a conformance suite at /testing.",
+  "license": "UNLICENSED",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./nest": {
+      "types": "./dist/nest/index.d.ts",
+      "default": "./dist/nest/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "nest.js",
+    "nest.d.ts",
+    "testing.js",
+    "testing.d.ts"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quynhonsemiconductor/app-platform.git",
+    "directory": "packages/platform-mail"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "peerDependencies": {
+    "@azure/identity": ">=4.4",
+    "@nestjs/common": ">=11",
+    "@nestjs/core": ">=11",
+    "@quynhonsemiconductor/observability": ">=0.2.0",
+    "@quynhonsemiconductor/platform-jobs": ">=0.1.0",
+    "nodemailer": ">=6.9"
+  },
+  "peerDependenciesMeta": {
+    "@azure/identity": {
+      "optional": true
+    },
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@nestjs/core": {
+      "optional": true
+    },
+    "nodemailer": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@azure/identity": "4.13.3",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@quynhonsemiconductor/identity": "workspace:*",
+    "@quynhonsemiconductor/observability": "workspace:^",
+    "@quynhonsemiconductor/platform-db": "workspace:^",
+    "@quynhonsemiconductor/platform-jobs": "workspace:^",
+    "@quynhonsemiconductor/testing": "workspace:*",
+    "@types/mailparser": "3.9.0",
+    "@types/nodemailer": "8.0.2",
+    "@types/pg": "8.23.1",
+    "drizzle-orm": "0.45.3",
+    "ioredis": "5.11.1",
+    "mailparser": "3.9.37",
+    "nodemailer": "10.0.16",
+    "pg": "8.23.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  }
+}

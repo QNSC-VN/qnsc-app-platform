@@ -306,6 +306,46 @@ Also decided:
   `queue.lag_seconds` = age of the oldest ready job) through `observability`'s `QueueMetrics`, with
   pg-boss's own `pgboss.*` instruments and `pgboss.queue.oldest_ready_age` as extras.
 
+## Amendment 2026-10-10 (WP-8 `platform-mail`; its author)
+
+Written by the author of `platform-mail` against `platform-jobs` as merged. It records what the mail
+queue decided and why, and amends nothing above: decision 3's handler-side guard is implemented here
+the way the Amendment of WP-7 (`jobs.once` must never hold an external call) already points.
+
+1. **The `mail.send` send ledger is in Valkey, not behind `jobs.once`.** `once(db, key, effect)` runs
+   its effect inside a database transaction (a savepoint of the caller's) and keeps that transaction
+   and the marker's row lock for as long as the effect runs. The effect here is an HTTP request to
+   Microsoft Graph, which PLAN §4.3 forbids inside an open transaction, and no transaction can make an
+   external call atomic with a marker. The handler therefore keeps a **claim ledger**: claim (atomic
+   `SET`-if-absent with a lease) → send → record (7 days) → release on failure. It lives in the
+   product's own Valkey, keyed by the sender mailbox and a hash of the idempotency key
+   (`purpose:userId:sha256(token)` from identity), and adds no table to the product's database (P6).
+   It is a guard, not a record: losing it can cost one duplicate email, never a lost one. This is why
+   PLATFORM-CONTRACT §11 ("the cache is never the source of truth") carries a note for it.
+2. **Delivery is at-least-once, with duplicates preferred to losses.** Graph has no idempotency key, so
+   a message accepted by Graph whose acknowledgement is lost is sent again by the retry. The ledger
+   narrows that to the moment between Graph's `202` and the ledger write. A failed ledger write after a
+   successful send is logged, not thrown.
+3. **One queue definition.** `MAIL_QUEUE_CONFIG` is used by the worker (`handle`) and by every process
+   that only enqueues (`defineQueue`), so identity's API pods create `mail.send` exactly as the worker
+   does; `platform-jobs` throws if they differ. Retention is `{ completed: 'immediate', failed: 86400,
+deadLetter: 86400 }`, the lease is `expireInSeconds` (300) with an explicit 30 s heartbeat, and the
+   ledger claim is held for `expireInSeconds + 30`.
+4. **The retry window is at least an hour.** `retryLimit` 10, `retryDelaySeconds` 10,
+   `retryDelayMaxSeconds` 900. pg-boss waits `min(max, delay × 2ⁿ × (1 + random))`; with `random` at 0
+   the ten waits sum to 66 minutes (10, 20, 40, 80, 160, 320, 640, then 900 three times). A ten-minute
+   Valkey outage, a killed worker whose stale claim has to expire, or sustained throttling must not
+   dead-letter a password reset.
+5. **Permanent failures dead-letter at once** (`PermanentJobError`): HTTP 400, 403, 404, 413 and an
+   invalid payload. Everything else is retried. `retryAfterSeconds` from a `429` does not reschedule
+   the job; it starts a **mailbox-wide cooldown** in the shared state that every worker honours before
+   sending.
+6. **Priority by category.** `auth.*` messages are enqueued with priority 10, everything else 0, so a
+   bulk run cannot delay a verification link. Bulk mail must stay at 0.
+7. **Registration.** In NestJS the handler is a provider with `@JobHandler(MAIL_QUEUE, …)`, which
+   `JobsModule` registers before it starts pg-boss. In the core, the order of `registerMailJobs` against
+   `jobs.start()` does not matter (`platform-jobs` starts a handler registered after `start()` at once).
+
 ## Alternatives considered
 
 | Option                                                  | Why it was not chosen                                                                                                                                                                                   |
