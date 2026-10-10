@@ -159,13 +159,23 @@ dead on its next read (`get-session`, `list-sessions`, the guard) whatever expir
 was issued on the public lifetime and whose owner is staff _now_. A user **becomes staff** when a Microsoft account is
 linked or when their email moves onto `staff.domains`; at that moment the sessions they hold that are not staff-shaped
 (a stored expiry beyond `createdAt + 12 h`) are revoked, so they sign in again as staff, and their capped sessions are
-left alone. The staff test costs nothing in a session's first 12 h or for a staff-domain email; for anyone else it is one
+left alone. **The same limit applies to that revocation**: it runs inside the request that linked the account or moved the
+email, so it cannot refuse; if the cache is degraded at that moment (the signal is `onStorageDegraded`) the rows go from
+Postgres but the cached copies stay, and come back when Valkey recovers. They are still staff sessions on a public
+lifetime, so the read-time cap ends them within 12 h of their creation (`revokeAllSessions` cannot reach them: their rows are
+already gone, so flush the product's cache keys for the user if that window matters); alert on `onStorageDegraded` if it
+does. `list-sessions` and the admin's
+`list-user-sessions` do not list a staff session past its cap as active. The staff test costs nothing in a session's first 12 h or for a staff-domain email; for anyone else it is one
 `account` lookup, remembered per process for 30 s.
 
 **Changing the presets of a running system** (adding `staff`, or moving from `public + staff` to `staff` only) does not
 end the sessions issued under the old policy by itself. Staff ones end within 12 h of their creation; to end every session
 now, call `revokeAllSessions(auth)` once at deploy. It deletes them in Postgres and in Valkey, returns how many it ended,
-and everyone signs in again:
+and everyone signs in again. **It refuses to run while the cache is unavailable** (it throws `SessionStoreUnavailableError`
+before deleting anything) and stops, leaving the rows for a re-run, if the cache fails during the run: sessions are served
+from Valkey first, Valkey's deletes are silent no-ops while it is down (`onStorageDegraded` fires), so rows deleted from
+Postgres alone would leave cached sessions that come back to life when Valkey recovers. Run it again when the cache is
+healthy; what it already revoked stays revoked:
 
 ```ts
 import { createIdentity, revokeAllSessions } from '@quynhonsemiconductor/identity';

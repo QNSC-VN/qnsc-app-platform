@@ -114,6 +114,11 @@ interface SessionAdapter {
     user: { id?: unknown; email: string };
   } | null>;
   findAccounts(userId: string): Promise<Array<{ providerId: string }>>;
+  findUserById(userId: string): Promise<{ id?: unknown; email: string } | null>;
+  listSessions(
+    userId: string,
+    options?: unknown,
+  ): Promise<Array<{ createdAt: Date | string; expiresAt: Date | string }>>;
 }
 
 /** How long "is this user staff?" is remembered per process, and for how many users. */
@@ -216,6 +221,20 @@ export function staffRefreshGuard(
       // request state to set, and setting it throws.
       if (await hasRequestState()) await setShouldSkipSessionRefresh(true);
       return found;
+    };
+
+    // `list-sessions` and the admin's `list-user-sessions` list from the store, which knows the stored
+    // expiry and not the cap: a staff sibling past its cap would be listed as an active session
+    // (and offered for revocation as one). It is dead, so it is not listed.
+    const list = adapter.listSessions.bind(adapter);
+    adapter.listSessions = async (userId, options) => {
+      const sessions = await list(userId, options);
+      const pastCap = (s: { createdAt: Date | string }) =>
+        new Date(s.createdAt).getTime() + capMs < Date.now();
+      if (!sessions.some(pastCap)) return sessions; // nothing old enough to be wrong: no lookup
+      const user = await adapter.findUserById(userId);
+      if (!user || !(await classifier.classify(adapter, { ...user, id: userId }))) return sessions;
+      return sessions.filter((s) => !pastCap(s));
     };
   }
 

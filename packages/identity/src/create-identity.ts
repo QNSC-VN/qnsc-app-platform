@@ -112,6 +112,9 @@ const internals = new WeakMap<
   {
     getContext: () => Promise<AccountContext>;
     sink: SecurityEventSink;
+    cache: CacheService;
+    /** How many times the session store (Valkey) has failed so far; see `revokeAllSessions`. */
+    degradedCount: () => number;
   }
 >();
 
@@ -151,7 +154,11 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
     allowLocalNetwork: internal.unsafeTestNetwork === true,
   };
   const staffDomains = o.staff?.domains ?? [];
-  const storage = valkeySecondaryStorage(o.cache, o.onStorageDegraded);
+  let degraded = 0;
+  const storage = valkeySecondaryStorage(o.cache, (operation, error) => {
+    degraded += 1;
+    o.onStorageDegraded?.(operation, error);
+  });
   const mail = new AuthMail(
     o.mail.jobs,
     o.mail.templates,
@@ -318,7 +325,7 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
     withCallbackErrorCodes(withTimingFloor(auth.handler, AUTH_BASE_PATH)),
     o.logger ?? consoleLogger,
   );
-  internals.set(auth, { getContext, sink });
+  internals.set(auth, { getContext, sink, cache: o.cache, degradedCount: () => degraded });
   return auth;
 }
 
@@ -338,17 +345,39 @@ export function purgeUnverifiedAccounts(
 }
 
 /**
+ * The session store (Valkey) cannot be written, so sessions cannot be revoked completely.
+ *
+ * Sessions are served from Valkey FIRST and from Postgres only when Valkey has no copy. While Valkey
+ * is down, its deletes are silent no-ops (the storage degrades, `onStorageDegraded` fires): rows deleted
+ * from Postgres would leave the cached copies behind, and they would come back to life when Valkey
+ * recovers. So nothing is revoked until the store can take the deletes.
+ */
+export class SessionStoreUnavailableError extends Error {
+  override readonly name = 'SessionStoreUnavailableError';
+}
+
+/**
  * Revoke EVERY session of every user, in the database and in the cache. Call it when the session
  * policy of a running system changes: adding the `staff` preset, or moving from `public + staff` to
  * `staff` only. Sessions issued under the old policy would otherwise live on the old lifetime;
  * the read-time cap ends staff ones within 12 h of their creation, this ends them now. Everyone
  * signs in again. Returns how many sessions were revoked. Safe to re-run.
+ *
+ * **Refuses to run while the cache is unavailable** (throws {@link SessionStoreUnavailableError}
+ * before deleting anything), and stops, without touching the database for that batch, if the cache
+ * fails during the run. Re-run it when the cache is healthy: what it already revoked stays revoked.
  */
 export async function revokeAllSessions(auth: Identity): Promise<number> {
   const internal = internals.get(auth);
   if (!internal)
     throw new Error('identity: revokeAllSessions needs an instance from createIdentity()');
+  const unavailable = (detail: string) =>
+    new SessionStoreUnavailableError(
+      `identity: revokeAllSessions: the session cache is not available (${detail}). Cached sessions would survive and come back when it recovers, so nothing more was revoked; run it again when the cache is healthy.`,
+    );
+  if (!internal.cache.isAvailable) throw unavailable('not connected');
   const ctx = (await internal.getContext()) as unknown as {
+    options: { secondaryStorage?: { delete(key: string): Promise<void> } };
     adapter: {
       findMany(args: { model: string; limit: number }): Promise<Array<{ token?: unknown }>>;
     };
@@ -362,6 +391,13 @@ export async function revokeAllSessions(auth: Identity): Promise<number> {
     // The database decides when it is done; a batch that did not go away would loop forever.
     if (tokens.length === 0 || tokens[0] === previous) break;
     previous = tokens[0]!;
+    // The cache first, and verified: a failed delete is swallowed by the storage (it counts it), and
+    // the rows must stay in Postgres so that a re-run finds them.
+    const failuresBefore = internal.degradedCount();
+    await Promise.all(tokens.map((token) => ctx.options.secondaryStorage?.delete(token)));
+    if (internal.degradedCount() !== failuresBefore || !internal.cache.isAvailable) {
+      throw unavailable(`${revoked} revoked before it failed`);
+    }
     await ctx.internalAdapter.deleteSessions(tokens);
     revoked += tokens.length;
   }
