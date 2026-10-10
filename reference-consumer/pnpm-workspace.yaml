@@ -1,0 +1,27 @@
+# The reference consumer is its OWN pnpm root, deliberately outside the repo workspace: it installs the
+# PUBLISHED packages from the registry, exactly as a product does, so what it proves is what ships
+# (files, exports, peer ranges), not what the workspace builds. Its tree must also stay out of the root
+# pnpm-lock.yaml, the release config and the root lint/typecheck/test runs.
+packages: []
+
+# pnpm 11 refuses a release younger than a day. The first-party packages are released here, and this
+# project exists to check a release right after it ships, so they are exempt; everything else keeps the
+# default.
+minimumReleaseAgeExclude:
+  - "@quynhonsemiconductor/*"
+
+# The same transitive CVE floors as the repo root and spikes/better-auth, for the same reason: the root
+# `security / Dependency CVE scan (osv-scanner)` walks the repo recursively and is BLOCKING, so this
+# lockfile is scanned too. Nothing here declares these packages.
+overrides:
+  "js-yaml@4": "^4.3.2"
+  # `@nestjs/platform-fastify` pins fastify EXACTLY, so a range floor on fastify cannot reach it.
+  "@nestjs/platform-fastify>fastify": "5.12.5"
+
+# pnpm 11 fails an install that ignores a build script unless the decision is recorded. Same as the root
+# workspace: none is needed (testcontainers falls back to pure JS for ssh2 and cpu-features).
+allowBuilds:
+  "@scarf/scarf": false
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
