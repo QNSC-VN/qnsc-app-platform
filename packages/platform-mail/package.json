@@ -1,6 +1,6 @@
 {
   "name": "@quynhonsemiconductor/platform-mail",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Email transport for QNSC product backends: the EmailSender contract, Microsoft Graph (one mailbox per product) and a non-production SMTP transport, and a rate-limited, idempotent mail.send job handler. NestJS at /nest, test doubles and a conformance suite at /testing.",
   "license": "UNLICENSED",
   "main": "dist/index.js",

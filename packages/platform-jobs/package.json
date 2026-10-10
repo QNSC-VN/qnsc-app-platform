@@ -1,6 +1,6 @@
 {
   "name": "@quynhonsemiconductor/platform-jobs",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Durable jobs for QNSC product backends on Postgres and pg-boss: transactional enqueue through platform-db's DbExecutor, worker-only handlers (ROLE=worker), schedules, per-queue retention and a graceful stop. NestJS at /nest, test helpers at /testing.",
   "license": "UNLICENSED",
   "main": "dist/index.js",
