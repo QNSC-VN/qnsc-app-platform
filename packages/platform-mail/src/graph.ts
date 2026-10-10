@@ -212,6 +212,14 @@ class GraphSender implements EmailSender {
         retryAfterSeconds !== undefined
           ? retryAfterSeconds * 1000
           : this.random() * Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** (attempt - 1));
+      if (response.status === 429 && sendOptions.onThrottled) {
+        // BEFORE waiting: the other workers must stop now, not when this one gives up or succeeds.
+        try {
+          await sendOptions.onThrottled(Math.max(1, Math.ceil(delayMs / 1000)));
+        } catch {
+          // Telling the others is best effort; this worker still waits.
+        }
+      }
       try {
         await this.sleep(delayMs, signal);
       } catch (err) {

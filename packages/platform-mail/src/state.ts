@@ -24,6 +24,13 @@ export interface MailState {
   claim(key: string, leaseSeconds: number): Promise<ClaimResult>;
   /** Record delivery. Final: later claims for the key see `sent` until `ttlSeconds` pass. */
   markSent(key: string, id: string, ttlSeconds: number): Promise<void>;
+  /**
+   * Extend the lease of a claim this attempt still holds, to `leaseSeconds` from now. Resolves
+   * `false` when it no longer does (it expired and another attempt took it, or it is `sent`).
+   * The handler calls it every few seconds while it works, so a LIVE attempt keeps a short lease
+   * and a DEAD one's claim lapses within that lease instead of at the end of the job's ceiling.
+   */
+  renew(key: string, token: string, leaseSeconds: number): Promise<boolean>;
   /** Give the claim back after a failed attempt, so the retry can take it. Never undoes `sent`. */
   release(key: string, token: string): Promise<void>;
   /**
@@ -93,6 +100,14 @@ redis.call('SET', KEYS[1], 'sent:' .. ARGV[1], 'EX', ARGV[2])
 return 1
 `;
 
+const RENEW = `
+if redis.call('GET', KEYS[1]) == 'claimed:' .. ARGV[1] then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0
+`;
+
 const RELEASE = `
 if redis.call('GET', KEYS[1]) == 'claimed:' .. ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0
@@ -143,6 +158,9 @@ export function createValkeyMailState(client: ValkeyLike): MailState {
     },
     async markSent(key, id, ttlSeconds) {
       await client.eval(MARK_SENT, 1, key, id, ttlSeconds);
+    },
+    async renew(key, token, leaseSeconds) {
+      return Number(await client.eval(RENEW, 1, key, token, leaseSeconds)) === 1;
     },
     async release(key, token) {
       await client.eval(RELEASE, 1, key, token);

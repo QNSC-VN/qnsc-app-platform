@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MailSendError } from './errors';
 import {
   MAIL_CLAIM_LEASE_SECONDS,
+  MAIL_CLAIM_RENEW_SECONDS,
   MAIL_HANDLE_OPTIONS,
   MAIL_MAX_SLOT_WAIT_MS,
   MAIL_PRIORITY,
@@ -115,10 +116,13 @@ describe('the mail.send queue configuration', () => {
     expect(MAIL_QUEUE_CONFIG.heartbeatSeconds).toBe(30);
   });
 
-  it('holds the claim for the job ceiling plus 30 s, longer than any attempt can run', () => {
-    expect(MAIL_CLAIM_LEASE_SECONDS).toBe(MAIL_QUEUE_CONFIG.expireInSeconds + 30);
-    // The longest wait for a slot is inside the attempt's ceiling.
-    expect(MAIL_MAX_SLOT_WAIT_MS / 1000).toBeLessThan(MAIL_QUEUE_CONFIG.expireInSeconds);
+  it('leases a claim for a minute and renews it twice per lease, so a dead worker’s claim lapses fast', () => {
+    expect(MAIL_CLAIM_LEASE_SECONDS).toBe(60);
+    expect(MAIL_CLAIM_RENEW_SECONDS).toBe(30);
+    // Two ticks per lease: one missed renewal does not cost a live attempt its claim.
+    expect(MAIL_CLAIM_LEASE_SECONDS).toBeGreaterThanOrEqual(2 * MAIL_CLAIM_RENEW_SECONDS);
+    // ...and it is far shorter than the job's five-minute ceiling, which used to be the lease.
+    expect(MAIL_CLAIM_LEASE_SECONDS).toBeLessThan(MAIL_QUEUE_CONFIG.expireInSeconds / 2);
   });
 
   it('keeps the ledger longer than the retry window plus the failed-job retention', () => {
@@ -377,8 +381,8 @@ describe('failures', () => {
   });
 
   it('the stale claim of a killed worker is outlasted by the retry window, so its redelivery is never dead-lettered by it', () => {
-    // Redelivery is bounced until the lease ends (≤ expireInSeconds + 30 s); the first retries
-    // are 10, 20, 40, 80, 160, 320 s. The window dwarfs the lease.
+    // Redelivery is bounced until the lease ends (≤ 60 s); the first retries are 10, 20, 40, 80 s.
+    // The window dwarfs the lease.
     expect(minRetryWindowSeconds()).toBeGreaterThan(MAIL_CLAIM_LEASE_SECONDS * 5);
   });
 
@@ -684,5 +688,247 @@ describe('registerMailJobs', () => {
     expect(handle.mock.calls[0]?.[0]).toBe(MAIL_QUEUE);
     expect(handle.mock.calls[0]?.[2]).toBe(MAIL_HANDLE_OPTIONS);
     expect(await queue.enqueue(sampleMessage())).toBe('job-1');
+  });
+});
+
+describe('the claim is renewed while a send runs, and lapses when its worker dies (M-A)', () => {
+  /** A send that stays in flight until the test lets it finish. */
+  function deferredSend(sender: MemoryEmailSender) {
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      const send = sender.send.bind(sender);
+      sender.send = async (message, options) => {
+        resolve();
+        await new Promise<void>((r) => (release = r));
+        return send(message, options);
+      };
+    });
+    return { started, finish: () => release() };
+  }
+
+  it('renews on the interval while the send is in flight, with the lease, and stops when it ends', async () => {
+    const state = new MemoryMailState();
+    const renew = vi.spyOn(state, 'renew');
+    const sender = new MemoryEmailSender(MAILBOX);
+    const { started, finish } = deferredSend(sender);
+    const handler = createMailHandler({ sender, state, claimRenewMs: 5 });
+    const job = handler({
+      id: 'j',
+      data: sampleMessage(),
+      attempt: 1,
+      signal: new AbortController().signal,
+    });
+    await started;
+    await new Promise((r) => setTimeout(r, 40));
+
+    expect(renew.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(renew.mock.calls[0]?.[2]).toBe(MAIL_CLAIM_LEASE_SECONDS);
+    finish();
+    await job;
+    const callsAtEnd = renew.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(renew.mock.calls.length).toBe(callsAtEnd); // the timer is gone with the attempt
+  });
+
+  it('a live attempt keeps its claim past the first lease: a second attempt still sees it in flight', async () => {
+    let now = 0;
+    const state = new MemoryMailState(() => now);
+    const sender = new MemoryEmailSender(MAILBOX);
+    const { started, finish } = deferredSend(sender);
+    const message = sampleMessage({ idempotencyKey: 'long-send' });
+    const handler = createMailHandler({ sender, state, claimRenewMs: 5 });
+    const job = handler({
+      id: 'j',
+      data: message,
+      attempt: 1,
+      signal: new AbortController().signal,
+    });
+    await started;
+
+    for (let i = 0; i < 4; i += 1) {
+      await new Promise((r) => setTimeout(r, 20)); // a renewal happens
+      now += (MAIL_CLAIM_LEASE_SECONDS - 10) * 1000; // 50 s of simulated time per round: 200 s in all
+    }
+    expect((await state.claim(ledgerKey(MAILBOX, 'long-send'), 30)).status).toBe('in-flight');
+    finish();
+    await job;
+    expect(sender.sent).toHaveLength(1);
+  });
+
+  it('a dead attempt’s claim (never renewed) lapses within one lease, so the redelivery sends', async () => {
+    let now = 0;
+    const state = new MemoryMailState(() => now);
+    const { run, sender } = setup({ state });
+    await state.claim(ledgerKey(MAILBOX, 'killed'), MAIL_CLAIM_LEASE_SECONDS); // the dead worker's last claim
+    const message = sampleMessage({ idempotencyKey: 'killed' });
+
+    expect(await rejection(run(message))).toMatchObject({ retryable: true });
+    now += (MAIL_CLAIM_LEASE_SECONDS + 1) * 1000;
+    await run(message, { attempt: 2 });
+
+    expect(sender.sent).toHaveLength(1);
+  });
+
+  it('a renewal that finds the claim gone is logged, and the attempt carries on', async () => {
+    const state = new MemoryMailState();
+    state.renew = async () => false;
+    const logs: string[] = [];
+    const sender = new MemoryEmailSender(MAILBOX);
+    const { started, finish } = deferredSend(sender);
+    const handler = createMailHandler({
+      sender,
+      state,
+      claimRenewMs: 5,
+      logger: { info() {}, error() {}, warn: (_f, message) => void logs.push(message) },
+    });
+    const job = handler({
+      id: 'j',
+      data: sampleMessage(),
+      attempt: 1,
+      signal: new AbortController().signal,
+    });
+    await started;
+    await new Promise((r) => setTimeout(r, 30));
+    finish();
+    await job;
+
+    expect(logs.some((m) => /lost its claim/.test(m))).toBe(true);
+    expect(sender.sent).toHaveLength(1);
+  });
+
+  it('a renewal that throws does not fail the send', async () => {
+    const state = new MemoryMailState();
+    state.renew = async () => {
+      throw new Error('valkey blinked');
+    };
+    const sender = new MemoryEmailSender(MAILBOX);
+    const { started, finish } = deferredSend(sender);
+    const handler = createMailHandler({ sender, state, claimRenewMs: 5 });
+    const job = handler({
+      id: 'j',
+      data: sampleMessage(),
+      attempt: 1,
+      signal: new AbortController().signal,
+    });
+    await started;
+    await new Promise((r) => setTimeout(r, 30));
+    finish();
+
+    await expect(job).resolves.toBeUndefined();
+    expect(sender.sent).toHaveLength(1);
+  });
+
+  it('counts the in-flight bounce as mail.failures{code="in_flight"} and logs it', async () => {
+    const { run, state, events, logs } = setup();
+    await state.claim(ledgerKey(MAILBOX, 'busy'), MAIL_CLAIM_LEASE_SECONDS);
+
+    const error = await rejection(run(sampleMessage({ idempotencyKey: 'busy' })));
+
+    expect(error).toMatchObject({ code: 'unavailable', retryable: true });
+    expect(error).not.toBeInstanceOf(PermanentJobError);
+    expect(events).toEqual(['failed:auth.verify-email:in_flight']);
+    expect(logs).toContainEqual({
+      level: 'warn',
+      fields: { jobId: 'job-1', category: 'auth.verify-email', code: 'in_flight', attempt: 1 },
+      message: 'mail.send attempt failed',
+    });
+  });
+});
+
+describe('a 429 waited out inside send() still backs the whole mailbox off (M-B)', () => {
+  it('tells the other workers BEFORE the wait: onThrottled gets the seconds, then the sender sleeps', async () => {
+    const { run, sender, state } = setup();
+    const order: string[] = [];
+    const real = state.backOff.bind(state);
+    state.backOff = async (mailbox, seconds) => {
+      order.push(`backOff:${seconds}`);
+      return real(mailbox, seconds);
+    };
+    sender.send = async (_message, options) => {
+      order.push('429');
+      await options?.onThrottled?.(20);
+      order.push('slept');
+      return { id: 'x', transport: 'memory' };
+    };
+
+    await run(sampleMessage());
+
+    expect(order).toEqual(['429', 'backOff:20', 'slept']);
+    // ...so another worker asking now is made to wait.
+    expect(await state.takeSlot(MAILBOX)).toBeGreaterThan(19_000);
+  });
+
+  it('caps the cooldown it starts from the hook like any other', async () => {
+    const { run, sender, state } = setup();
+    sender.send = async (_message, options) => {
+      await options?.onThrottled?.(86_400);
+      return { id: 'x', transport: 'memory' };
+    };
+    await run(sampleMessage());
+
+    expect(await state.takeSlot(MAILBOX)).toBeLessThanOrEqual(600_000);
+  });
+
+  it('a hook that cannot reach the state does not fail the send', async () => {
+    const { run, sender, state } = setup();
+    state.backOff = async () => {
+      throw new Error('valkey blinked');
+    };
+    sender.send = async (_message, options) => {
+      await Promise.resolve(options?.onThrottled?.(20)).catch(() => undefined);
+      return { id: 'x', transport: 'memory' };
+    };
+
+    await expect(run(sampleMessage())).resolves.toBeUndefined();
+  });
+});
+
+describe('a payload correlation id is validated before it becomes the log context (L-2)', () => {
+  it.each([
+    ['5028 characters with a newline', `${'a'.repeat(5000)}\n${'b'.repeat(27)}`],
+    ['a newline', 'abc\ndef'],
+    ['a space', 'a b'],
+  ])(
+    '%s is never entered as the context, never logged, and the payload dead-letters',
+    async (_label, bad) => {
+      const seenInContext: (string | undefined)[] = [];
+      const logged: string[] = [];
+      const handler = createMailHandler({
+        sender: new MemoryEmailSender(MAILBOX),
+        state: new MemoryMailState(),
+        logger: {
+          info() {},
+          warn() {},
+          error: (fields, message) => {
+            // The line is written inside whatever context is current: it must not be the bad id.
+            seenInContext.push(requestContextStorage.getStore()?.correlationId);
+            logged.push(JSON.stringify({ fields, message }));
+          },
+        },
+      });
+
+      const error = await rejection(
+        handler({
+          id: 'j',
+          data: sampleMessage({ correlationId: bad }),
+          attempt: 1,
+          signal: new AbortController().signal,
+        }),
+      );
+
+      expect(error).toBeInstanceOf(PermanentJobError);
+      expect(logged).toHaveLength(1);
+      expect(seenInContext).not.toContain(bad);
+      expect(logged.join('')).not.toContain('bbbb');
+      expect(logged.join('')).not.toContain('abc\\ndef');
+    },
+  );
+
+  it('a number is not coerced into an id: it fails validation instead of passing as "12345"', async () => {
+    const { run, sender } = setup();
+    expect(await rejection(run({ ...sampleMessage(), correlationId: 12345 }))).toBeInstanceOf(
+      PermanentJobError,
+    );
+    expect(sender.sent).toHaveLength(0);
   });
 });

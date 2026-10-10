@@ -329,8 +329,11 @@ the way the Amendment of WP-7 (`jobs.once` must never hold an external call) alr
 3. **One queue definition.** `MAIL_QUEUE_CONFIG` is used by the worker (`handle`) and by every process
    that only enqueues (`defineQueue`), so identity's API pods create `mail.send` exactly as the worker
    does; `platform-jobs` throws if they differ. Retention is `{ completed: 'immediate', failed: 86400,
-deadLetter: 86400 }`, the lease is `expireInSeconds` (300) with an explicit 30 s heartbeat, and the
-   ledger claim is held for `expireInSeconds + 30`.
+deadLetter: 86400 }`, the lease is `expireInSeconds` (300) with an explicit 30 s heartbeat. The ledger claim
+   is **not** tied to that ceiling: it is leased for 60 s and renewed every 30 s (token-checked) while
+   the send runs, so a worker killed mid-send frees its claim within a minute. (A first version held it
+   for `expireInSeconds + 30`; a SIGKILL probe showed the dead worker's claim then bounced four
+   redeliveries and delayed the mail about nine minutes.)
 4. **The retry window is at least an hour.** `retryLimit` 10, `retryDelaySeconds` 10,
    `retryDelayMaxSeconds` 900. pg-boss waits `min(max, delay × 2ⁿ × (1 + random))`; with `random` at 0
    the ten waits sum to 66 minutes (10, 20, 40, 80, 160, 320, 640, then 900 three times). A ten-minute

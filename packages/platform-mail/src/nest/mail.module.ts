@@ -18,7 +18,7 @@ import {
   type SendOptions,
 } from '@quynhonsemiconductor/platform-jobs';
 import { JOBS_TOKEN, JobHandler } from '@quynhonsemiconductor/platform-jobs/nest';
-import type { MailEnv } from '../config';
+import { isProduction, type MailEnv } from '../config';
 import { createEmailSender } from '../factory';
 import {
   MAIL_HANDLE_OPTIONS,
@@ -48,9 +48,19 @@ export interface MailModuleOptions {
   /**
    * Use this sender instead of building one from the environment: a transport this package does
    * not have, or a test double. It must satisfy the `EmailSender` contract
-   * (`describeEmailSenderConformance` checks that). Unset in production.
+   * (`describeEmailSenderConformance` checks that).
+   *
+   * **Refused when `NODE_ENV=production`** unless `allowCustomSenderInProduction` is true: it
+   * bypasses every guard the built-in transports have (`smtp` refuses to load, a client secret is
+   * refused), and a test double left in a production module drops every authentication email
+   * while every health check stays green.
    */
   sender?: EmailSender | undefined;
+  /**
+   * Allow `sender` in production: a real transport this package does not have. Say it out loud;
+   * the default is to refuse.
+   */
+  allowCustomSenderInProduction?: boolean | undefined;
   /**
    * The ledger and pacing store (`createValkeyMailState(cache.instance)`). Required in a
    * `ROLE=worker` process, which sends; an API process that only enqueues does not need it.
@@ -62,6 +72,20 @@ export interface MailModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> 
   inject?: FactoryProvider['inject'];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- NestJS factory signature
   useFactory: (...args: any[]) => MailModuleOptions | Promise<MailModuleOptions>;
+}
+
+/** The sender for this module: the one given (outside production, or when allowed) or the built-in. */
+function resolveSender(options: MailModuleOptions, env: MailEnv): EmailSender {
+  if (options.sender === undefined) return createEmailSender({ env });
+  if (isProduction(env) && options.allowCustomSenderInProduction !== true) {
+    throw new Error(
+      'MailModule: `sender` is refused when NODE_ENV=production. It bypasses the production guards ' +
+        'of the built-in transports (a test double would silently drop every authentication email). ' +
+        'Use MAIL_TRANSPORT=graph, or pass allowCustomSenderInProduction: true for a real transport ' +
+        'of your own.',
+    );
+  }
+  return options.sender;
 }
 
 function nestLogger(logger: Logger): MailLogger {
@@ -159,7 +183,7 @@ export class MailModule {
         { provide: MAIL_STATE, useValue: options.state ?? null },
         {
           provide: EMAIL_SENDER,
-          useFactory: (): EmailSender => options.sender ?? createEmailSender({ env }),
+          useFactory: (): EmailSender => resolveSender(options, env),
         },
         MailSendHandler,
         MailService,
@@ -187,7 +211,7 @@ export class MailModule {
         {
           provide: EMAIL_SENDER,
           useFactory: (resolved: MailModuleOptions, env: MailEnv): EmailSender =>
-            resolved.sender ?? createEmailSender({ env }),
+            resolveSender(resolved, env),
           inject: ['MAIL_OPTIONS', MAIL_ENV],
         },
         MailSendHandler,

@@ -131,6 +131,65 @@ describe('MailModule', () => {
   });
 });
 
+describe('a custom sender is refused in production (M-C)', () => {
+  const PROD = {
+    ...ENV,
+    NODE_ENV: 'production',
+    AZURE_CLIENT_SECRET: undefined,
+    AZURE_FEDERATED_TOKEN_FILE: '/t',
+  };
+
+  it('forRoot refuses `sender` when NODE_ENV=production, and says why', async () => {
+    await expect(
+      boot({ env: PROD, sender: new MemoryEmailSender('x@example.test') }),
+    ).rejects.toThrow(/`sender` is refused when NODE_ENV=production.*silently drop/s);
+  });
+
+  it('forRootAsync refuses it too', async () => {
+    @Module({
+      imports: [
+        MailModule.forRootAsync({
+          useFactory: () => ({ env: PROD, sender: new MemoryEmailSender('x@example.test') }),
+        }),
+      ],
+    })
+    class AsyncModule {}
+    await expect(
+      NestFactory.createApplicationContext(AsyncModule, { logger: false, abortOnError: false }),
+    ).rejects.toThrow(/`sender` is refused when NODE_ENV=production/);
+  });
+
+  it('allows it only when `allowCustomSenderInProduction` is set — and then it must not be a MemoryEmailSender', async () => {
+    const custom = {
+      mailbox: 'real@example.test',
+      send: async () => ({ id: 'x', transport: 'custom' }),
+    };
+    const context = await boot({ env: PROD, sender: custom, allowCustomSenderInProduction: true });
+    expect(context.get(EMAIL_SENDER)).toBe(custom);
+  });
+
+  it('allowCustomSenderInProduction: false (or unset) still refuses', async () => {
+    await expect(
+      boot({
+        env: PROD,
+        sender: { send: async () => ({ id: 'x', transport: 'custom' }) },
+        allowCustomSenderInProduction: false,
+      }),
+    ).rejects.toThrow(/refused/);
+  });
+
+  it('the built-in transport is unaffected in production', async () => {
+    const context = await boot({ env: PROD });
+    expect(context.get(EMAIL_SENDER).mailbox).toBe('noreply@example.test');
+  });
+
+  it('outside production a custom sender is accepted without the flag', async () => {
+    await expect(
+      boot({ env: ENV, sender: new MemoryEmailSender('x@example.test') }),
+    ).resolves.toBeDefined();
+  });
+});
+
 describe('createMailTelemetry', () => {
   function fakeMeter() {
     const calls: [string, string, number, object | undefined][] = [];

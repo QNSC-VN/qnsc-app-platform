@@ -9,7 +9,7 @@ import {
   type SendOptions,
 } from '@quynhonsemiconductor/platform-jobs';
 import { MailSendError } from './errors';
-import { validateMessage, type EmailMessage, type EmailSender } from './message';
+import { isCorrelationId, validateMessage, type EmailMessage, type EmailSender } from './message';
 import { ledgerKey, type MailState } from './state';
 
 /** The queue every product's mail goes through. */
@@ -67,15 +67,18 @@ export function minRetryWindowSeconds(config: QueueConfig = MAIL_QUEUE_CONFIG): 
 }
 
 /**
- * How long one attempt holds its ledger claim: the job's own ceiling plus 30 s. A live attempt
- * can never lose its claim to a second worker, and a crashed one frees it as soon as the queue
- * would have given up on it anyway.
+ * How long one attempt's ledger claim lasts without being renewed, and how often a LIVE attempt
+ * renews it (twice per lease, alongside the job's own 30 s heartbeat). A worker that dies
+ * mid-send stops renewing, so its claim lapses within one lease (~60 s) — not at the end of the
+ * job's five-minute ceiling — and the redelivery finds it free instead of bouncing off it.
+ * Renewal is token-checked: an attempt whose claim already lapsed cannot extend someone else's.
  *
- * A worker killed mid-send is recovered by the heartbeat well before this, so its redelivery
- * finds the dead attempt's claim still held and fails retryably until the lease ends (at most
- * five minutes). That is what the retry window is for; it is never close to dead-lettering.
+ * Measured against a SIGKILLed worker (jobs.integration.test.ts): without renewal the stale claim
+ * bounced four redeliveries and the mail arrived ~9 minutes late; with it the mail is sent within
+ * about two and a half minutes of the kill, of which ~77 s is `platform-jobs` noticing the death.
  */
-export const MAIL_CLAIM_LEASE_SECONDS = MAIL_QUEUE_CONFIG.expireInSeconds + 30;
+export const MAIL_CLAIM_LEASE_SECONDS = 60;
+export const MAIL_CLAIM_RENEW_SECONDS = 30;
 
 /**
  * How long a delivered message stays in the ledger. It has to outlast every retry of the job
@@ -170,6 +173,8 @@ export interface MailHandlerOptions {
   logger?: MailLogger | undefined;
   /** Test seam. */
   sleep?: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined;
+  /** Test seam: how often a live attempt renews its claim. Default {@link MAIL_CLAIM_RENEW_SECONDS}. */
+  claimRenewMs?: number | undefined;
 }
 
 function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
@@ -192,6 +197,14 @@ function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
  * dead-letters AT ONCE with no retries and no backoff to wait out. The text is the code and the
  * error's own message, which holds the HTTP status and the provider's request id and nothing else.
  */
+/** A cooldown from the provider's `Retry-After`: at least a second, at most {@link MAIL_MAX_COOLDOWN_SECONDS}. */
+function cooldownSeconds(retryAfterSeconds: number | undefined): number {
+  return Math.min(
+    MAIL_MAX_COOLDOWN_SECONDS,
+    Math.max(1, retryAfterSeconds ?? MAIL_DEFAULT_COOLDOWN_SECONDS),
+  );
+}
+
 function toJobError(error: unknown): unknown {
   if (error instanceof MailSendError && !error.retryable) {
     return new PermanentJobError(`mail.send failed permanently (${error.code}): ${error.message}`);
@@ -230,6 +243,7 @@ export function createMailHandler(options: MailHandlerOptions): JobHandlerFn<Ema
   const logger = options.logger ?? NOOP_LOGGER;
   const mailbox = options.mailbox ?? sender.mailbox ?? 'default';
   const sleep = options.sleep ?? sleepMs;
+  const claimRenewMs = options.claimRenewMs ?? MAIL_CLAIM_RENEW_SECONDS * 1000;
 
   async function waitForSlot(signal: AbortSignal): Promise<void> {
     // Counted from the waits asked for, not the wall clock: it is what this attempt chose to
@@ -276,17 +290,46 @@ export function createMailHandler(options: MailHandlerOptions): JobHandlerFn<Ema
       return;
     }
     if (claim.status === 'in-flight') {
+      // Not a provider failure, but a retry spent: count it, so a dead worker's stale claim (or a
+      // genuine race) is visible instead of looking like mail that simply took a while.
+      telemetry.failed(message.category, 'in_flight');
+      logger.warn(
+        { jobId: job.id, category: message.category, code: 'in_flight', attempt: job.attempt },
+        'mail.send attempt failed',
+      );
       throw new MailSendError(
         'unavailable',
         'Another attempt is sending this message; retrying later.',
       );
     }
 
+    // While this attempt works (waiting for a slot included) it keeps its claim alive; if it dies
+    // the claim lapses on its own.
+    const renewal = setInterval(() => {
+      state.renew(key, claim.token, MAIL_CLAIM_LEASE_SECONDS).then(
+        (held) => {
+          if (!held) {
+            logger.warn(
+              { jobId: job.id, category: message.category },
+              'mail.send lost its claim; another attempt may now send this message',
+            );
+          }
+        },
+        () => undefined, // a failed renewal is retried at the next tick; the lease is 2 ticks long
+      );
+    }, claimRenewMs);
+    renewal.unref();
+
     let reachedProvider = false;
     try {
       await waitForSlot(job.signal);
       reachedProvider = true;
-      const result = await sender.send(message, { signal: job.signal });
+      const result = await sender.send(message, {
+        signal: job.signal,
+        // The transport is about to wait out a 429 itself: tell every worker NOW, not after it
+        // gives up, so the others do not keep sending into a mailbox Exchange just throttled.
+        onThrottled: (seconds) => state.backOff(mailbox, cooldownSeconds(seconds)),
+      });
       try {
         await state.markSent(key, result.id, MAIL_SENT_TTL_SECONDS);
       } catch (err) {
@@ -317,25 +360,25 @@ export function createMailHandler(options: MailHandlerOptions): JobHandlerFn<Ema
       }
       if (reachedProvider && err instanceof MailSendError && err.code === 'throttled') {
         // Exchange told us to stop: every worker must, not just the one that was told.
-        const seconds = Math.min(
-          MAIL_MAX_COOLDOWN_SECONDS,
-          Math.max(1, err.retryAfterSeconds ?? MAIL_DEFAULT_COOLDOWN_SECONDS),
-        );
         try {
-          await state.backOff(mailbox, seconds);
+          await state.backOff(mailbox, cooldownSeconds(err.retryAfterSeconds));
         } catch {
           // Best effort: the job's own retry backoff still applies.
         }
       }
       throw toJobError(err);
+    } finally {
+      clearInterval(renewal);
     }
   }
 
   return (job) => {
     // Continue the request's correlation id (contract §7) when the payload carries one; else
-    // platform-jobs has already seeded `mail.send:<jobId>`.
+    // platform-jobs has already seeded `mail.send:<jobId>`. The id comes from a job payload, so it
+    // is validated BEFORE it becomes the log context: an invalid one (a newline, 5000 characters)
+    // is never entered, never logged, and `run` then rejects the payload as invalid.
     const correlationId = job.data?.correlationId;
-    return typeof correlationId === 'string'
+    return isCorrelationId(correlationId)
       ? Promise.resolve(withJobContext(MAIL_QUEUE, () => run(job), { correlationId }))
       : run(job);
   };

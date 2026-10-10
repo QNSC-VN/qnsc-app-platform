@@ -161,6 +161,13 @@ describe('validateMessage', () => {
   });
 
   describe('correlationId (contract §7)', () => {
+    it.each([12345, 1.5, true, {}, ['a'], null])(
+      'rejects the non-string %o instead of coercing it',
+      (value) => {
+        expect(reasonFor({ correlationId: value as never })).toMatch(/correlationId/);
+      },
+    );
+
     it.each([
       'abc',
       'req-01HZX',

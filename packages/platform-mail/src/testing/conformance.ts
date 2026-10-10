@@ -308,6 +308,40 @@ export function describeMailStateConformance(options: MailStateConformanceOption
       expect((await state.claim('k', 30)).status).toBe('claimed');
     });
 
+    it('renews a claim it holds, and refuses to renew one it does not', async () => {
+      const state = await options.create();
+      const claim = await state.claim('k', 30);
+      if (claim.status !== 'claimed') throw new Error('expected a claim');
+
+      expect(await state.renew('k', claim.token, 30)).toBe(true);
+      expect(await state.renew('k', 'someone-elses-token', 30)).toBe(false);
+      expect(await state.renew('never-claimed', claim.token, 30)).toBe(false);
+    });
+
+    it('does not renew a claim that is already sent', async () => {
+      const state = await options.create();
+      const claim = await state.claim('k', 30);
+      if (claim.status !== 'claimed') throw new Error('expected a claim');
+      await state.markSent('k', 'msg-1', 60);
+
+      expect(await state.renew('k', claim.token, 30)).toBe(false);
+      expect(await state.claim('k', 30)).toEqual({ status: 'sent', id: 'msg-1' });
+    });
+
+    it('keeps a renewed claim alive past its first lease, and lets an unrenewed one lapse', async () => {
+      const state = await options.create();
+      const renewed = await state.claim('renewed', 1);
+      const unrenewed = await state.claim('unrenewed', 1);
+      if (renewed.status !== 'claimed' || unrenewed.status !== 'claimed')
+        throw new Error('expected claims');
+      await advance(600);
+      expect(await state.renew('renewed', renewed.token, 1)).toBe(true);
+      await advance(700); // 1.3 s since the first claims: both leases are past, one was renewed
+
+      expect((await state.claim('renewed', 30)).status).toBe('in-flight');
+      expect((await state.claim('unrenewed', 30)).status).toBe('claimed');
+    }, 10_000);
+
     it('ignores a release with the wrong token', async () => {
       const state = await options.create();
       await state.claim('k', 30);
