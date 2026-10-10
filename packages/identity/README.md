@@ -116,7 +116,9 @@ a required reason, a 1 h limit and an audit record). Passkeys, the `jwt` plugin,
 Better Auth's lifetime is per instance, so in an instance with both `staff` and `public` sessions are written with the
 public lifetime and **the 12 h staff cap is enforced where sessions are written** (`session.create.before` and
 `session.update.before`, so Better Auth's own endpoints honour it and a refresh cannot stretch it). Staff means a user
-with a Microsoft account or an email on `staff.domains`. The cookie cache is off whenever `staff` is present.
+with a Microsoft account or an email on `staff.domains`. A staff session at its cap is never refreshed (Better Auth would
+ask for a refresh on every read, and the clamp would write the same expiry back): reading it costs no database write, no
+Valkey write and no `Set-Cookie`. The cookie cache is off whenever `staff` is present.
 
 Organization creation is closed (`allowOrganizationCreation`, default `false`): organizations are created by the product,
 because an organization owner can register an SSO provider. `trustedOrigins` is exactly the list you pass; provider
