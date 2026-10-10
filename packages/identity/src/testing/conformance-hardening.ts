@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { hash as argon2hash } from '@node-rs/argon2';
+import { revokeAllSessions } from '../create-identity';
 import { DEFAULTS } from '../defaults';
 import { signDeviceValue } from '../known-device';
 import { lockoutKeys } from '../lockout';
@@ -163,7 +164,7 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
       );
       const c = stack.client();
       expect((await signIn(c, email, password)).status).toBe(200);
-      return { email, c };
+      return { email, c, password };
     };
 
     it('a tenant member signed in with Microsoft gets a 12 h session in a combined instance', async () => {
@@ -271,26 +272,244 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
         expect(await lifetime(email)).toBeLessThanOrEqual(12 * 3600 + 5);
       });
 
-      it('the cap still holds: a refresh still cannot stretch a session past createdAt + 12 h, and a session past it is dead', async () => {
-        // A staff session whose stored expiry is beyond the cap (7 d) and which is due a refresh:
-        // the guard must NOT wave it through; the clamp runs, once, and brings it back to the cap.
-        const { email, c } = await staffByDomainOnly();
+      /**
+       * Make ONE session look like it was issued on a public lifetime `hours` ago: created then, expiring in
+       * 5 days. In Postgres, and (when it is cached) in Valkey too.
+       */
+      const publicLifetime = async (c: { cookies: Record<string, string> }, hours: number) => {
         const token = sessionToken(c);
         await stack.pool.query(
-          `update identity.session set expires_at = created_at + interval '7 days' where token = $1`,
-          [token],
+          `update identity.session set created_at = now() - make_interval(hours => $2),
+                  updated_at = now() - make_interval(hours => $2), expires_at = now() + interval '5 days'
+            where token = $1`,
+          [token, hours],
         );
-        await stack.flushCache();
-        await age(c, 25);
+        const cached = await stack.get(token);
+        if (cached) {
+          const value = JSON.parse(cached);
+          value.session.createdAt = new Date(Date.now() - hours * 3600_000).toISOString();
+          value.session.updatedAt = value.session.createdAt;
+          value.session.expiresAt = new Date(Date.now() + 5 * 86400_000).toISOString();
+          await stack.seedCounter(token, JSON.stringify(value), 5 * 86400);
+        }
+      };
+      const sessionRows = async (token: string) =>
+        Number(
+          (
+            await stack.pool.query(
+              `select count(*)::int as n from identity.session where token = $1`,
+              [token],
+            )
+          ).rows[0].n,
+        );
+
+      it('the cap is enforced on READ: a staff session older than 12 h that stores a later expiry is dead on the FIRST read, with nothing written', async () => {
+        const { c } = await staffByDomainOnly();
+        const token = sessionToken(c);
+        await publicLifetime(c, 13);
+        await stack.flushCache(); // served from Postgres
         const writes = await countWrites();
         const before = await writes();
-        const first = await c.get(`${API}/get-session?disableCookieCache=true`);
-        expect(first.status).toBe(200);
+        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        expect(await writes()).toBe(before);
+        expect(await sessionRows(token)).toBe(0);
+      });
+
+      it('the same when the session is served from VALKEY', async () => {
+        const { c } = await staffByDomainOnly();
+        const token = sessionToken(c);
+        await publicLifetime(c, 13);
+        expect(await stack.get(token)).not.toBeNull();
+        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        expect(await stack.get(token)).toBeNull();
+        expect(await sessionRows(token)).toBe(0);
+      });
+
+      it("and on Better Auth's other endpoints (list-sessions, update-user)", async () => {
+        const { c } = await staffByDomainOnly();
+        await publicLifetime(c, 13);
+        expect((await c.get(`${API}/list-sessions`)).status).toBe(401);
+        const { c: d } = await staffByDomainOnly();
+        await publicLifetime(d, 13);
+        expect((await d.post(`${API}/update-user`, { name: 'Renamed' })).status).toBe(401);
+      });
+
+      it('a staff session inside its first 12 h that stores a later expiry is NOT cut short: the due refresh clamps it once', async () => {
+        const { email, c } = await staffByDomainOnly();
+        await publicLifetime(c, 6); // 6 h old, stores 5 days
+        await stack.flushCache();
+        const writes = await countWrites();
+        const before = await writes();
+        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).status).toBe(200);
         expect(await writes()).toBe(before + 1);
         expect(await lifetime(email)).toBeLessThanOrEqual(12 * 3600 + 5);
-        // 25 h old, so over the 12 h cap: dead from here on, and nothing is written for it.
-        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        expect(await read10(c)).toBe(0); // and now it is at its cap: left alone
         expect(await writes()).toBe(before + 1);
+      });
+
+      it('a PUBLIC session costs no account lookup in its first 12 h, and at most one per 30 s after', async () => {
+        const email = uniqueEmail('visitor');
+        const password = strongPassword();
+        await verifiedUser(stack, email, password, expect);
+        const c = stack.client();
+        expect((await signIn(c, email, password)).status).toBe(200);
+        // Count the statements that read the account table while 10 reads run.
+        const lookupsDuring10Reads = async () => {
+          const pool = stack.pool as unknown as { query: (...args: unknown[]) => unknown };
+          const original = pool.query;
+          let lookups = 0;
+          pool.query = function (this: unknown, ...args: unknown[]) {
+            const text =
+              typeof args[0] === 'string' ? args[0] : (args[0] as { text?: string })?.text;
+            if (text && /from "identity"\."account"/.test(text)) lookups += 1;
+            return original.apply(this, args);
+          };
+          try {
+            for (let i = 0; i < 10; i += 1) {
+              expect((await c.get(`${API}/get-session?disableCookieCache=true`)).status).toBe(200);
+            }
+          } finally {
+            pool.query = original;
+          }
+          return lookups;
+        };
+        expect(await lookupsDuring10Reads()).toBe(0);
+        await age(c, 13); // older than the cap, not yet due for its daily refresh
+        expect(await lookupsDuring10Reads()).toBeLessThanOrEqual(1);
+      });
+
+      it('a direct internalAdapter.findSession outside a request does not throw', async () => {
+        const { c } = await staffByDomainOnly();
+        await age(c, 2); // staff, at its cap, due a refresh: the case that sets the request-scoped switch
+        const context = (await stack.auth.$context) as unknown as {
+          internalAdapter: { findSession(token: string): Promise<{ session: unknown } | null> };
+        };
+        const found = await context.internalAdapter.findSession(sessionToken(c));
+        expect(found?.session).toBeDefined();
+      });
+
+      describe('a user who BECOMES staff loses the sessions issued before', () => {
+        const contextOf = async () =>
+          (await stack.auth.$context) as unknown as {
+            internalAdapter: {
+              linkAccount(account: Record<string, unknown>): Promise<unknown>;
+              updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
+            };
+          };
+        const publicUser = async () => {
+          const email = uniqueEmail('later-staff');
+          const password = strongPassword();
+          await verifiedUser(stack, email, password, expect);
+          const id = (
+            await stack.pool.query<{ id: string }>(
+              `select id from identity."user" where email = $1`,
+              [email],
+            )
+          ).rows[0]!.id;
+          const a = stack.client();
+          const b = stack.client();
+          expect((await signIn(a, email, password)).status).toBe(200);
+          expect((await signIn(b, email, password)).status).toBe(200);
+          return { email, id, a, b };
+        };
+        const alive = async (c: ReturnType<Stack['client']>) =>
+          (await c.get(`${API}/get-session?disableCookieCache=true`)).json() !== null;
+
+        it('a staff-provider account is linked: both older sessions are dead', async () => {
+          const { id, a, b } = await publicUser();
+          expect(await alive(a)).toBe(true);
+          await (
+            await contextOf()
+          ).internalAdapter.linkAccount({
+            userId: id,
+            providerId: 'microsoft',
+            accountId: randomUUID(),
+          });
+          expect(await alive(a)).toBe(false);
+          expect(await alive(b)).toBe(false);
+        });
+
+        it('an email moved onto a staff domain: the older sessions are dead; an unrelated update leaves them', async () => {
+          const { id, a, b } = await publicUser();
+          await (await contextOf()).internalAdapter.updateUser(id, { name: 'Renamed' });
+          expect(await alive(a)).toBe(true);
+          await (
+            await contextOf()
+          ).internalAdapter.updateUser(id, {
+            email: `moved-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`,
+          });
+          expect(await alive(a)).toBe(false);
+          expect(await alive(b)).toBe(false);
+        });
+
+        it('a Microsoft sign-in of a user who held a long session: the old one is revoked, the NEW one survives', async () => {
+          const { email, c } = await staffByDomainOnly();
+          await publicLifetime(c, 1); // issued on a public lifetime before they were staff
+          const { client } = await microsoftSignIn(stack, idp, {
+            sub: 'b',
+            oid: randomUUID(),
+            tid: TEST_TENANT,
+            email,
+            name: 'L',
+          });
+          expect(
+            (await client.get(`${API}/get-session?disableCookieCache=true`)).json(),
+          ).not.toBeNull();
+          expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        });
+
+        it('only the sessions that are not staff-shaped go: a capped session of the same user survives', async () => {
+          const { email, password, c: capped } = await staffByDomainOnly();
+          const long = stack.client();
+          expect((await signIn(long, email, password)).status).toBe(200);
+          await publicLifetime(long, 1); // from before they were staff
+          const { client } = await microsoftSignIn(stack, idp, {
+            sub: 'c',
+            oid: randomUUID(),
+            tid: TEST_TENANT,
+            email,
+            name: 'L',
+          });
+          expect((await long.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+          expect(
+            (await capped.get(`${API}/get-session?disableCookieCache=true`)).json(),
+          ).not.toBeNull();
+          expect(
+            (await client.get(`${API}/get-session?disableCookieCache=true`)).json(),
+          ).not.toBeNull();
+        });
+      });
+
+      it('staff by a Microsoft account alone (an email OFF the staff domain) is classified as staff too', async () => {
+        const email = uniqueEmail('guest-staff');
+        const password = strongPassword();
+        await verifiedUser(stack, email, password, expect);
+        const c = stack.client();
+        expect((await signIn(c, email, password)).status).toBe(200);
+        // The account row is inserted directly: no hook runs, so only the READ-time check can catch it.
+        await stack.pool.query(
+          `insert into identity.account (id, account_id, provider_id, user_id, created_at, updated_at)
+             select uuidv7(), $2::text, 'microsoft', u.id, now(), now() from identity."user" u where u.email = $1`,
+          [email, randomUUID()],
+        );
+        await publicLifetime(c, 13);
+        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+      });
+
+      it('revokeAllSessions() ends every session, in Postgres and in Valkey (for a change of presets)', async () => {
+        const { c } = await staffByDomainOnly();
+        const visitor = uniqueEmail('visitor');
+        const password = strongPassword();
+        await verifiedUser(stack, visitor, password, expect);
+        const d = stack.client();
+        expect((await signIn(d, visitor, password)).status).toBe(200);
+        const token = sessionToken(d);
+        expect(await stack.get(token)).not.toBeNull();
+        expect(await revokeAllSessions(stack.auth)).toBeGreaterThanOrEqual(2);
+        expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        expect((await d.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        expect(await stack.get(token)).toBeNull();
+        expect(await revokeAllSessions(stack.auth)).toBe(0);
       });
 
       it("the guard is for staff only: a non-staff session, even a short one, is left to Better Auth's refresh", async () => {
@@ -360,6 +579,30 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
           expect(res.setCookie.some((line) => /session_token=/.test(line))).toBe(false);
         }
         expect(await writes()).toBe(before);
+      } finally {
+        await stack.stop();
+        await idp.stop();
+      }
+    });
+
+    it('a 13 h session that stores 5 days is dead on the first read (it used to survive until its refresh)', async () => {
+      const idp = await startMockIdp();
+      const stack = await startStack(infra, { presets: ['staff'], staff: { authority: idp.base } });
+      try {
+        const email = `lead-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`;
+        const { client: c } = await microsoftSignIn(stack, idp, {
+          sub: 'o',
+          oid: randomUUID(),
+          tid: TEST_TENANT,
+          email,
+          name: 'L',
+        });
+        await stack.pool.query(
+          `update identity.session set created_at = now() - interval '13 hours',
+                  updated_at = now() - interval '13 hours', expires_at = now() + interval '5 days'`,
+        );
+        await stack.flushCache();
+        expect((await c.get(`${API}/get-session`)).json()).toBeNull();
       } finally {
         await stack.stop();
         await idp.stop();

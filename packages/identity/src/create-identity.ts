@@ -25,7 +25,12 @@ import { withEncryptedSsoSecrets } from './sso-protect';
 import { ssoPlugin, type SsoHooks } from './sso';
 import { valkeySecondaryStorage, type StorageDegraded } from './storage';
 import { testLogin } from './test-login';
-import { staffRefreshGuard, staffSessionHooks } from './staff-session';
+import {
+  staffBecameHooks,
+  staffClassifier,
+  staffRefreshGuard,
+  staffSessionHooks,
+} from './staff-session';
 import { withCallbackErrorCodes } from './callback-errors';
 import { withTimingFloor } from './timing';
 import { withTxCapture } from './tx-context';
@@ -174,6 +179,11 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
     transaction: true,
   });
 
+  const staffPolicy = { staffDomains, getContext };
+  const classifier = staffPreset ? staffClassifier(staffPolicy) : undefined;
+  const staffBecame = classifier ? staffBecameHooks(staffPolicy, classifier) : undefined;
+  const refreshGuard = classifier ? staffRefreshGuard(staffPolicy, classifier) : undefined;
+
   const options = {
     appName: o.product,
     baseURL: o.baseURL,
@@ -256,12 +266,14 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
     },
     databaseHooks: {
       ...(staffPreset ? { session: staffSessionHooks({ staffDomains, getContext }) as never } : {}),
+      ...(staffPreset ? { account: staffBecame!.account as never } : {}),
       user: {
         create: {
           after: async (user: User) => {
             await o.hooks?.onUserCreated?.(user);
           },
         },
+        ...(staffPreset ? { update: staffBecame!.user.update as never } : {}),
       },
     },
     plugins: [
@@ -274,7 +286,7 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
         : []),
       admin({ allowImpersonatingAdmins: false }),
       ...(publicPreset ? [twoFactor({ issuer: o.product })] : []),
-      ...(staffPreset ? [staffRefreshGuard({ staffDomains, getContext })] : []),
+      ...(refreshGuard ? [refreshGuard] : []),
       accountLockout(sink),
       companyDomainSignUpGuard(isReserved),
       securityEvents(sink, onSinkError),
@@ -283,6 +295,14 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
   } satisfies BetterAuthOptions;
 
   auth = betterAuth(options) as unknown as Identity;
+  // Guard `internalAdapter.findSession` as soon as the instance's context exists, not at the first
+  // request: a product may call it directly (a socket gateway) before any request has run.
+  if (refreshGuard) {
+    void (auth.$context as Promise<object>).then(
+      (context) => refreshGuard.install(context),
+      () => undefined,
+    );
+  }
   auth.handler = withCallbackErrorCodes(withTimingFloor(auth.handler, AUTH_BASE_PATH));
   internals.set(auth, { getContext, sink });
   return auth;
@@ -301,6 +321,37 @@ export function purgeUnverifiedAccounts(
   if (!internal)
     throw new Error('identity: purgeUnverifiedAccounts needs an instance from createIdentity()');
   return purgeWith(internal.getContext, internal.sink, options);
+}
+
+/**
+ * Revoke EVERY session of every user, in the database and in the cache. Call it when the session
+ * policy of a running system changes: adding the `staff` preset, or moving from `public + staff` to
+ * `staff` only. Sessions issued under the old policy would otherwise live on the old lifetime;
+ * the read-time cap ends staff ones within 12 h of their creation, this ends them now. Everyone
+ * signs in again. Returns how many sessions were revoked. Safe to re-run.
+ */
+export async function revokeAllSessions(auth: Identity): Promise<number> {
+  const internal = internals.get(auth);
+  if (!internal)
+    throw new Error('identity: revokeAllSessions needs an instance from createIdentity()');
+  const ctx = (await internal.getContext()) as unknown as {
+    adapter: {
+      findMany(args: { model: string; limit: number }): Promise<Array<{ token?: unknown }>>;
+    };
+    internalAdapter: { deleteSessions(tokens: string[]): Promise<unknown> };
+  };
+  let revoked = 0;
+  let previous = '';
+  for (;;) {
+    const rows = await ctx.adapter.findMany({ model: 'session', limit: 500 });
+    const tokens = rows.map((r) => r.token).filter((t): t is string => typeof t === 'string');
+    // The database decides when it is done; a batch that did not go away would loop forever.
+    if (tokens.length === 0 || tokens[0] === previous) break;
+    previous = tokens[0]!;
+    await ctx.internalAdapter.deleteSessions(tokens);
+    revoked += tokens.length;
+  }
+  return revoked;
 }
 
 export function identityInternals(auth: Identity) {

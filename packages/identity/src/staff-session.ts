@@ -1,3 +1,4 @@
+import { hasRequestState } from '@better-auth/core/context';
 import { createAuthMiddleware, setShouldSkipSessionRefresh } from 'better-auth/api';
 import type { BetterAuthPlugin } from 'better-auth';
 import { DEFAULTS } from './defaults';
@@ -24,12 +25,17 @@ interface HookContext {
     internalAdapter: {
       findUserById(id: string): Promise<{ email: string } | null>;
       findAccounts(userId: string): Promise<Array<{ providerId: string }>>;
+      deleteSessions(tokens: string[]): Promise<unknown>;
     };
     adapter: {
       findOne(args: {
         model: string;
         where: Array<{ field: string; value: unknown }>;
       }): Promise<Row | null>;
+      findMany(args: {
+        model: string;
+        where: Array<{ field: string; value: unknown }>;
+      }): Promise<Row[]>;
     };
     secret: string;
     authCookies: { sessionToken: { name: string } };
@@ -105,65 +111,189 @@ export function staffSessionHooks(policy: StaffSessionPolicy) {
 interface SessionAdapter {
   findSession(token: string): Promise<{
     session: { createdAt: Date | string; expiresAt: Date | string };
-    user: { email: string };
+    user: { id?: unknown; email: string };
   } | null>;
   findAccounts(userId: string): Promise<Array<{ providerId: string }>>;
 }
 
+/** How long "is this user staff?" is remembered per process, and for how many users. */
+const CLASSIFICATION_TTL_MS = 30_000;
+const CLASSIFICATION_MAX = 10_000;
+
 /**
- * A staff session never needs refreshing, so it must not be refreshed.
- *
- * Better Auth refreshes a session on `get-session` once `expiresAt - expiresIn + updateAge <= now`.
- * For a staff session `expiresAt` is `createdAt + 12 h`, always at least as old as that threshold
- * in an instance whose lifetime is the public 7 days, and after the first hour in a staff-only one.
- * So every read of a staff session asked for a refresh to `now + 7 d`, which `update.before` above
- * clamped back to the SAME `createdAt + 12 h`: a database UPDATE, two Valkey writes and a
- * Set-Cookie per request, to change nothing. (Measured: see the PR for #N1.)
- *
- * The clamp stays as the guarantee, and is now idempotent: when the session Better Auth has just
- * loaded is a staff session already at or under its cap, the refresh is switched off for that
- * request (`setShouldSkipSessionRefresh`, Better Auth's own request-scoped switch). A session over
- * its cap (created before the cap existed) is NOT skipped: the refresh runs once, is clamped, and
- * the next read finds it at the cap. Public sessions keep their sliding refresh.
- *
- * The decision hangs on `findSession`, the one place the loaded session and its user are in hand
- * without a second read; the staff test costs a query only when the session was about to refresh.
+ * Is this user staff? A staff-domain email says so for free. Otherwise it takes a query for a
+ * Microsoft account, and THAT answer is remembered per process for 30 s: without it, every request
+ * of every public user whose session is older than the cap would pay one `account` lookup (the
+ * cookie cache is off in an instance with `staff`, so every request reaches the store). The memo can
+ * only be stale in the direction of a user who has JUST become staff, and the hooks below revoke the
+ * sessions that were living on a public lifetime at that moment, so nothing relies on it being fresh.
  */
-export function staffRefreshGuard(policy: StaffSessionPolicy): BetterAuthPlugin {
+export function staffClassifier(policy: StaffSessionPolicy) {
+  const memo = new Map<string, { staff: boolean; until: number }>();
+  const remember = (userId: string, staff: boolean) => {
+    if (memo.size >= CLASSIFICATION_MAX) memo.delete(memo.keys().next().value as string);
+    memo.set(userId, { staff, until: Date.now() + CLASSIFICATION_TTL_MS });
+  };
+  return {
+    remember,
+    async classify(
+      adapter: Pick<SessionAdapter, 'findAccounts'>,
+      user: { id?: unknown; email: string },
+    ): Promise<boolean> {
+      if (domainIn(emailDomain(user.email), policy.staffDomains)) return true;
+      const id = user.id;
+      if (typeof id !== 'string') return false;
+      const hit = memo.get(id);
+      if (hit && hit.until > Date.now()) return hit.staff;
+      const staff = (await adapter.findAccounts(id)).some((a) => a.providerId === 'microsoft');
+      remember(id, staff);
+      return staff;
+    },
+  };
+}
+
+export type StaffClassifier = ReturnType<typeof staffClassifier>;
+
+type SessionContext = { sessionConfig: { expiresIn: number; updateAge: number } };
+
+/**
+ * The staff cap, enforced when a session is READ, and a staff session at its cap never refreshed.
+ *
+ * Two decisions, both made in `findSession`, the one place the loaded session and its user are in
+ * hand without a second read; and both only for the sessions that can need them:
+ *
+ * 1. ENFORCE. A staff session is dead once `createdAt + 12 h` has passed, whatever its stored
+ *    `expiresAt` says. The clamp in `update.before` only runs when Better Auth refreshes, which for a
+ *    session on a long lifetime is once an `updateAge` (a day, or a week in a staff-only instance),
+ *    and the read that triggers it answers 200 with the row it just wrote. So a user who BECOMES
+ *    staff mid-session (a staff-provider account linked, an email moved into `staff.domains`), or an
+ *    instance that gains the `staff` preset while 7-day sessions live, kept a long session for up to
+ *    that long. Now such a session comes back with `expiresAt = createdAt + cap`, Better Auth's own
+ *    expiry check deletes it and answers `null`. The staff test runs only for a session OLDER than
+ *    its cap that still stores a later expiry: never for a young session, nor one already at its cap.
+ * 2. DO NOT REWRITE. A staff session at its cap needs no refresh (Better Auth would ask on every
+ *    read, and `update.before` would write the same expiry back: an UPDATE, two Valkey writes and a
+ *    Set-Cookie per request), so the refresh is switched off for the request with Better Auth's own
+ *    `setShouldSkipSessionRefresh`. A staff session still holding a later expiry inside its first 12 h
+ *    is NOT skipped: the refresh runs once and the clamp brings it to the cap.
+ *
+ * Public sessions, and any non-staff session, keep Better Auth's behaviour.
+ */
+export function staffRefreshGuard(
+  policy: StaffSessionPolicy,
+  classifier: StaffClassifier = staffClassifier(policy),
+): BetterAuthPlugin & { install(context: object): void } {
   const capMs = DEFAULTS.session.staff.expiresInSeconds * 1000;
   const wrapped = new WeakSet<object>();
 
+  // Wrap `internalAdapter.findSession` once. Better Auth rebuilds `internalAdapter` after plugin
+  // `init`, so `init` cannot do it; it is done as soon as the instance's context resolves, and again
+  // (idempotently) from a `before` hook, which no request can precede.
+  function install(context: object): void {
+    const ctx = context as SessionContext & { internalAdapter: SessionAdapter };
+    const adapter = ctx.internalAdapter;
+    if (!adapter || wrapped.has(adapter)) return;
+    wrapped.add(adapter);
+    const find = adapter.findSession.bind(adapter);
+    adapter.findSession = async (token) => {
+      const found = await find(token);
+      if (!found) return found;
+      const { sessionConfig } = ctx;
+      const expiresAt = new Date(found.session.expiresAt).getTime();
+      const capAt = new Date(found.session.createdAt).getTime() + capMs;
+      const overCap = expiresAt > capAt;
+      const pastCap = capAt < Date.now();
+      const due =
+        expiresAt - (sessionConfig.expiresIn - sessionConfig.updateAge) * 1000 <= Date.now();
+      const mustDie = overCap && pastCap;
+      const skippable = !overCap && due;
+      if (!mustDie && !skippable) return found;
+      if (!(await classifier.classify(adapter, found.user))) return found;
+      if (mustDie) {
+        return { ...found, session: { ...found.session, expiresAt: new Date(capAt) } };
+      }
+      // Outside a request (a product calling `internalAdapter.findSession` directly) there is no
+      // request state to set, and setting it throws.
+      if (await hasRequestState()) await setShouldSkipSessionRefresh(true);
+      return found;
+    };
+  }
+
   return {
     id: 'qnsc-staff-refresh-guard',
+    install,
     hooks: {
       before: [
         {
           matcher: () => true,
           handler: createAuthMiddleware(async (ctx) => {
-            const adapter = ctx.context.internalAdapter as unknown as SessionAdapter;
-            if (wrapped.has(adapter)) return;
-            wrapped.add(adapter);
-            const { sessionConfig } = ctx.context;
-            const find = adapter.findSession.bind(adapter);
-            adapter.findSession = async (token) => {
-              const found = await find(token);
-              if (!found) return found;
-              const expiresAt = new Date(found.session.expiresAt).getTime();
-              const createdAt = new Date(found.session.createdAt).getTime();
-              // Not about to refresh, or past its cap: nothing to decide here.
-              const due = expiresAt - (sessionConfig.expiresIn - sessionConfig.updateAge) * 1000;
-              if (due > Date.now() || expiresAt > createdAt + capMs) return found;
-              const userId = (found.user as { id?: unknown }).id;
-              const staff =
-                domainIn(emailDomain(found.user.email), policy.staffDomains) ||
-                (typeof userId === 'string' &&
-                  (await adapter.findAccounts(userId)).some((a) => a.providerId === 'microsoft'));
-              if (staff) await setShouldSkipSessionRefresh(true);
-              return found;
-            };
+            install(ctx.context);
           }),
         },
       ],
+    },
+  };
+}
+
+/**
+ * When a user BECOMES staff, the sessions they already hold were issued on a public lifetime. The
+ * read-time check above would end them within 12 h of their creation anyway; this ends them now, so
+ * the user signs in again as staff. "Becomes staff" is: a staff-provider (Microsoft) account is
+ * linked, or the email is moved onto a staff domain.
+ *
+ * Only the sessions that are NOT staff-shaped are revoked (stored expiry beyond `createdAt + cap`),
+ * never all of them: a user who was already staff (by domain) keeps their capped sessions on other
+ * devices, and a session issued by the very sign-in that linked the account would be capped too. The
+ * sessions are read from the DATABASE, not through the secondary storage, which a restart or outage
+ * would make look empty.
+ */
+export function staffBecameHooks(policy: StaffSessionPolicy, classifier: StaffClassifier) {
+  const capMs = DEFAULTS.session.staff.expiresInSeconds * 1000;
+
+  async function revokeUncapped(userId: string, context: HookContext | null): Promise<void> {
+    const inner =
+      context?.context ??
+      ((await policy.getContext()) as unknown as NonNullable<HookContext['context']>);
+    const rows = await inner.adapter.findMany({
+      model: 'session',
+      where: [{ field: 'userId', value: userId }],
+    });
+    const tokens = rows
+      .filter((r) => {
+        const created = r['createdAt'];
+        const expires = r['expiresAt'];
+        return (
+          typeof r['token'] === 'string' &&
+          created instanceof Date &&
+          expires instanceof Date &&
+          expires.getTime() > created.getTime() + capMs
+        );
+      })
+      .map((r) => r['token'] as string);
+    if (tokens.length > 0) await inner.internalAdapter.deleteSessions(tokens);
+  }
+
+  return {
+    account: {
+      create: {
+        after: async (account: Row, context: HookContext | null) => {
+          const userId = account['userId'];
+          if (account['providerId'] !== 'microsoft' || typeof userId !== 'string') return;
+          classifier.remember(userId, true);
+          await revokeUncapped(userId, context);
+        },
+      },
+    },
+    user: {
+      update: {
+        after: async (user: Row | null, context: HookContext | null) => {
+          const id = user?.['id'];
+          const email = user?.['email'];
+          if (typeof id !== 'string' || typeof email !== 'string') return;
+          if (!domainIn(emailDomain(email), policy.staffDomains)) return;
+          await revokeUncapped(id, context);
+        },
+      },
     },
   };
 }
