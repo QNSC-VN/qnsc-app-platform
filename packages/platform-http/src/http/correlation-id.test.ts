@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Injectable,
   Logger,
   Module,
@@ -16,9 +17,11 @@ import { APP_FILTER, APP_GUARD, NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   RequestContextService,
+  type RequestContext,
   createLoggerOptions,
   requestContextStorage,
 } from '@quynhonsemiconductor/observability';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '../errors';
@@ -67,10 +70,10 @@ describe('resolveCorrelationId', () => {
     expect(JSON.stringify(resolved)).not.toContain(value === '' ? '\u0000never' : value);
   });
 
-  it('replaces a header that arrived more than once, naming the reason', () => {
+  it('replaces an array of values too (only possible from a caller other than Node, which joins duplicates)', () => {
     expect(resolveCorrelationId(['abc', 'def'], () => 'g')).toEqual({
       id: 'g',
-      replaced: { reason: 'multiple', length: 3 },
+      replaced: { reason: 'invalid', length: 3 },
     });
   });
 
@@ -100,6 +103,9 @@ describe('readCorrelationIdMode', () => {
 
 // ── Against a real Nest + Fastify server on a real socket ──────────────────────────────────────
 
+/** opshub keeps a third, private AsyncLocalStorage of its own (not observability's). */
+const opshubStore = new AsyncLocalStorage<{ correlationId?: string }>();
+
 /** What a handler, a guard and the logger mixin each see, so the tests can compare them. */
 function snapshot() {
   const mixin = (
@@ -114,6 +120,11 @@ function snapshot() {
   return {
     store: requestContextStorage.getStore()?.correlationId ?? null,
     traceparent: requestContextStorage.getStore()?.traceparent ?? null,
+    // opshub's PRIVATE store, which its logger mixin and exception filter read. Null unless its
+    // middleware ran.
+    own: opshubStore.getStore()?.correlationId ?? null,
+    userId: requestContextStorage.getStore()?.userId ?? null,
+    workspaceId: requestContextStorage.getStore()?.workspaceId ?? null,
     service: new RequestContextService().getCorrelationId() ?? null,
     // The exact function pino calls to add fields to every log line.
     logLine: (mixin['correlationId'] as string | undefined) ?? null,
@@ -130,6 +141,13 @@ class ProbeController {
   @Post('ctx')
   post(@Body() body: unknown) {
     return { ...snapshot(), body };
+  }
+
+  @Get('login')
+  login(@Headers('x-user') user: string) {
+    // What an auth guard does after verifying a token: write into the CURRENT request's context.
+    new RequestContextService().setAuthContext(`ws-${user}`, user, `sess-${user}`);
+    return snapshot();
   }
 
   @Get('missing')
@@ -184,6 +202,22 @@ class ObservingMiddleware implements NestMiddleware {
   }
 }
 
+/** Shaped like opshub's: UUID-only, echoes the header, enters ITS OWN private store (not observability's). */
+@Injectable()
+class OpshubStyleMiddleware implements NestMiddleware {
+  use(
+    req: { headers: Record<string, string | string[] | undefined> },
+    res: { setHeader(name: string, value: string): void },
+    next: () => void,
+  ): void {
+    const header = req.headers['x-correlation-id'];
+    const raw = Array.isArray(header) ? header[0] : header;
+    const correlationId = raw && /^[0-9a-f-]{32,36}$/i.test(raw) ? raw.slice(0, 36) : randomUUID();
+    res.setHeader('X-Correlation-Id', correlationId);
+    opshubStore.run({ correlationId }, () => next());
+  }
+}
+
 /** solodesk's middleware: trusts the raw header as it arrives, validates nothing, echoes nothing. */
 @Injectable()
 class TrustingMiddleware implements NestMiddleware {
@@ -219,12 +253,16 @@ interface BootOptions {
   productMiddleware?: boolean;
   /** A middleware that trusts the raw header, as solodesk's does. */
   trustingMiddleware?: boolean;
+  /** A middleware shaped like opshub's, which uses its own private store. */
+  opshubMiddleware?: boolean;
   /** A module middleware that only observes the context. */
   observingMiddleware?: boolean;
   env?: NodeJS.ProcessEnv;
   /** Run before `enableCorrelationId`, as a product's own earlier hook would. */
   beforeEnable?: (app: NestFastifyApplication) => void;
   skipEnable?: boolean;
+  /** Create and start the server inside this context, as a bootstrap wrapped in `withJobContext` would. */
+  bootContext?: RequestContext;
 }
 
 async function boot(
@@ -243,18 +281,22 @@ async function boot(
     configure(consumer: MiddlewareConsumer): void {
       if (options.productMiddleware) consumer.apply(ProductStyleMiddleware).forRoutes('*');
       if (options.trustingMiddleware) consumer.apply(TrustingMiddleware).forRoutes('*');
+      if (options.opshubMiddleware) consumer.apply(OpshubStyleMiddleware).forRoutes('*');
       if (options.observingMiddleware) consumer.apply(ObservingMiddleware).forRoutes('*');
     }
   }
 
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
-    logger: false,
-  });
-  apps.push(app);
-  options.beforeEnable?.(app);
-  if (!options.skipEnable) enableCorrelationId(app, options.env ?? {});
-  await app.listen(0, '127.0.0.1');
-  return { app, url: await app.getUrl() };
+  const start = async () => {
+    const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
+      logger: false,
+    });
+    apps.push(app);
+    options.beforeEnable?.(app);
+    if (!options.skipEnable) enableCorrelationId(app, options.env ?? {});
+    await app.listen(0, '127.0.0.1');
+    return { app, url: await app.getUrl() };
+  };
+  return options.bootContext ? requestContextStorage.run(options.bootContext, start) : start();
 }
 
 async function getCtx(url: string, headers: Record<string, string> = {}) {
@@ -457,27 +499,103 @@ describe('a product whose own middleware still sets the header (rollout in progr
     expect(body.logLine).toBe(echoed);
   });
 
-  it('reuses a context that already exists when it runs, instead of replacing it', async () => {
+  it('gives every request its own context even when the server was started inside one (no cross-request leak)', async () => {
+    // Bootstrap wrapped in withJobContext() / run(): the ambient context is active when the server
+    // starts, and every request handled afterwards inherits it. Reusing it would hand ONE mutable
+    // object to all requests: they would share an id, and a guard's setAuthContext() would write
+    // one user into everybody's context.
+    const bootContext: RequestContext = {
+      workspaceId: undefined,
+      userId: undefined,
+      sessionId: undefined,
+      correlationId: 'BOOT',
+      traceparent: undefined,
+    };
+    const { url } = await boot({ bootContext });
+
+    const users = Array.from({ length: 24 }, (_v, i) => `user-${i}`);
+    const results = await Promise.all(
+      users.map(async (user) => {
+        const res = await fetch(`${url}/login`, {
+          headers: { 'x-correlation-id': `id-${user}`, 'x-user': user },
+        });
+        return (await res.json()) as ReturnType<typeof snapshot>;
+      }),
+    );
+    results.forEach((r, i) => {
+      expect(r.store).toBe(`id-user-${i}`);
+      expect(r.userId).toBe(`user-${i}`);
+      expect(r.workspaceId).toBe(`ws-user-${i}`);
+    });
+
+    // A request that never logs in sees no user: nothing bled over from the ones above.
+    const anonymous = await getCtx(url, { 'x-correlation-id': 'anon-1' });
+    expect(anonymous.body).toMatchObject({ store: 'anon-1', userId: null, workspaceId: null });
+    // And the request with NO header gets its own id, never the boot context's.
+    expect((await getCtx(url)).body.store).toMatch(UUID_V4);
+    // The ambient object itself was never written to.
+    expect(bootContext).toMatchObject({
+      correlationId: 'BOOT',
+      userId: undefined,
+      workspaceId: undefined,
+    });
+  });
+
+  it('enters the context with run(), not enterWith(): nothing leaks out of the request on the way back', async () => {
+    // An earlier app.use() sees the context AFTER ours has called next(). With run() the store is
+    // restored by then; with enterWith() it stays set on this execution and would bleed into whatever
+    // the same connection does next.
+    const afterNext: (string | null)[] = [];
     const { url } = await boot({
       beforeEnable: (app) => {
-        // An earlier app.use(), as a product's own bootstrap might have registered.
-        app.use((_req: unknown, _res: unknown, next: () => void) =>
-          requestContextStorage.run(
-            {
-              workspaceId: 'w1',
-              userId: undefined,
-              sessionId: undefined,
-              correlationId: 'pre-existing-1',
-              traceparent: undefined,
-            },
-            next,
-          ),
-        );
+        app.use((_req: unknown, _res: unknown, next: () => void) => {
+          next();
+          afterNext.push(requestContextStorage.getStore()?.correlationId ?? null);
+        });
       },
     });
-    const { res, body } = await getCtx(url, { 'x-correlation-id': 'caller-sent-id' });
-    expect(res.headers.get('x-correlation-id')).toBe('pre-existing-1');
-    expect(body.store).toBe('pre-existing-1');
+    await getCtx(url, { 'x-correlation-id': 'scoped-1' });
+    await getCtx(url, { 'x-correlation-id': 'scoped-2' });
+    expect(afterNext).toEqual([null, null]);
+  });
+
+  it('can be retried after a typo in CORRELATION_ID_MODE: the failed call does not count as enabled', async () => {
+    @Module({ controllers: [ProbeController] })
+    class Tiny {}
+    const app = await NestFactory.create<NestFastifyApplication>(Tiny, new FastifyAdapter(), {
+      logger: false,
+    });
+    apps.push(app);
+    expect(() => enableCorrelationId(app, { [CORRELATION_ID_MODE_ENV]: 'dissabled' })).toThrow(
+      /CORRELATION_ID_MODE/,
+    );
+    expect(() => enableCorrelationId(app, {})).not.toThrow();
+    await app.listen(0, '127.0.0.1');
+    const res = await fetch(`${await app.getUrl()}/ctx`);
+    expect(res.headers.get('x-correlation-id')).toMatch(UUID_V4);
+  });
+});
+
+describe('a product with its own private store (opshub-shaped middleware)', () => {
+  it("keeps one id in the response and in the product's own store, for every kind of input", async () => {
+    const { url } = await boot({ opshubMiddleware: true });
+    const uuid = randomUUID();
+    for (const header of [uuid, undefined, 'has space', 'a.b:c', 'caller-id-12345']) {
+      const { res, body } = await getCtx(url, header ? { 'x-correlation-id': header } : {});
+      const echoed = res.headers.get('x-correlation-id');
+      expect(echoed, String(header)).toBeTruthy();
+      expect(body.own, String(header)).toBe(echoed);
+      if (header === uuid) expect(echoed).toBe(uuid);
+    }
+  });
+
+  it('shows the prerequisite for deleting that middleware: without it the private store is empty', async () => {
+    // This package seeds observability's store. A product whose logger and exception filter read a
+    // different, private store sees nothing there once its own middleware is gone.
+    const { url } = await boot();
+    const { body } = await getCtx(url, { 'x-correlation-id': 'only-in-shared-store' });
+    expect(body.store).toBe('only-in-shared-store');
+    expect(body.own).toBeNull();
   });
 });
 

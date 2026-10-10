@@ -43,11 +43,16 @@ const SAFE_CORRELATION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
  */
 const W3C_TRACEPARENT = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 
-/** Why a supplied value was not used. Never carries the value itself. */
+/**
+ * Why a supplied value was not used. Never carries the value itself.
+ *
+ * There is one reason on purpose. A header that arrives more than once reaches Node as ONE
+ * comma-joined string (`a, b`), which has a space and a comma and so fails the character class like
+ * any other bad value; a separate "repeated" reason could not be told apart over a real socket.
+ */
 export interface CorrelationIdReplacement {
-  /** `multiple`: the header arrived more than once. `invalid`: empty, too long, or a character outside the class. */
-  reason: 'invalid' | 'multiple';
-  /** Length of the rejected value (the first one, for `multiple`). A number is safe to log; the value is not. */
+  reason: 'invalid';
+  /** Length of the rejected value. A number is safe to log; the value is not. */
   length: number;
 }
 
@@ -69,7 +74,9 @@ export function resolveCorrelationId(
 ): ResolvedCorrelationId {
   if (supplied === undefined) return { id: generate() };
   if (Array.isArray(supplied)) {
-    return { id: generate(), replaced: { reason: 'multiple', length: (supplied[0] ?? '').length } };
+    // Not what Node produces for this header (it joins duplicates into one string), but the type
+    // allows it and an array is never a single valid id.
+    return { id: generate(), replaced: { reason: 'invalid', length: (supplied[0] ?? '').length } };
   }
   if (SAFE_CORRELATION_ID.test(supplied)) return { id: supplied };
   return { id: generate(), replaced: { reason: 'invalid', length: supplied.length } };
@@ -108,13 +115,19 @@ const logger = new Logger('CorrelationId');
  * enableCorrelationId(app);
  * ```
  *
+ * **A context is made for EVERY request, whatever is active when it runs.** A server started inside a
+ * context (a bootstrap wrapped in `withJobContext`, say) has that context active for every request it
+ * handles later; reusing it would hand one mutable object to all of them, so they would share an id
+ * and a guard's `setAuthContext()` would write one user into everybody's context. Register this
+ * before any other middleware that enters a context: it starts a fresh one and does not copy from
+ * an existing one.
+ *
  * **A product that already seeds the context keeps working.** The id settled on here is also written
  * back to the request's `x-correlation-id` header, so a product middleware that reads that header
  * adopts it (and one that trusts the raw header no longer reflects bad input). If that middleware
  * then enters its own context, its id is the effective one: its `setHeader` wins over this one, and
- * its context is the innermost. One id, the product's, as before. A context that already exists when
- * this runs is reused, not replaced. Switch this off without a code change with
- * `CORRELATION_ID_MODE=disabled`, and remove the product's middleware at leisure.
+ * its context is the innermost. One id, the product's, as before. Switch this off without a code
+ * change with `CORRELATION_ID_MODE=disabled`, and remove the product's middleware at leisure.
  *
  * @throws if called twice for the same application, or on an unknown `CORRELATION_ID_MODE`.
  */
@@ -125,18 +138,18 @@ export function enableCorrelationId(
   if (enabledFor.has(app)) {
     throw new Error('enableCorrelationId() was already called for this application.');
   }
+  // Parsed BEFORE the application is recorded: a typo in the mode throws, and the call that failed
+  // must not count as having enabled it, or the fixed call would be refused as a duplicate.
+  const mode = readCorrelationIdMode(env);
   enabledFor.add(app);
 
-  if (readCorrelationIdMode(env) === 'disabled') {
+  if (mode === 'disabled') {
     logger.log(`${CORRELATION_ID_MODE_ENV}=disabled: the product seeds the correlation id itself`);
     return;
   }
 
   app.use((req: IncomingMessage, res: ServerResponse, next: () => void) => {
-    const existing = requestContextStorage.getStore();
-    const { id, replaced } = existing
-      ? { id: existing.correlationId, replaced: undefined }
-      : resolveCorrelationId(req.headers[CORRELATION_ID_HEADER]);
+    const { id, replaced } = resolveCorrelationId(req.headers[CORRELATION_ID_HEADER]);
 
     if (replaced) {
       // Reason and length only. The value is attacker-chosen and may hold CR/LF.
@@ -158,11 +171,6 @@ export function enableCorrelationId(
     // `'x-correlation-id'`, which the test for that constant pins.
     req.headers['x-correlation-id'] = id;
 
-    if (existing) {
-      next();
-      return;
-    }
-
     const context: RequestContext = {
       workspaceId: undefined,
       userId: undefined,
@@ -170,6 +178,7 @@ export function enableCorrelationId(
       correlationId: id,
       traceparent: firstValid(req.headers['traceparent'], W3C_TRACEPARENT),
     };
+    // run(), never enterWith(): the store is restored when next() returns, so nothing outlives the request.
     requestContextStorage.run(context, next);
   });
 }
