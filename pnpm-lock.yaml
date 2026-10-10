@@ -106,6 +106,9 @@ importers:
       '@quynhonsemiconductor/platform-http':
         specifier: workspace:^
         version: link:../platform-http
+      '@quynhonsemiconductor/platform-jobs':
+        specifier: workspace:*
+        version: link:../platform-jobs
       '@quynhonsemiconductor/testing':
         specifier: workspace:*
         version: link:../testing

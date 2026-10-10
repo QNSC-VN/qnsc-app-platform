@@ -91,6 +91,15 @@ export async function knownDeviceId(
   userId: () => Promise<string | undefined>,
   now: () => number = () => Math.floor(Date.now() / 1000),
 ): Promise<string | undefined> {
+  return (await validDevice(ctx, userId, now))?.deviceId;
+}
+
+/** As {@link knownDeviceId}, with the cookie's `iat` too (a re-issue must not extend its life). */
+export async function validDevice(
+  ctx: Ctx,
+  userId: () => Promise<string | undefined>,
+  now: () => number = () => Math.floor(Date.now() / 1000),
+): Promise<{ deviceId: string; iat: number } | undefined> {
   const device = await parse(ctx);
   if (!device) return undefined;
   const age = now() - device.iat;
@@ -98,29 +107,53 @@ export async function knownDeviceId(
     return undefined;
   if ((await userId()) !== device.userId) return undefined;
   const epoch = await epochOf(ctx, device.userId);
-  return epoch && equal(epoch, device.epoch) ? device.deviceId : undefined;
+  return epoch && equal(epoch, device.epoch)
+    ? { deviceId: device.deviceId, iat: device.iat }
+    : undefined;
 }
 
-/** Set the cookie after a completed sign-in, unless this browser already has a valid one for the user. */
-export async function rememberDevice(ctx: Ctx, userId: string): Promise<void> {
-  if (await knownDeviceId(ctx, async () => userId)) return;
+async function writeDevice(
+  ctx: Ctx,
+  userId: string,
+  deviceId: string,
+  iat: number,
+): Promise<boolean> {
   const epoch = await epochOf(ctx, userId);
-  if (!epoch) return; // no password account: nothing to throttle, nothing to remember
+  if (!epoch) return false; // no password account: nothing to throttle, nothing to remember
   const cookie = ctx.context.createAuthCookie(COOKIE, {
     maxAge: DEFAULTS.lockout.knownDevice.maxAgeSeconds,
   });
-  const payload = [
-    'v2',
-    userId,
-    randomBytes(18).toString('base64url'),
-    Math.floor(Date.now() / 1000),
-    epoch,
-  ].join('.');
+  const payload = ['v2', userId, deviceId, iat, epoch].join('.');
   ctx.setCookie(
     cookie.name,
     signDeviceValue(ctx.context.secret, cookie.name, payload),
     cookie.attributes,
   );
+  return true;
+}
+
+/** Set the cookie after a completed sign-in, unless this browser already has a valid one for the user. */
+export async function rememberDevice(ctx: Ctx, userId: string): Promise<void> {
+  if (await knownDeviceId(ctx, async () => userId)) return;
+  await writeDevice(
+    ctx,
+    userId,
+    randomBytes(18).toString('base64url'),
+    Math.floor(Date.now() / 1000),
+  );
+}
+
+/**
+ * Re-issue THIS browser's cookie under the user's current epoch, keeping its device id and its
+ * original `iat` (so the per-device counter carries on and the cookie does not live longer). Used after
+ * "sign out OTHER sessions", which bumps the epoch for every device but the one asking.
+ */
+export async function reissueDevice(
+  ctx: Ctx,
+  userId: string,
+  device: { deviceId: string; iat: number },
+): Promise<void> {
+  await writeDevice(ctx, userId, device.deviceId, device.iat);
 }
 
 /**

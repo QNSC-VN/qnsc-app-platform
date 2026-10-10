@@ -3,7 +3,13 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/a
 import type { BetterAuthPlugin } from 'better-auth';
 import { DEFAULTS } from './defaults';
 import { emitSafely, type SecurityEventSink } from './events';
-import { bumpDeviceEpoch, knownDeviceId, rememberDevice } from './known-device';
+import {
+  bumpDeviceEpoch,
+  knownDeviceId,
+  rememberDevice,
+  reissueDevice,
+  validDevice,
+} from './known-device';
 
 const digest = (value: string): string =>
   createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
@@ -56,21 +62,24 @@ async function admit(
   const gen = await generation(storage, subject);
   if (deviceId) {
     // A known device is limited per device: the account-wide delay and ceiling are exactly what a flood
-    // of guesses from other addresses exhausts, and they must not reach the owner. But the cookie is a
-    // bypass, so ALL valid devices of the account share a budget; past it a cookie counts for nothing
-    // and the request is judged like any other.
+    // of guesses from other addresses exhausts, and they must not reach the owner.
+    //
+    // Per device FIRST. A request this device's own limit refuses must not touch the shared budget:
+    // otherwise one stolen cookie burns the whole account's allowance in a few dozen requests and the
+    // owner's other devices are refused with it.
+    const mine = await storage.increment(
+      lockoutKeys.device(kind, gen, subject, deviceId),
+      knownDevice.windowSeconds,
+    );
+    if (mine > knownDevice.maxAttempts) await refuse();
+    // The cookie is a bypass, so ALL valid devices of the account share a budget, spent only by
+    // attempts that passed the device limit; past it a cookie counts for nothing and the request is
+    // judged like any other.
     const together = await storage.increment(
       lockoutKeys.devices(kind, gen, subject),
       knownDevice.accountWindowSeconds,
     );
-    if (together <= knownDevice.accountMaxAttempts) {
-      const mine = await storage.increment(
-        lockoutKeys.device(kind, gen, subject, deviceId),
-        knownDevice.windowSeconds,
-      );
-      if (mine > knownDevice.maxAttempts) await refuse();
-      return;
-    }
+    if (together <= knownDevice.accountMaxAttempts) return;
   }
   const here = await storage.increment(
     lockoutKeys.accountAndIp(kind, gen, subject, ip),
@@ -102,8 +111,20 @@ export async function clearAttempts(storage: Storage, subject: string): Promise<
  * on 2FA verification. Sign-up is limited per IP only, by the built-in rule.
  */
 export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
-  const resetUser = new WeakMap<Request, string>();
-  const revokedUser = new WeakMap<Request, string>();
+  // What a before hook learned and the matching after hook needs, keyed by the CALL. A browser request
+  // has `ctx.request`; a server-side `auth.api.x({ headers })` call has none (review L2), only its headers
+  // (or just a body). Whichever exists is the same object in both hooks of one call.
+  const resetUser = new WeakMap<object, string>();
+  const revoked = new WeakMap<
+    object,
+    { userId: string; device?: { deviceId: string; iat: number } }
+  >();
+  const callKey = (ctx: {
+    request?: Request | undefined;
+    headers?: Headers | undefined;
+    body?: unknown;
+  }): object | undefined =>
+    ctx.request ?? ctx.headers ?? (ctx.body && typeof ctx.body === 'object' ? ctx.body : undefined);
   const refuse = async (): Promise<never> => {
     await emitSafely(sink, { name: 'account.locked' });
     throw APIError.from('TOO_MANY_REQUESTS', {
@@ -142,11 +163,21 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
           }),
         },
         {
-          // "Sign out everywhere" must also forget the remembered devices (see known-device.ts).
-          matcher: (ctx) => ctx.path === '/revoke-sessions',
+          // "Sign out everywhere" and "sign out OTHER sessions" must also forget remembered devices
+          // (see known-device.ts). For "other", this browser stays remembered: note its cookie now,
+          // while it is still valid, and re-issue it under the new epoch afterwards.
+          matcher: (ctx) =>
+            ctx.path === '/revoke-sessions' || ctx.path === '/revoke-other-sessions',
           handler: createAuthMiddleware(async (ctx) => {
-            const session = await getSessionFromCtx(ctx);
-            if (session && ctx.request) revokedUser.set(ctx.request, session.user.id);
+            const key = callKey(ctx);
+            const session = key ? await getSessionFromCtx(ctx) : null;
+            if (!key || !session) return;
+            const userId = session.user.id;
+            const device =
+              ctx.path === '/revoke-other-sessions'
+                ? await validDevice(ctx, async () => userId)
+                : undefined;
+            revoked.set(key, { userId, ...(device ? { device } : {}) });
           }),
         },
         {
@@ -154,33 +185,37 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
           matcher: (ctx) => ctx.path === '/reset-password',
           handler: createAuthMiddleware(async (ctx) => {
             const token = (ctx.body as { token?: unknown } | undefined)?.token;
-            if (typeof token !== 'string' || !ctx.request) return;
+            const key = callKey(ctx);
+            if (typeof token !== 'string' || !key) return;
             const pending = await ctx.context.internalAdapter.findVerificationValue(
               `reset-password:${token}`,
             );
             const user = pending
               ? await ctx.context.internalAdapter.findUserById(pending.value)
               : null;
-            if (user) resetUser.set(ctx.request, user.email);
+            if (user) resetUser.set(key, user.email);
           }),
         },
       ],
       after: [
         {
           matcher: (ctx) =>
-            ctx.path === '/revoke-sessions' || ctx.path === '/admin/revoke-user-sessions',
+            ctx.path === '/revoke-sessions' ||
+            ctx.path === '/revoke-other-sessions' ||
+            ctx.path === '/admin/revoke-user-sessions',
           handler: createAuthMiddleware(async (ctx) => {
             if (ctx.context.returned instanceof Error) return;
-            const body = ctx.body as { userId?: unknown } | undefined;
-            const userId =
-              ctx.path === '/admin/revoke-user-sessions'
-                ? typeof body?.userId === 'string'
-                  ? body.userId
-                  : undefined
-                : ctx.request
-                  ? revokedUser.get(ctx.request)
-                  : undefined;
-            if (userId) await bumpDeviceEpoch(ctx, userId);
+            if (ctx.path === '/admin/revoke-user-sessions') {
+              const target = (ctx.body as { userId?: unknown } | undefined)?.userId;
+              if (typeof target === 'string') await bumpDeviceEpoch(ctx, target);
+              return;
+            }
+            const key = callKey(ctx);
+            const seen = key ? revoked.get(key) : undefined;
+            if (!seen) return;
+            await bumpDeviceEpoch(ctx, seen.userId);
+            // "Other sessions" keeps the one asking: its cookie, valid until now, gets the new epoch.
+            if (seen.device) await reissueDevice(ctx, seen.userId, seen.device);
           }),
         },
         {
@@ -214,7 +249,8 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
           matcher: (ctx) => ctx.path === '/reset-password',
           handler: createAuthMiddleware(async (ctx) => {
             const storage = ctx.context.secondaryStorage;
-            const email = ctx.request ? resetUser.get(ctx.request) : undefined;
+            const key = callKey(ctx);
+            const email = key ? resetUser.get(key) : undefined;
             if (!storage || !email || ctx.context.returned instanceof Error) return;
             await clearAttempts(storage, email);
           }),
