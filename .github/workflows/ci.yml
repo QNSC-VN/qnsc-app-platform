@@ -196,7 +196,7 @@ jobs:
           name: consumer-tarballs
           path: tarballs
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@c0cc0dbf26e731b04b4470bec4d55aee148f8229
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
         with:
           node-version: '24'
           pnpm-version: ${{ matrix.pnpm }}
