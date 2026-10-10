@@ -1,4 +1,5 @@
-import { requestContextStorage, QueueMetrics } from '@quynhonsemiconductor/observability';
+import { QueueMetrics, requestContextStorage } from '@quynhonsemiconductor/observability';
+import { currentCorrelationId } from './correlation';
 import { withTransaction } from '@quynhonsemiconductor/platform-db/drizzle';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -526,6 +527,150 @@ describe.skipIf(!dockerOn)(
         } finally {
           await worker.close();
         }
+      });
+    });
+
+    describe('correlation: a job continues the request that caused it', () => {
+      /** Send a job from inside a request context, the way a controller does, and report what the handler saw. */
+      async function run(payloadId: unknown, requestId = 'req-from-the-browser') {
+        const worker = h.makeJobs({ worker: true });
+        const queue = uniqueQueue('corr');
+        const seen: { correlationId: string | undefined; data: unknown }[] = [];
+        await worker.jobs.handle(queue, (job) => {
+          seen.push({
+            correlationId: requestContextStorage.getStore()?.correlationId,
+            data: job.data,
+          });
+          return Promise.resolve();
+        });
+        await worker.jobs.start();
+        try {
+          const id = await requestContextStorage.run({ correlationId: requestId } as never, () =>
+            worker.jobs.send(
+              queue,
+              payloadId === 'FROM_CONTEXT'
+                ? { correlationId: currentCorrelationId(), n: 1 }
+                : { correlationId: payloadId, n: 1 },
+            ),
+          );
+          await waitFor(() => seen.length === 1, { message: 'the handler' });
+          return { seen: seen[0]!, queue, jobId: id! };
+        } finally {
+          await worker.close();
+        }
+      }
+
+      it("the sender puts the request's id in the payload with currentCorrelationId(), and the handler's logs carry it", async () => {
+        const { seen } = await run('FROM_CONTEXT');
+        expect(seen.correlationId).toBe('req-from-the-browser');
+        // The payload is exactly what was sent: nothing was injected, nothing removed.
+        expect(seen.data).toEqual({ correlationId: 'req-from-the-browser', n: 1 });
+      });
+
+      it.each([
+        ['has a space', 'two words'],
+        ['forges a log line', 'abc\r\nfake: line'],
+        ['is too long', 'a'.repeat(129)],
+        ['is not a string', 42],
+        ['is empty', ''],
+      ])('an id in the payload that %s is replaced by queue:jobId', async (_why, bad) => {
+        const { seen, queue, jobId } = await run(bad);
+        expect(seen.correlationId).toBe(`${queue}:${jobId}`);
+      });
+
+      it('a payload with no id gets queue:jobId, and the platform never adds a key to the data', async () => {
+        const worker = h.makeJobs({ worker: true });
+        const queue = uniqueQueue('corr');
+        const seen: { correlationId: string | undefined; data: unknown }[] = [];
+        await worker.jobs.handle(queue, (job) => {
+          seen.push({
+            correlationId: requestContextStorage.getStore()?.correlationId,
+            data: job.data,
+          });
+          return Promise.resolve();
+        });
+        await worker.jobs.start();
+        try {
+          const id = await requestContextStorage.run(
+            { correlationId: 'req-ignored' } as never,
+            () => worker.jobs.send(queue, { strict: true }),
+          );
+          await waitFor(() => seen.length === 1, { message: 'the handler' });
+          expect(seen[0]).toEqual({ correlationId: `${queue}:${id}`, data: { strict: true } });
+        } finally {
+          await worker.close();
+        }
+      });
+
+      it('a job that sends a follow-up job continues the same id down the chain', async () => {
+        const worker = h.makeJobs({ worker: true });
+        const first = uniqueQueue('corr');
+        const second = uniqueQueue('corr');
+        const seen: string[] = [];
+        await worker.jobs.handle(first, async () => {
+          await worker.jobs.send(second, { correlationId: currentCorrelationId() });
+        });
+        await worker.jobs.handle(second, () => {
+          seen.push(requestContextStorage.getStore()!.correlationId!);
+          return Promise.resolve();
+        });
+        await worker.jobs.start();
+        try {
+          await requestContextStorage.run({ correlationId: 'req-chain' } as never, () =>
+            worker.jobs.send(first, { correlationId: currentCorrelationId() }),
+          );
+          await waitFor(() => seen.length === 1, { message: 'the second job' });
+          expect(seen).toEqual(['req-chain']);
+        } finally {
+          await worker.close();
+        }
+      });
+    });
+
+    describe('queue.processed / queue.failures count only what the fenced settle landed on', () => {
+      const lostClaim = async (outcome: 'succeed' | 'throw') => {
+        const processed = vi.spyOn(QueueMetrics.prototype, 'recordProcessed');
+        const failures = vi.spyOn(QueueMetrics.prototype, 'recordFailure');
+        const worker = h.makeJobs({ worker: true });
+        const queue = uniqueQueue('lost');
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let started = false;
+        await worker.jobs.handle(queue, async () => {
+          started = true;
+          await gate;
+          if (outcome === 'throw') throw new Error('late failure');
+        });
+        await worker.jobs.start();
+        try {
+          const id = (await worker.jobs.send(queue, {}))!;
+          await waitFor(() => started, { message: 'the handler to start' });
+          await h.adminPool.query(
+            "UPDATE pgboss.job SET state = 'cancelled', completed_on = now() WHERE id = $1",
+            [id],
+          );
+          release();
+          await waitFor(() => h.logs.warn.some((m) => m.includes(id) && /claim was lost/.test(m)), {
+            message: 'the lost-claim warning',
+          });
+          await sleep(300);
+          return {
+            processed: processed.mock.calls.filter(([q]) => q === queue).length,
+            failures: failures.mock.calls.filter(([q]) => q === queue).length,
+          };
+        } finally {
+          processed.mockRestore();
+          failures.mockRestore();
+          await worker.close();
+        }
+      };
+
+      it('a handler that SUCCEEDS after its claim was lost is not a processed job', async () => {
+        expect(await lostClaim('succeed')).toEqual({ processed: 0, failures: 0 });
+      });
+
+      it('a handler that THROWS after its claim was lost is not a failure of the queue', async () => {
+        expect(await lostClaim('throw')).toEqual({ processed: 0, failures: 0 });
       });
     });
 

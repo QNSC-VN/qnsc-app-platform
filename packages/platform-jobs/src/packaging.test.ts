@@ -45,6 +45,7 @@ describe('the published package', () => {
         'PermanentJobError',
         'createJobs',
         'createJobsPool',
+        'currentCorrelationId',
         'idempotencyId',
         'installJobsSchema',
         'jobsGrantsSql',

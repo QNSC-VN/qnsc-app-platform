@@ -17,6 +17,7 @@ export { installJobsSchema, jobsGrantsSql, type InstallJobsSchemaOptions } from 
 export { stopBudgetMs } from './budget';
 export { roleFrom, type Role } from './boss-options';
 export { DEFAULTS, DEFAULT_TIME_ZONE, JobsConfigError } from './config';
+export { currentCorrelationId } from './correlation';
 export { PermanentJobError } from './errors';
 export { idempotencyId } from './idempotency';
 export { OLDEST_READY_AGE_METRIC } from './metrics';

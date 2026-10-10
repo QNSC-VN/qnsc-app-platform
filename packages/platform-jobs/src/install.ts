@@ -66,6 +66,10 @@ export async function installJobsSchema(
   // rolling migration, a retried Job) install ONE AT A TIME, so the second finds a finished schema
   // instead of racing the first through the table DDL and the grants.
   const client = await migratorPool.connect();
+  // If the unlock fails the session may still HOLD the lock, and a pooled connection that holds an
+  // advisory lock would block every later install until the process dies. Release it with the error
+  // so the pool destroys the connection (which frees the lock) instead of reusing it.
+  let broken: Error | undefined;
   try {
     await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [INSTALL_LOCK]);
     try {
@@ -73,10 +77,12 @@ export async function installJobsSchema(
     } finally {
       await client
         .query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [INSTALL_LOCK])
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          broken = error instanceof Error ? error : new Error(String(error));
+        });
     }
   } finally {
-    client.release();
+    client.release(broken);
   }
 }
 

@@ -14,6 +14,7 @@ import {
   type ResolvedHandler,
   type ResolvedQueue,
 } from './config';
+import { correlationIdFor } from './correlation';
 import { isPermanent } from './errors';
 import { idempotencyId } from './idempotency';
 import { EFFECT_TABLE } from './install';
@@ -50,6 +51,7 @@ export interface CreateJobsOptions {
     superviseIntervalSeconds?: number;
     monitorIntervalSeconds?: number;
     maintenanceIntervalSeconds?: number;
+    drainTimeoutMs?: number;
   };
 }
 
@@ -112,6 +114,7 @@ export class JobsImpl implements Jobs {
   private state: 'new' | 'started' | 'stopped' = 'new';
   private purgeTimer: NodeJS.Timeout | undefined;
   private readonly queueMetrics = new QueueMetrics();
+  private readonly drainTimeoutMs: number;
 
   constructor(options: CreateJobsOptions) {
     this.pool = options.pool;
@@ -119,12 +122,14 @@ export class JobsImpl implements Jobs {
     this.logger = options.logger ?? console;
     this.role = roleFrom(this.env);
     const instanceName = this.env['OTEL_SERVICE_NAME']?.trim() || this.role;
+    const { drainTimeoutMs, ...bossInternal } = options.internal ?? {};
+    this.drainTimeoutMs = drainTimeoutMs ?? DRAIN_TIMEOUT_MS;
     this.boss = new PgBoss(
       bossOptions({
         role: this.role,
         pool: this.pool,
         instanceName,
-        ...options.internal,
+        ...bossInternal,
       }) as ConstructorParameters<typeof PgBoss>[0],
     );
     this.boss.on('error', (error: Error) => {
@@ -267,8 +272,50 @@ export class JobsImpl implements Jobs {
     );
   }
 
-  private processBatch(handler: RegisteredHandler, jobs: BatchJob[]): Promise<JobOutcome[]> {
-    return Promise.all(jobs.map((job) => this.runOne(handler, job)));
+  private async processBatch(handler: RegisteredHandler, jobs: BatchJob[]): Promise<BatchResult[]> {
+    const outcomes = await Promise.all(jobs.map((job) => this.runOne(handler, job)));
+    await this.countFailures(handler.queue.name, outcomes);
+    // Only what pg-boss reads: the internal attempt number stays here.
+    return outcomes.map((outcome) =>
+      outcome.status === 'completed'
+        ? { id: outcome.id, status: outcome.status }
+        : { id: outcome.id, status: outcome.status, output: outcome.output },
+    );
+  }
+
+  /**
+   * `queue.failures` counts a failure only when the fenced settle that follows will land: the job is
+   * still ACTIVE under the attempt that ran. A handler that throws after its claim was lost (expired,
+   * cancelled, taken by another worker) is not a failure of the queue; pg-boss's fence leaves that
+   * job alone, and counting it would double-count the attempt that now holds the job.
+   */
+  private async countFailures(queue: string, outcomes: JobOutcome[]): Promise<void> {
+    const failed = outcomes.filter((o) => o.status !== 'completed');
+    if (failed.length === 0) return;
+    let held: Set<string> | undefined;
+    try {
+      const { rows } = await this.pool.query<{ id: string }>(
+        `SELECT id FROM pgboss.job
+          WHERE name = $1 AND state = 'active'
+            AND (id::text || ':' || retry_count::text) = ANY($2::text[])`,
+        [queue, failed.map((o) => `${o.id}:${o.attempt}`)],
+      );
+      held = new Set(rows.map((r) => r.id));
+    } catch (error) {
+      // Cannot tell: count them (the usual case) rather than lose the signal.
+      this.logger.warn(
+        `Could not check job claims before counting failures: ${describe(error).message}`,
+      );
+    }
+    for (const outcome of failed) {
+      if (held && !held.has(outcome.id)) {
+        this.logger.warn(
+          `Job ${queue}/${outcome.id} failed after its claim was lost; not counting it`,
+        );
+      } else {
+        this.queueMetrics.recordFailure(queue);
+      }
+    }
   }
 
   /**
@@ -291,26 +338,30 @@ export class JobsImpl implements Jobs {
       signal: job.signal,
     };
     try {
-      // Handler logs carry the job and correlation context (`queue:jobId`), like a request's.
+      // Handler logs carry a correlation id: the one the sender put in the payload (so a job
+      // continues the request that caused it), else `queue:jobId`. Never read from anywhere else.
       await withJobContext(queue, () => handler.fn(context), {
-        correlationId: `${queue}:${job.id}`,
+        correlationId: correlationIdFor(queue, job.id, job.data),
       });
     } catch (error) {
       const { name, message } = describe(error);
-      this.queueMetrics.recordFailure(queue);
       if (isPermanent(error)) {
         this.logger.warn(
           `Job ${queue}/${job.id} failed permanently, dead-lettering: ${name}: ${message}`,
         );
-        return { id: job.id, status: 'deadletter', output: { name, message } };
+        return {
+          id: job.id,
+          status: 'deadletter',
+          output: { name, message },
+          attempt: job.retryCount,
+        };
       }
       this.logger.warn(
         `Job ${queue}/${job.id} attempt ${context.attempt} failed: ${name}: ${message}`,
       );
-      return { id: job.id, status: 'failed', output: { name, message } };
+      return { id: job.id, status: 'failed', output: { name, message }, attempt: job.retryCount };
     }
 
-    this.queueMetrics.recordProcessed(queue);
     try {
       // Both calls are FENCED to the attempt that was fetched, and only match a row that is still
       // ACTIVE under it, so a handler that finishes after its claim was lost can touch nothing.
@@ -323,10 +374,13 @@ export class JobsImpl implements Jobs {
         ? this.boss.deleteJob(queue, attempt)
         : this.boss.complete(queue, attempt))) as { affected?: number };
       if (done.affected === 0) {
-        // Expired, cancelled or taken by another worker while the handler ran.
+        // Expired, cancelled or taken by another worker while the handler ran: the settle landed on
+        // nothing, so this is not a processed job of this queue (the attempt that holds it counts).
         this.logger.warn(
           `Job ${queue}/${job.id} finished after its claim was lost; not completing it`,
         );
+      } else {
+        this.queueMetrics.recordProcessed(queue);
       }
     } catch (error) {
       // Not fatal: the batch-level settle completes it, and retention removes the row.
@@ -505,9 +559,9 @@ export class JobsImpl implements Jobs {
       }
       return outcomes;
     });
+    let quiet = 0;
     try {
-      let quiet = 0;
-      for (let waited = 0; quiet < 2 && waited < DRAIN_TIMEOUT_MS; waited += DRAIN_POLL_MS) {
+      for (let waited = 0; quiet < 2 && waited < this.drainTimeoutMs; waited += DRAIN_POLL_MS) {
         await new Promise((resolve) => setTimeout(resolve, DRAIN_POLL_MS));
         const { rows } = await this.pool.query<{ n: string }>(
           `SELECT count(*) AS n FROM pgboss.job
@@ -517,7 +571,15 @@ export class JobsImpl implements Jobs {
         quiet = Number(rows[0]!.n) === 0 ? quiet + 1 : 0;
       }
     } finally {
-      await this.boss.offWork(queue, { id: worker, wait: true });
+      // Wait for the worker's current job only when the queue went quiet; on a timeout a handler may
+      // never return, and waiting for it would hang the very test this is reporting for.
+      await this.boss.offWork(queue, { id: worker, wait: quiet >= 2 });
+    }
+    if (quiet < 2) {
+      throw new Error(
+        `drainQueue: queue "${queue}" still had ready or active jobs after ${this.drainTimeoutMs} ms; ` +
+          'a handler is not finishing (or keeps enqueuing work for the same queue).',
+      );
     }
     if (failures.length > 0) {
       throw new Error(`Job on queue "${queue}" failed: ${failures[0]}`);
@@ -535,9 +597,16 @@ interface BatchJob {
   signal: AbortSignal;
 }
 
+/** What pg-boss reads from a `perJobResults` handler. */
+interface BatchResult {
+  id: string;
+  status: 'completed' | 'failed' | 'deadletter';
+  output?: object;
+}
+
 type JobOutcome =
   | { id: string; status: 'completed' }
-  | { id: string; status: 'failed' | 'deadletter'; output: object };
+  | { id: string; status: 'failed' | 'deadletter'; output: object; attempt: number };
 
 /** Drizzle's transaction exposes `transaction()`, which nests as a savepoint. */
 interface SavepointCapable {
