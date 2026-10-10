@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createAuthClient } from 'better-auth/client';
 import { createServer } from 'node:http';
 import { hash as argon2hash } from '@node-rs/argon2';
-import { revokeAllSessions } from '../create-identity';
+import { revokeAllSessions, SessionStoreUnavailableError } from '../create-identity';
 import { DEFAULTS } from '../defaults';
 import { signDeviceValue } from '../known-device';
 import { lockoutKeys } from '../lockout';
@@ -396,6 +396,78 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
         expect(await lookupsDuring10Reads()).toBe(0);
         await age(c, 13); // older than the cap, not yet due for its daily refresh
         expect(await lookupsDuring10Reads()).toBeLessThanOrEqual(1);
+      });
+
+      describe('a staff session past its cap is not listed as an active session', () => {
+        const idsOf = async (email: string) =>
+          (
+            await stack.pool.query<{ id: string }>(
+              `select s.id from identity.session s join identity."user" u on u.id = s.user_id
+                where u.email = $1`,
+              [email],
+            )
+          ).rows.map((r) => r.id);
+
+        it('list-sessions: the 13 h sibling of a staff user is not listed; the live session is', async () => {
+          const { email, password, c } = await staffByDomainOnly();
+          const sibling = stack.client();
+          expect((await signIn(sibling, email, password)).status).toBe(200);
+          await publicLifetime(sibling, 13);
+          const listed = (await c.get(`${API}/list-sessions`)).json<Array<{ id: string }>>();
+          const all = await idsOf(email);
+          expect(all).toHaveLength(2);
+          expect(listed).toHaveLength(1);
+          const dead = (
+            await stack.pool.query<{ id: string }>(
+              `select id from identity.session where token = $1`,
+              [sessionToken(sibling)],
+            )
+          ).rows[0]!.id;
+          expect(listed.map((x) => x.id)).not.toContain(dead);
+        });
+
+        it('a PUBLIC user’s old sessions are still listed (the filter is for staff only)', async () => {
+          const email = uniqueEmail('visitor');
+          const password = strongPassword();
+          await verifiedUser(stack, email, password, expect);
+          const a = stack.client();
+          const b = stack.client();
+          expect((await signIn(a, email, password)).status).toBe(200);
+          expect((await signIn(b, email, password)).status).toBe(200);
+          await age(b, 13);
+          expect(
+            (await a.get(`${API}/list-sessions`)).json<unknown[]>().length,
+          ).toBeGreaterThanOrEqual(2);
+        });
+
+        it('admin/list-user-sessions: the same filter, for the session list of someone else', async () => {
+          const { email, password } = await staffByDomainOnly();
+          const first = stack.client();
+          const sibling = stack.client();
+          expect((await signIn(first, email, password)).status).toBe(200);
+          expect((await signIn(sibling, email, password)).status).toBe(200);
+          await publicLifetime(sibling, 13);
+          const userId = (
+            await stack.pool.query<{ id: string }>(
+              `select id from identity."user" where email = $1`,
+              [email],
+            )
+          ).rows[0]!.id;
+          const adminEmail = uniqueEmail('admin');
+          const adminPassword = strongPassword();
+          await verifiedUser(stack, adminEmail, adminPassword, expect);
+          await stack.pool.query(`update identity."user" set role = 'admin' where email = $1`, [
+            adminEmail,
+          ]);
+          const admin = stack.client();
+          expect((await signIn(admin, adminEmail, adminPassword)).status).toBe(200);
+          const res = await admin.post(`${API}/admin/list-user-sessions`, { userId });
+          expect(res.status, res.body).toBe(200);
+          const { sessions } = res.json<{ sessions: Array<{ id: string }> }>();
+          const live = (await idsOf(email)).length; // 3: the helper's own sign-in, first, sibling
+          expect(live).toBe(3);
+          expect(sessions).toHaveLength(2); // all but the 13 h sibling
+        });
       });
 
       it('a direct internalAdapter.findSession outside a request does not throw', async () => {
@@ -1961,6 +2033,110 @@ export function hardeningConformance(t: TestApi, infra: ConformanceInfra): void 
         code: 'INTERNAL_ERROR',
         message: 'An unexpected error occurred',
         error: { code: 'INTERNAL_ERROR' },
+      });
+    });
+  });
+
+  describe('staff cap on read: follow-ups', () => {
+    it('the findSession guard is installed when the instance is built, not at the first request', async () => {
+      const stack = await startStack(infra, {
+        presets: ['public', 'staff'],
+        staff: { authority: 'http://127.0.0.1:1' },
+      });
+      try {
+        const email = `early-${randomUUID().slice(0, 6)}@${STAFF_DOMAIN}`;
+        const token = randomUUID();
+        // No request has been made on this instance: rows are written directly and the session is
+        // read through the internal adapter, as a socket gateway would.
+        const user = await stack.pool.query<{ id: string }>(
+          `insert into identity."user" (id, name, email, email_verified, created_at, updated_at)
+           values (uuidv7(), 'E', $1, true, now(), now()) returning id`,
+          [email],
+        );
+        await stack.pool.query(
+          `insert into identity.session (id, expires_at, token, created_at, updated_at, user_id)
+           values (uuidv7(), now() + interval '5 days', $1, now() - interval '13 hours', now() - interval '13 hours', $2)`,
+          [token, user.rows[0]!.id],
+        );
+        const context = (await stack.auth.$context) as unknown as {
+          internalAdapter: {
+            findSession(
+              token: string,
+            ): Promise<{ session: { createdAt: Date; expiresAt: Date } } | null>;
+          };
+        };
+        const found = await context.internalAdapter.findSession(token);
+        expect(found).not.toBeNull();
+        const { createdAt, expiresAt } = found!.session;
+        // clamped to createdAt + 12 h, i.e. already in the past: Better Auth's own check will end it
+        expect(new Date(expiresAt).getTime()).toBeLessThanOrEqual(
+          new Date(createdAt).getTime() + 12 * 3600_000,
+        );
+      } finally {
+        await stack.stop();
+      }
+    });
+
+    describe('revokeAllSessions and a cache that cannot take deletes', () => {
+      it('refuses to run while the cache is unavailable, and revokes nothing', async () => {
+        const stack = await startStack(infra, { appValkeyUrl: 'redis://127.0.0.1:1' });
+        try {
+          // Refuses up front, even with nothing to revoke: it cannot promise the cache is clean.
+          await expect(revokeAllSessions(stack.auth)).rejects.toBeInstanceOf(
+            SessionStoreUnavailableError,
+          );
+          const email = uniqueEmail('outage');
+          const password = strongPassword();
+          await verifiedUser(stack, email, password, expect);
+          const c = stack.client();
+          expect((await signIn(c, email, password)).status).toBe(200);
+          const rows = async () =>
+            Number(
+              (await stack.pool.query(`select count(*)::int as n from identity.session`)).rows[0].n,
+            );
+          const before = await rows();
+          expect(before).toBeGreaterThan(0);
+          await expect(revokeAllSessions(stack.auth)).rejects.toBeInstanceOf(
+            SessionStoreUnavailableError,
+          );
+          expect(await rows()).toBe(before); // nothing was deleted behind the cache's back
+          expect((await c.get(`${API}/get-session`)).json()).not.toBeNull(); // from Postgres
+        } finally {
+          await stack.stop();
+        }
+      });
+
+      it('stops when the cache fails DURING the run, leaves the rows for a re-run, and a re-run completes', async () => {
+        const stack = await startStack(infra);
+        try {
+          const email = uniqueEmail('flaky');
+          const password = strongPassword();
+          await verifiedUser(stack, email, password, expect);
+          const c = stack.client();
+          expect((await signIn(c, email, password)).status).toBe(200);
+          const rows = async () =>
+            Number(
+              (await stack.pool.query(`select count(*)::int as n from identity.session`)).rows[0].n,
+            );
+          const before = await rows();
+          const original = stack.cache.del.bind(stack.cache);
+          stack.cache.del = (async () => {
+            throw new Error('cache write failed');
+          }) as typeof stack.cache.del;
+          try {
+            await expect(revokeAllSessions(stack.auth)).rejects.toBeInstanceOf(
+              SessionStoreUnavailableError,
+            );
+          } finally {
+            stack.cache.del = original;
+          }
+          expect(await rows()).toBe(before); // untouched: the cached copies could not be deleted
+          expect(await revokeAllSessions(stack.auth)).toBe(before);
+          expect(await rows()).toBe(0);
+          expect((await c.get(`${API}/get-session?disableCookieCache=true`)).json()).toBeNull();
+        } finally {
+          await stack.stop();
+        }
       });
     });
   });
