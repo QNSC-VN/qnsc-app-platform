@@ -11,6 +11,7 @@ export {
   createIdentity,
   purgeUnverifiedAccounts,
   revokeAllSessions,
+  SessionStoreUnavailableError,
   type Identity,
   type IdentityOptions,
 } from './create-identity';

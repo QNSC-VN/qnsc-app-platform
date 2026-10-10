@@ -128,6 +128,62 @@ describe('retention is per queue', () => {
   });
 });
 
+describe('retention.pending: how long a job nobody processed may wait', () => {
+  it("defaults to pg-boss's 14 days, written explicitly so a queue converges to it", () => {
+    const q = resolveQueue('q');
+    expect(q.queue.retentionSeconds).toBe(14 * DAY);
+    expect(q.pendingWatch, 'a queue that did not ask is not watched').toBe(false);
+  });
+
+  it('maps to the queue retention and asks the worker to watch the queue', () => {
+    const q = resolveQueue('mail.send', { retention: { pending: DAY } });
+    expect(q.queue.retentionSeconds).toBe(DAY);
+    expect(q.pendingWatch).toBe(true);
+  });
+
+  it('is part of the definition: two different windows are two definitions', () => {
+    expect(resolveQueue('q', { retention: { pending: DAY } }).fingerprint).not.toBe(
+      resolveQueue('q', { retention: { pending: 2 * DAY } }).fingerprint,
+    );
+    expect(resolveQueue('q').fingerprint).not.toBe(
+      resolveQueue('q', { retention: { pending: 14 * DAY } }).fingerprint,
+    );
+  });
+
+  it.each([0, 59, -1, 1.5, 24])(
+    'refuses %s: a typo for 24 hours would delete jobs before anyone fetched them',
+    (value) => {
+      expect(() => resolveQueue('q', { retention: { pending: value } })).toThrow(
+        /retention.pending/,
+      );
+    },
+  );
+
+  it('refuses a window shorter than the retries can take, because a retry does not extend the deadline', () => {
+    // (retryLimit + 1) x (expire + 75) + retryLimit x retryDelayMax = 4 x 975 + 3 x 300 = 4800 s by default
+    expect(() => resolveQueue('q', { retention: { pending: 4_799 } })).toThrow(
+      /shorter than the least that covers the retries.*4800 s.*75 s.*does not extend/s,
+    );
+    expect(() => resolveQueue('q', { retention: { pending: 4_800 } })).not.toThrow();
+    // The margin counts once per attempt: without it 4500 s would have been accepted.
+    expect(() => resolveQueue('q', { retention: { pending: 4_500 } })).toThrow(/4800 s/);
+    expect(() =>
+      resolveQueue('q', {
+        retention: { pending: 3600 },
+        retryLimit: 1,
+        expireInSeconds: 600,
+        retryDelayMaxSeconds: 60,
+      }),
+    ).not.toThrow();
+  });
+
+  it('a queue that did not ask is not checked against its retries (it keeps the 14 days)', () => {
+    expect(() =>
+      resolveQueue('q', { retryLimit: 100, retryDelayMaxSeconds: 86_400 }),
+    ).not.toThrow();
+  });
+});
+
 describe('queue and dead-letter names', () => {
   it.each(['mail.send', 'a', 'billing/invoice-run', 'x_1.y-2'])('accepts %s', (name) => {
     expect(() => assertQueueName(name)).not.toThrow();

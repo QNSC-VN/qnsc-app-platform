@@ -306,11 +306,6 @@ Every error response is one envelope. **Frontends branch on `code`, never on `me
 Reference: `platform-http` `DomainException` and subclasses, `GlobalExceptionFilter`, `HttpErrorCodes`,
 `CATEGORY_HTTP_STATUS`.
 
-**Exception: third-party wire protocols.** A route group that speaks a library's own protocol answers it unchanged and
-adds the envelope next to it, in an `error` field, instead of replacing the body. Today that is `identity`'s
-`/api/auth/*` (Better Auth: `better-auth/client` reads the top-level `code` and `message` and the status, so those keep
-Better Auth's values and statuses). `error` is exactly the envelope above, and a 5xx is `INTERNAL_ERROR` at both levels.
-
 ## 8. Client IP
 
 The client address is, in order:
@@ -532,6 +527,11 @@ implemented by WP-7, not yet released:
   `{ moved, skipped }`; it refuses a queue that is not a dead-letter queue. Only a `failed` original is replaced.
   The origin queue's `canRedrive` rule is enforced in code: authentication mail is never redriven.
 - Schedules default to `Asia/Ho_Chi_Minh`. One execution per tick across any number of workers.
+- A job that nobody processes is deleted after `retention.pending` (default pg-boss's 14 days; set it for a
+  queue whose payload must not linger): the deadline is fixed when the job is inserted, **a retry does not
+  extend it**, a job being processed is never deleted by it, there is no dead-letter copy, and a worker
+  reports what it drops, best effort and as a lower bound (a warning with a count per queue, never a
+  payload; `queue.pending_dropped`; pg-boss's own 15-minute maintenance deletes silently too).
 - Per-queue **retention** defaults: completed 7 days; failed follows completed (pg-boss keeps finished
   jobs on one clock); the dead-letter copy 30 days. `mail.send`: completed deleted immediately, failed
   at most 24 h — and because deleting a completed job also drops the job-id dedupe, its handler keeps its
@@ -545,7 +545,8 @@ implemented by WP-7, not yet released:
   statistics come from telemetry, not from the queue's own stats table.
 - Telemetry on the contract names ([§5](#5-telemetry)): `queue.processed`, `queue.failures`,
   `queue.lag_seconds` (the age of the oldest ready job); pg-boss's `pgboss.*` instruments and
-  `pgboss.queue.oldest_ready_age` are extras. Handler logs carry the correlation id the sender put in the payload as
+  `pgboss.queue.oldest_ready_age` and `queue.pending_dropped` (jobs deleted unprocessed past
+  `retention.pending`: a lower bound, alert on it) are extras. Handler logs carry the correlation id the sender put in the payload as
   `correlationId` ([§7](#7-errors-and-http-behaviour); valid per the same rule: 1–128 of `[A-Za-z0-9._:-]`), else
   `queue:jobId`. It is explicit, never injected into the data (`currentCorrelationId()` reads it for senders).
 - One worker replica per product; alert on queue depth and oldest-job age. **No KEDA.**
@@ -598,7 +599,8 @@ subject, html, text, headers?, category, idempotencyKey, correlationId?`. Addres
   accepted.
 - **The `mail.send` queue.** One definition (`MAIL_QUEUE_CONFIG`) used by the worker and by every
   process that only enqueues: completed jobs deleted at once, failed and dead-lettered kept at most
-  24 h (the payload carries bearer links), a 300 s lease with a 30 s heartbeat, **10 retries from 10 s
+  24 h (the payload carries bearer links; **an unprocessed job too**, `retention.pending`, not pg-boss's
+  14 days), a 300 s lease with a 30 s heartbeat, **10 retries from 10 s
   doubling to 15 min — at least an hour in the worst case** — so a ten-minute cache outage or sustained
   throttling does not dead-letter a password reset. **Priority:** `auth.*` messages are 10, everything
   else 0, and bulk mail stays at 0. A failure retrying cannot fix (HTTP 400, 403, 404, 413, an invalid

@@ -207,13 +207,14 @@ retention: {
   completed?: number | 'immediate', // default 7 days
   failed?: number,                  // default: follows `completed`
   deadLetter?: number,              // default 30 days
+  pending?: number,                 // default 14 days (pg-boss's)
 }
 ```
 
-| queue                      | configuration                                                    |
-| -------------------------- | ---------------------------------------------------------------- |
-| most queues                | nothing: finished jobs stay 7 days, dead letters 30 days         |
-| `mail.send` (ADR 0002 d.4) | `{ completed: 'immediate', failed: 86_400, deadLetter: 86_400 }` |
+| queue                      | configuration                                                                     |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| most queues                | nothing: finished jobs stay 7 days, dead letters 30 days                          |
+| `mail.send` (ADR 0002 d.4) | `{ completed: 'immediate', failed: 86_400, deadLetter: 86_400, pending: 86_400 }` |
 
 - **`completed: 'immediate'`** deletes the job's row the moment its handler succeeds (nothing of the
   payload remains). Because that also removes the job-id dedupe, such a handler must check its own
@@ -226,6 +227,36 @@ retention: {
 - **`deadLetter`** is how long an unhandled dead-letter copy waits before pg-boss deletes it, and so how
   long a failed payload (possibly personal data) lingers. "Until handled" cannot be literal; **alert on
   the dead-letter queue's depth**, do not rely on this number.
+- **`pending`: a job nobody processed.** Every other number above is about a job that was _finished_. A job
+  that is never fetched (no worker, a worker that is down, a queue nobody handles) is governed by
+  `pending`: pg-boss deletes it after this many seconds, and **without it that is 14 days**, which for a
+  payload with a bearer link in it (`mail.send`) is 13 days too many. Set it for any queue whose payload must
+  not linger. What pg-boss does, exactly (each point is a test in `pending.test.ts`):
+  - **The deadline is fixed per job when it is inserted**: `keep_until = start_after + pending`. A job
+    deferred with `startAfter` gets its window when it becomes due, not when it was sent.
+  - **A retry does not extend it.** A job waiting to be retried (`retry`) when the deadline passes is
+    deleted, exactly like one never fetched (`created`). So `pending` must cover the retries, at least
+    `(retryLimit + 1) x (expireInSeconds + 75) + retryLimit x retryDelayMaxSeconds` (75 s is how late
+    pg-boss can notice that an attempt expired, once per attempt), and **a queue that asks for less is
+    refused** with that number. It is a floor, not a forecast. Minimum 60 s (24 for 24 hours is a typo,
+    not a window).
+  - **A job being processed (`active`) is never deleted by it**, however long it runs; if it then fails into
+    `retry` after the deadline it is deleted. Finished jobs follow `completed`/`failed`, not this.
+  - **There is no dead-letter copy.** A dropped job is gone, payload and all; that is the point.
+  - **Changing it applies to jobs inserted afterwards.** Jobs already waiting keep the deadline they were
+    inserted with, so shortening it does not shorten what is already queued: to bound those, delete or
+    re-send them once.
+  - **It is reported, best effort, for the queues that set it.** A worker deletes what waited past its
+    deadline (the same deletion pg-boss does, under the same advisory lock) **once when it starts, then
+    every minute**, and logs a warning with a **count per queue, never a payload**, and increments the
+    `queue.pending_dropped` counter (label `queue`, a platform-jobs extra: not a contract name). Alert on
+    it: a dropped job is work, or an email, that never happened. **Read the count as a lower bound.**
+    pg-boss's own maintenance (every 15 minutes, on any worker) deletes expired jobs silently as well, and
+    whoever deletes first wins: a job that expires between two sweeps can go unreported, and so can one
+    that expires while no worker runs and is still waiting when pg-boss's first pass comes (the sweep at
+    start covers an outage's backlog unless pg-boss's pass is the first to run). A queue that does not set
+    `pending` keeps pg-boss's silent deletion. Only a **worker** sweeps: set `pending` where the queue's
+    worker defines it (`handle()` or `defineQueue()` in the worker process).
 - Deletion runs every **15 minutes** (pg-boss's own default is 24 hours, which would turn "at most
   24 h" into up to 48), so a retention below that is a lower bound, not a promise.
 

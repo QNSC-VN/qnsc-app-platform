@@ -42,6 +42,7 @@ describe('the published package', () => {
         'DEFAULT_TIME_ZONE',
         'JobsConfigError',
         'OLDEST_READY_AGE_METRIC',
+        'PENDING_DROPPED_METRIC',
         'PermanentJobError',
         'createJobs',
         'createJobsPool',
