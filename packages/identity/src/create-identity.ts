@@ -6,7 +6,13 @@ import { uuidv7 } from 'uuidv7';
 import { reservedDomainCheck } from './reserved';
 import { purgeWith, replaceUnverifiedAccount, type AccountContext } from './accounts';
 import { DEFAULTS, type Preset } from './defaults';
-import { consoleLogger, noopSink, type IdentityLogger, type SecurityEventSink } from './events';
+import {
+  consoleLogger,
+  errorFields,
+  noopSink,
+  type IdentityLogger,
+  type SecurityEventSink,
+} from './events';
 import { accountLockout } from './lockout';
 import { perEmailLimiter } from './mail-limit';
 import { AuthMail } from './mail-port';
@@ -32,6 +38,7 @@ import {
   staffSessionHooks,
 } from './staff-session';
 import { withCallbackErrorCodes } from './callback-errors';
+import { withErrorEnvelope } from './error-envelope';
 import { withTimingFloor } from './timing';
 import { withTxCapture } from './tx-context';
 
@@ -200,9 +207,13 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
     logger: o.logger
       ? {
           level: 'warn',
-          log: (level: string, message: string) => {
-            if (level === 'error') o.logger!.error(message);
-            else if (level === 'warn') o.logger!.warn(message);
+          log: (level: string, message: string, ...args: unknown[]) => {
+            // Better Auth hands the error it is reporting as an extra argument, and its message is
+            // just the error's name: "Error". Describe the error by class and code (never by message).
+            const error = args.find((a): a is Error => a instanceof Error);
+            const fields = error ? { source: 'better-auth', ...errorFields(error) } : undefined;
+            if (level === 'error') o.logger!.error(message, fields);
+            else if (level === 'warn') o.logger!.warn(message, fields);
           },
         }
       : { level: 'error' },
@@ -303,7 +314,10 @@ export function createIdentityInternal(o: IdentityOptions, internal: InternalOpt
       () => undefined,
     );
   }
-  auth.handler = withCallbackErrorCodes(withTimingFloor(auth.handler, AUTH_BASE_PATH));
+  auth.handler = withErrorEnvelope(
+    withCallbackErrorCodes(withTimingFloor(auth.handler, AUTH_BASE_PATH)),
+    o.logger ?? consoleLogger,
+  );
   internals.set(auth, { getContext, sink });
   return auth;
 }

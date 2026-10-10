@@ -167,7 +167,13 @@ Identity depends on two ports, never on the packages behind them:
   to it; `ports.types.test.ts` checks this at compile time). Auth emails are **enqueued, never awaited**, on queue
   `mail.send`, with idempotency key `purpose:userId:sha256(token)` and **priority 10** (`AUTH_MAIL_PRIORITY`), so a bulk
   digest on the same queue cannot delay a verification or reset mail. The sign-up verification mail joins Better Auth's own
-  database transaction (rolled back with the user); the others enqueue on their own.
+  database transaction (rolled back with the user); the others enqueue on their own. **A transaction that cannot commit is
+  never a 200:** if a statement in it fails (an SQL error in the enqueue, a revoked grant, a deadlock) Better Auth swallows
+  the callback's error and PostgreSQL turns the `COMMIT` into a silent `ROLLBACK`; identity checks the transaction before
+  it commits and fails the request instead, so sign-up answers `500` with Better Auth's top-level `code`/`message` (`INTERNAL_ERROR`, a fixed message)
+  plus the platform envelope in `error` (with the request's `correlationId`), and `auth.api.signUpEmail` rejects. The log
+  line says what failed: the error's class, its cause's class, the SQLSTATE and the correlation id, never the message. An enqueue that fails WITHOUT poisoning the transaction (a
+  queue not registered in this process) still leaves the user, and is logged as `identity.mail_enqueue_failed`.
 - **Retention is the queue's, not identity's.** Reset and verification links are bearer tokens in clear in the job row, so
   how long a finished job is kept matters (ADR 0002, decision 4). `platform-jobs` has no per-send retention; it is
   configured per queue, and `platform-mail` owns it for `mail.send` (`MAIL_QUEUE_CONFIG`: a completed job is deleted at
