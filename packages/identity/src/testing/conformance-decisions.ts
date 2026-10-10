@@ -400,6 +400,49 @@ export function decisionsConformance(t: TestApi, infra: ConformanceInfra): void 
       }
     });
 
+    it("the request's correlation id rides into the mail.send payload; with no context the key is absent; it is not in the idempotency key", async () => {
+      const id = 'req-01HZX:abc.1';
+      const withId = uniqueEmail('corr');
+      await stack.client().request('POST', `${API}/sign-up/email`, {
+        json: { email: withId, password: strongPassword(), name: 'x' },
+        headers: { 'x-correlation-id': id },
+      });
+      const without = uniqueEmail('nocorr');
+      await stack
+        .client()
+        .post(`${API}/sign-up/email`, { email: without, password: strongPassword(), name: 'x' });
+
+      const rows = async (to: string) =>
+        (
+          await stack.pool.query<{ data: Record<string, unknown>; idempotency_key: string }>(
+            `select data, idempotency_key from identity_test_jobs where data->>'to' = $1`,
+            [to],
+          )
+        ).rows;
+      const [mine] = await rows(withId);
+      expect(mine!.data['correlationId']).toBe(id);
+      expect(mine!.idempotency_key.includes(id)).toBe(false);
+      const [none] = await rows(without);
+      expect(Object.keys(none!.data)).not.toContain('correlationId'); // the key is absent, not null
+    });
+
+    it('a malformed caller id never reaches the payload as given (platform-http replaces it; the payload only ever holds a contract-§7 id)', async () => {
+      const bad = 'not valid: spaces and "quotes"';
+      const email = uniqueEmail('badcorr');
+      await stack.client().request('POST', `${API}/sign-up/email`, {
+        json: { email, password: strongPassword(), name: 'x' },
+        headers: { 'x-correlation-id': bad },
+      });
+      const { rows } = await stack.pool.query<{ data: { correlationId?: string } }>(
+        `select data from identity_test_jobs where data->>'to' = $1`,
+        [email],
+      );
+      const got = rows[0]!.data.correlationId;
+      expect(got).not.toBe(bad);
+      expect(got).toMatch(/^[A-Za-z0-9._:-]{1,128}$/);
+      expect(JSON.stringify(rows[0]!.data).includes('quotes')).toBe(false);
+    });
+
     it('the idempotency key is purpose:user:sha256(token) and never contains the token', async () => {
       const email = uniqueEmail('key');
       await stack

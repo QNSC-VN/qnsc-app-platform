@@ -16,6 +16,12 @@ export interface EmailMessage {
   category: 'auth.verify-email' | 'auth.reset-password';
   /** Stable per message: a duplicate key must produce one email. */
   idempotencyKey: string;
+  /**
+   * The correlation id of the request that caused this email (platform contract §7), so the worker's
+   * log lines carry it. Optional, and mirrors `platform-mail`'s field: the two `EmailMessage` types stay
+   * assignable both ways. NOT part of the idempotency key. Omitted, never invalid, when there is none.
+   */
+  correlationId?: string | undefined;
 }
 
 /** The `EmailSender` contract of `platform-mail` (§6.8). Identity names it; it never calls it directly. */

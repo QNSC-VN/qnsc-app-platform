@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm';
 import Redis from 'ioredis';
 import type { Pool } from 'pg';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { requestContextStorage } from '@quynhonsemiconductor/observability';
+import { CORRELATION_ID_HEADER, resolveCorrelationId } from '@quynhonsemiconductor/platform-http';
 import { createDatabase, type DbExecutor } from '@quynhonsemiconductor/platform-db/drizzle';
 import {
   createIdentityInternal,
@@ -214,7 +216,8 @@ export async function startStack(
     logs,
     env,
     origin: APP_ORIGIN,
-    client: (defaults) => new TestClient(APP_ORIGIN, auth.handler, defaults),
+    client: (defaults) =>
+      new TestClient(APP_ORIGIN, withCorrelationContext(auth.handler), defaults),
     mail,
     keys,
     ttl: (fullKey) => raw.ttl(fullKey),
@@ -235,6 +238,29 @@ export async function startStack(
       await cache.onApplicationShutdown();
       await database.stop?.();
     },
+  };
+}
+
+/**
+ * What `platform-http`'s `enableCorrelationId` does around a request: a valid `X-Correlation-Id` (or a
+ * generated one when it is invalid) goes into `observability`'s request context for the duration of
+ * the call. A request WITHOUT the header gets no context at all here, which is the "no context"
+ * case the kit needs (the Nest middleware would generate one; see the reference consumer for that).
+ */
+function withCorrelationContext(handler: Identity['handler']): Identity['handler'] {
+  return (request) => {
+    const supplied = request.headers.get(CORRELATION_ID_HEADER);
+    if (supplied === null) return handler(request);
+    return requestContextStorage.run(
+      {
+        workspaceId: undefined,
+        userId: undefined,
+        sessionId: undefined,
+        correlationId: resolveCorrelationId(supplied).id,
+        traceparent: undefined,
+      },
+      () => handler(request),
+    );
   };
 }
 

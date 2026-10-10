@@ -9,7 +9,11 @@ import type { Pool } from 'pg';
 import { CacheModule, CacheService } from '@quynhonsemiconductor/platform-cache';
 import { DATABASE_TOKEN, DatabaseModule } from '@quynhonsemiconductor/platform-db/nest';
 import type { DbExecutor } from '@quynhonsemiconductor/platform-db/drizzle';
-import { GlobalExceptionFilter, REQUEST_CONTEXT } from '@quynhonsemiconductor/platform-http';
+import {
+  enableCorrelationId,
+  GlobalExceptionFilter,
+  REQUEST_CONTEXT,
+} from '@quynhonsemiconductor/platform-http';
 import {
   dockerTestsEnabled,
   startPostgres,
@@ -194,6 +198,7 @@ describe.skipIf(!enabled)('reference consumer: identity inside Nest 11 + Fastify
         bodyParser: false,
       },
     );
+    enableCorrelationId(app); // seeds the request context the mail payload reads
     app.enableShutdownHooks();
     await app.listen(port, '127.0.0.1');
     auth = app.get<Identity>(AUTH);
@@ -310,6 +315,34 @@ describe.skipIf(!enabled)('reference consumer: identity inside Nest 11 + Fastify
     }
     expect((await staff.get('/v1/me')).status).toBe(401); // 13 h old, staff domain
     expect((await visitor.get('/v1/me')).status).toBe(200); // 13 h old, public lifetime
+  });
+
+  it('the X-Correlation-Id of a sign-up request is carried into the mail.send payload (end to end, with enableCorrelationId)', async () => {
+    const mailFor = async (email: string) =>
+      (
+        await pool.query<{ data: { correlationId?: string } }>(
+          `select data from identity_test_jobs where data->>'to' = $1`,
+          [email],
+        )
+      ).rows[0]!.data;
+    const withHeader = `corr-${randomUUID().slice(0, 6)}@users.reference.test`;
+    const res = await http().request('POST', '/api/auth/sign-up/email', {
+      json: { email: withHeader, password: `pw-${randomUUID()}`, name: 'R' },
+      headers: { 'x-correlation-id': 'req-01HZX:abc.1' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-correlation-id')).toBe('req-01HZX:abc.1');
+    expect((await mailFor(withHeader)).correlationId).toBe('req-01HZX:abc.1');
+
+    // no header: platform-http generates one, so the job still continues the request's id
+    const without = `nocorr-${randomUUID().slice(0, 6)}@users.reference.test`;
+    const bare = await http().post('/api/auth/sign-up/email', {
+      email: without,
+      password: `pw-${randomUUID()}`,
+      name: 'R',
+    });
+    expect(bare.headers.get('x-correlation-id')).toBeTruthy();
+    expect((await mailFor(without)).correlationId).toBe(bare.headers.get('x-correlation-id'));
   });
 
   it('is ready when the schema matches, and says why when it does not', async () => {

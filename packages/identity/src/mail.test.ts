@@ -70,6 +70,34 @@ describe('mail', () => {
     }
   });
 
+  it('carries a valid correlation id and omits the key for anything else, never echoing the input', async () => {
+    const payloads: Array<Record<string, unknown>> = [];
+    const mailFor = (id: string | undefined) =>
+      new AuthMail(
+        { send: async (_q, data) => (payloads.push(data as Record<string, unknown>), 'id') },
+        templates,
+        async () => true,
+        { warn: () => undefined, error: () => undefined },
+        () => id,
+      );
+    const input = {
+      user: { id: 'u', email: 'a@b.test', name: 'A' },
+      url: 'https://x/verify',
+      token: 't',
+    };
+    const invalid = ['', ' ', 'a b', 'a\r\nb', 'x'.repeat(129), '"q"', 'é', 'a/b', 'a,b'];
+    for (const id of ['req-1', '01HZX:abc.1_x', 'x'.repeat(128), 'a', undefined, ...invalid]) {
+      await mailFor(id).sendVerification(input);
+    }
+    const ids = payloads.map((p) => p['correlationId']);
+    expect(ids.slice(0, 4)).toEqual(['req-1', '01HZX:abc.1_x', 'x'.repeat(128), 'a']);
+    for (const p of payloads.slice(4)) expect(Object.keys(p)).not.toContain('correlationId');
+    expect(JSON.stringify(payloads.slice(4)).includes('quotes')).toBe(false);
+    // a source that returns a non-string is as good as none
+    await mailFor(42 as never).sendVerification(input);
+    expect(Object.keys(payloads.at(-1)!)).not.toContain('correlationId');
+  });
+
   it('drops mail silently once an address is over its hourly cap', async () => {
     const counts = new Map<string, number>();
     const allow = perEmailLimiter({
