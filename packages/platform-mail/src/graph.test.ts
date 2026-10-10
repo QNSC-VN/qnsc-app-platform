@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphServer, graphError } from './__helpers__/graph-server';
+import { createMailHandler } from './jobs';
+import { MemoryMailState } from './testing';
 import { MailSendError } from './errors';
 import { buildGraphPayload, createGraphSender, parseRetryAfter, GRAPH_SCOPE } from './graph';
 import { validateMessage, type EmailMessage } from './message';
@@ -349,6 +351,52 @@ describe('GraphSender: the credential and the caller’s signal (L4)', () => {
 
     expect(error.code).toBe('timeout');
     expect(server.requests).toHaveLength(0);
+  });
+});
+
+describe('a 429 waited out inside send() backs the whole mailbox off (M-B)', () => {
+  it('worker A gets 429 Retry-After: 20 ⇒ worker B’s takeSlot waits, while A is still sleeping', async () => {
+    const state = new MemoryMailState(); // the shared state both workers see
+    server.reply({
+      status: 429,
+      headers: { 'retry-after': '20' },
+      body: graphError('ApplicationThrottled'),
+    });
+    let wake!: () => void;
+    let sleeping!: () => void;
+    const asleep = new Promise<void>((resolve) => (sleeping = resolve));
+    const workerA = createMailHandler({
+      sender: createGraphSender({
+        sender: SENDER,
+        credential: credential(),
+        baseUrl: server.baseUrl,
+        random: () => 1,
+        // A's wait for Retry-After: held open until the test has looked at worker B.
+        sleep: () =>
+          new Promise<void>((resolve) => {
+            wake = resolve;
+            sleeping();
+          }),
+      }),
+      state,
+    });
+
+    const sending = workerA({
+      id: 'a',
+      data: sampleMessage({ idempotencyKey: 'throttled-in-place' }),
+      attempt: 1,
+      signal: new AbortController().signal,
+    });
+    await asleep;
+
+    // Worker B (another process in production) asks for a slot while A waits out the 429.
+    const wait = await state.takeSlot(SENDER);
+    expect(wait).toBeGreaterThan(19_000);
+    expect(wait).toBeLessThanOrEqual(20_000);
+
+    wake();
+    await sending;
+    expect(server.accepted).toHaveLength(1); // A's retry went through: one email
   });
 });
 

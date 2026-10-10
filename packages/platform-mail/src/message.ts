@@ -52,6 +52,13 @@ export interface SendResult {
 export interface SendOptions {
   /** Abort the attempt, including a wait for `Retry-After`. */
   signal?: AbortSignal | undefined;
+  /**
+   * Called when the provider throttles the mailbox and the transport is about to WAIT it out inside
+   * this `send()`, with the number of seconds it will wait. It is called BEFORE the wait, so the
+   * caller can tell the other workers at once (the `mail.send` handler starts the mailbox-wide
+   * cooldown from it). A throw is ignored.
+   */
+  onThrottled?: ((retryAfterSeconds: number) => void | Promise<void>) | undefined;
 }
 
 /**
@@ -97,6 +104,14 @@ const RESERVED_HEADER = /^x-(ms-exchange-|microsoft-)/i;
 const CORRELATION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 // eslint-disable-next-line no-control-regex -- the point is to reject control characters
 const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Whether `value` is a correlation id a service may put in a log line (contract §7). A string
+ * only: a number or an object is not coerced into one.
+ */
+export function isCorrelationId(value: unknown): value is string {
+  return typeof value === 'string' && CORRELATION_ID.test(value);
+}
 
 function invalid(reason: string): never {
   throw new MailSendError('invalid_message', `Invalid email message: ${reason}`);
@@ -203,7 +218,7 @@ export function validateMessage(message: EmailMessage): ValidatedMessage {
     invalid('idempotencyKey must be a non-empty string without control characters');
   }
 
-  if (message.correlationId !== undefined && !CORRELATION_ID.test(String(message.correlationId))) {
+  if (message.correlationId !== undefined && !isCorrelationId(message.correlationId)) {
     invalid('correlationId must be 1-128 characters from [A-Za-z0-9._:-]');
   }
 

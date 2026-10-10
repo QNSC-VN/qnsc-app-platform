@@ -21,7 +21,7 @@ interface MeterLike {
 /**
  * OpenTelemetry counters through `@quynhonsemiconductor/observability`, when it is installed;
  * a no-op otherwise. Labels are bounded: `category` is the message's category (a short word
- * list the product controls) and `code` is the closed `MailErrorCode` union — never an address,
+ * list the product controls) and `code` is the closed `MailErrorCode` union plus `in_flight` (an attempt that found another attempt's claim) — never an address,
  * a subject or a provider message.
  */
 export function createMailTelemetry(

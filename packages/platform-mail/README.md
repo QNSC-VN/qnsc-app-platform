@@ -130,7 +130,9 @@ Graph did **not** accept the message, so retrying cannot duplicate it — up to 
 `Retry-After` is not waited out: the error carries `retryAfterSeconds` and is thrown. Nothing
 reschedules the job for that long; what happens next is the queue's section below (a mailbox-wide
 cooldown, then the job's own retry backoff).
-A timeout, a dropped connection or a plain `500` are **not** retried in place: Graph may have
+While it waits, the transport calls `options.onThrottled(seconds)` **before** sleeping; the `mail.send`
+handler uses it to start the mailbox-wide cooldown at once, so the other workers stop sending the
+moment one is throttled, not when it gives up. A timeout, a dropped connection or a plain `500` are **not** retried in place: Graph may have
 accepted the message, so that decision belongs to the caller (the queue's ledger is the guard).
 
 ## The `mail.send` queue
@@ -179,20 +181,24 @@ For each job, in this order:
 
 ### Queue settings (`MAIL_QUEUE_CONFIG`, `MAIL_HANDLE_OPTIONS`)
 
-| setting                                                     | value                                                  | why                                                                                                                                                                                                                     |
-| ----------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `retention`                                                 | completed `'immediate'`, failed 24 h, dead letter 24 h | the payload carries bearer links in clear: nothing of a sent mail stays, a failure stays a day (ADR 0001 decision 3, identity ADR 0002 decision 4)                                                                      |
-| `expireInSeconds`                                           | 300                                                    | the ceiling on one attempt, including its wait for a slot                                                                                                                                                               |
-| `heartbeatSeconds`                                          | 30, set explicitly                                     | a killed worker's job is recovered in about a heartbeat plus the monitor pass, not at the end of the lease (ADR 0001 F4)                                                                                                |
-| claim lease (`MAIL_CLAIM_LEASE_SECONDS`)                    | `expireInSeconds` + 30 = 330 s                         | a live attempt can never lose its claim to a second worker                                                                                                                                                              |
-| `retryLimit` / `retryDelaySeconds` / `retryDelayMaxSeconds` | 10 / 10 s / 900 s                                      | the retry window is **at least an hour** in the worst case of pg-boss's jittered backoff (`minRetryWindowSeconds()` ≈ 66 min): a ten-minute Valkey outage or sustained throttling must not dead-letter a password reset |
-| `concurrency` / polling                                     | 1 / 1 s                                                | the mailbox is paced to a few a minute, so parallelism buys nothing; an OTP is picked up within about a second                                                                                                          |
-| priority                                                    | `auth.*` = 10, everything else 0                       | see below                                                                                                                                                                                                               |
+| setting                                                     | value                                                                         | why                                                                                                                                                                                                                     |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retention`                                                 | completed `'immediate'`, failed 24 h, dead letter 24 h                        | the payload carries bearer links in clear: nothing of a sent mail stays, a failure stays a day (ADR 0001 decision 3, identity ADR 0002 decision 4)                                                                      |
+| `expireInSeconds`                                           | 300                                                                           | the ceiling on one attempt, including its wait for a slot                                                                                                                                                               |
+| `heartbeatSeconds`                                          | 30, set explicitly                                                            | a killed worker's job is recovered in about a heartbeat plus the monitor pass, not at the end of the lease (ADR 0001 F4)                                                                                                |
+| claim lease (`MAIL_CLAIM_LEASE_SECONDS`)                    | 60 s, **renewed every 30 s** while the send runs (`MAIL_CLAIM_RENEW_SECONDS`) | a live attempt keeps its claim for as long as it works; a dead worker's claim lapses within a minute, not at the end of the five-minute ceiling                                                                         |
+| `retryLimit` / `retryDelaySeconds` / `retryDelayMaxSeconds` | 10 / 10 s / 900 s                                                             | the retry window is **at least an hour** in the worst case of pg-boss's jittered backoff (`minRetryWindowSeconds()` ≈ 66 min): a ten-minute Valkey outage or sustained throttling must not dead-letter a password reset |
+| `concurrency` / polling                                     | 1 / 1 s                                                                       | the mailbox is paced to a few a minute, so parallelism buys nothing; an OTP is picked up within about a second                                                                                                          |
+| priority                                                    | `auth.*` = 10, everything else 0                                              | see below                                                                                                                                                                                                               |
 
-A worker killed mid-send is recovered by the heartbeat well before its claim ends, so the
-redelivery finds the dead attempt's claim still held and fails retryably until the lease runs out
-(at most five and a half minutes). That is what the hour-long window is for: the redelivery is
-never dead-lettered by its own stale claim.
+A worker killed mid-send stops renewing, so its claim lapses within a minute. `platform-jobs`
+notices the death after about a minute and a quarter (the heartbeat plus its monitor pass), by which
+time the claim is usually already free: the redelivery sends. Measured with a real SIGKILLed worker
+process (`jobs.sigkill.test.ts`): the message went out **88 seconds after the kill**, with no
+bounce. With the earlier 330-second lease the same kill cost four redeliveries bouncing off the dead
+worker's claim and a mail that arrived about **nine minutes** late — a 15-minute reset link with six
+left. A redelivery that does meet a live claim fails retryably and is counted as
+`mail.failures{code="in_flight"}` and logged, so a bounce is never invisible.
 
 ### Priority
 
@@ -206,7 +212,14 @@ override. Bulk mail MUST stay at 0.
 - **Permanent** (`invalid_message`, `forbidden`, `mailbox_not_found`, `too_large` — HTTP 400, 403,
   404, 413): the handler throws `PermanentJobError`, so the job is **dead-lettered at once, with no
   retries**. The stored text is the code, the HTTP status and Microsoft's request id; logs carry the
-  code only. Fix the cause and redrive from `mail.send.dlq`.
+  code only.
+  What happens to the dead letter:
+  - **Alert on `pgboss.queue.jobs{queue="mail.send.dlq",state="ready"} > 0`.** That is the signal; the
+    dead-letter copy is deleted after 24 h.
+  - **Authentication mail is never redriven.** Its link expires, and the user asks for a new one;
+    redriving a stale reset link only emails someone a dead link.
+  - Other categories wait for a redrive API in `platform-jobs` (not built yet). Until then a
+    dead-lettered digest or notification is lost after 24 h, and the alert is how you find out.
 - **Retryable** (`unauthenticated`, `throttled`, `unavailable`, `network`, `timeout`): thrown as they
   are; the queue retries with its backoff.
 - A throttled mailbox is not retried into: the cooldown makes every send wait out the `Retry-After`
@@ -263,10 +276,14 @@ export class SignUp {
 `MailService` takes `JOBS_TOKEN` (`@InjectJobs()` is the same provider) and defines the queue in
 every process. `EMAIL_SENDER` is the token identity's `EmailSender` port binds to. A `ROLE=worker`
 process without `state` **fails the boot**, not the first job. `MailModuleOptions.sender` replaces
-the transport built from the environment (a transport this package does not have, or a test double).
+the transport built from the environment (a transport this package does not have, or a test double)
+and is **refused when `NODE_ENV=production`** unless `allowCustomSenderInProduction: true`: it
+bypasses every guard the built-in transports have, and a test double left in a production module
+drops every authentication email while every health check stays green. `MemoryEmailSender` cannot
+even be constructed under `NODE_ENV=production`.
 
 With `@quynhonsemiconductor/observability` installed it records `mail.sent`, `mail.duplicates`,
-`mail.failures` (labels `category`, `code`) and `mail.pacing_wait_ms`.
+`mail.failures` (labels `category`, `code` — the closed error codes plus `in_flight`) and `mail.pacing_wait_ms`.
 
 ## Setting up a product mailbox (once, by an owner)
 

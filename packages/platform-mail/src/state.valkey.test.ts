@@ -1,6 +1,8 @@
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { dockerTestsEnabled, startValkey, type ValkeyHarness } from '@quynhonsemiconductor/testing';
+import { GraphServer, graphError } from './__helpers__/graph-server';
+import { createGraphSender } from './graph';
 import { createMailHandler } from './jobs';
 import { createValkeyMailState, ledgerKey, type MailState, type ValkeyLike } from './state';
 import { MemoryEmailSender, describeMailStateConformance, sampleMessage } from './testing';
@@ -109,6 +111,68 @@ describe.skipIf(!dockerEnabled)('createValkeyMailState (real Valkey)', () => {
     const keys = await client('').keys('test:mail:rate:cool2*');
     expect(keys).toEqual([]); // the bucket was never touched while cooling down
   });
+
+  it('worker A waits out a 429 Retry-After: 20 inside send() and worker B, on another client, is held back', async () => {
+    const graph = new GraphServer();
+    await graph.start();
+    try {
+      graph.reply({
+        status: 429,
+        headers: { 'retry-after': '20' },
+        body: graphError('ApplicationThrottled'),
+      });
+      let wake!: () => void;
+      let sleeping!: () => void;
+      const asleep = new Promise<void>((resolve) => (sleeping = resolve));
+      const handlerA = createMailHandler({
+        sender: createGraphSender({
+          sender: 'noreply-academy@qnsc.vn',
+          credential: { getToken: async () => ({ token: 't' }) },
+          baseUrl: graph.baseUrl,
+          random: () => 1,
+          sleep: () =>
+            new Promise<void>((resolve) => {
+              wake = resolve;
+              sleeping();
+            }),
+        }),
+        state: createValkeyMailState(client()),
+      });
+      const sending = handlerA({
+        id: 'a',
+        data: sampleMessage({ idempotencyKey: 'in-place-429' }),
+        attempt: 1,
+        signal: new AbortController().signal,
+      });
+      await asleep;
+
+      const stateB = createValkeyMailState(client());
+      const wait = await stateB.takeSlot('noreply-academy@qnsc.vn');
+      expect(wait).toBeGreaterThan(19_000);
+      expect(wait).toBeLessThanOrEqual(20_000);
+
+      wake();
+      await sending;
+      expect(graph.accepted).toHaveLength(1);
+    } finally {
+      await graph.stop();
+    }
+  });
+
+  it('renews a claim on the server: it outlives its lease while renewed and lapses once renewal stops', async () => {
+    const state = createValkeyMailState(client());
+    const claim = await state.claim('renew-me', 1);
+    if (claim.status !== 'claimed') throw new Error('expected a claim');
+    for (let i = 0; i < 3; i += 1) {
+      await new Promise((r) => setTimeout(r, 600));
+      expect(await state.renew('renew-me', claim.token, 1)).toBe(true);
+    }
+    expect((await state.claim('renew-me', 30)).status).toBe('in-flight'); // 1.8 s in, lease 1 s: renewed
+
+    await new Promise((r) => setTimeout(r, 1_300)); // renewal stopped, as if its worker had been killed
+    expect((await state.claim('renew-me', 30)).status).toBe('claimed');
+    expect(await state.renew('renew-me', claim.token, 1)).toBe(false); // and the old holder cannot take it back
+  }, 15_000);
 
   describe('two workers, one message', () => {
     const worker = (state: MailState, sender: MemoryEmailSender) =>

@@ -591,14 +591,17 @@ subject, html, text, headers?, category, idempotencyKey, correlationId?`. Addres
   doubling to 15 min — at least an hour in the worst case** — so a ten-minute cache outage or sustained
   throttling does not dead-letter a password reset. **Priority:** `auth.*` messages are 10, everything
   else 0, and bulk mail stays at 0. A failure retrying cannot fix (HTTP 400, 403, 404, 413, an invalid
-  message) is a `PermanentJobError`: dead-lettered at once, no retries.
+  message) is a `PermanentJobError`: dead-lettered at once, no retries. Alert on the dead-letter
+  queue's depth (`pgboss.queue.jobs{queue="mail.send.dlq",state="ready"} > 0`); authentication mail
+  is never redriven (its link expires and the user asks again).
 - **Pacing.** About **20 messages a minute per sender mailbox** (a bucket of 20 a minute with a burst
   of 5, so at most 25 in any minute, under Exchange's ~30), shared by every worker. A `429` starts a
   **mailbox-wide cooldown** for its `Retry-After` (60 s if none, at most 10 min) that every worker
   honours before sending. `Retry-After` does not reschedule the job.
 - **Idempotency.** The handler claims a ledger entry for the message (the sender mailbox and a hash of
-  `idempotencyKey`) **before** it sends, records the delivery after, and releases the claim on
-  failure: a duplicate key is one email, whether the message was enqueued twice, the job was delivered
+  `idempotencyKey`) **before** it sends, keeps the claim alive (60 s lease, renewed every 30 s) while the
+  send runs so a killed worker's claim lapses within a minute, records the delivery after, and releases
+  the claim on failure: a duplicate key is one email, whether the message was enqueued twice, the job was delivered
   twice or two workers raced. It is at-least-once, not exactly-once: Graph has no idempotency key, so
   a lost acknowledgement can send a message twice, which is the chosen failure for authentication
   mail (a duplicate over a lost link).
@@ -610,7 +613,7 @@ subject, html, text, headers?, category, idempotencyKey, correlationId?`. Addres
   (see the note in [§11](#11-cache)).
 - **Correlation.** The worker continues the `correlationId` of the request that queued the email
   ([§7](#7-errors-and-http-behaviour)); without one the job's own `mail.send:<jobId>` applies.
-- **Telemetry.** `mail.sent`, `mail.duplicates`, `mail.failures` (labels `category`, closed `code`),
+- **Telemetry.** `mail.sent`, `mail.duplicates`, `mail.failures` (labels `category`, closed `code`, plus `in_flight` for an attempt that met another attempt's claim),
   `mail.pacing_wait_ms`. Log lines carry the category and the error code, never an address.
 - The manual check — one product's mailbox succeeds and another product's mailbox returns `403` — is
   run by the owner with real credentials ([package README](../packages/platform-mail/README.md)).

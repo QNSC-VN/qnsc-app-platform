@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MemoryEmailSender,
   MemoryMailState,
@@ -68,6 +68,22 @@ describe('MemoryMailState pacing', () => {
       if ((await state.takeSlot('m@example.test')) === 0) granted += 1;
     expect(granted).toBeLessThanOrEqual(25);
     expect(granted).toBeGreaterThanOrEqual(24);
+  });
+});
+
+describe('MemoryEmailSender refuses production (M-C)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('throws when constructed under NODE_ENV=production, naming the cause', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(() => new MemoryEmailSender()).toThrow(
+      /must not be used when NODE_ENV=production.*sends nothing/s,
+    );
+  });
+
+  it.each(['development', 'test', ''])('builds under NODE_ENV=%o', (env) => {
+    vi.stubEnv('NODE_ENV', env);
+    expect(() => new MemoryEmailSender()).not.toThrow();
   });
 });
 

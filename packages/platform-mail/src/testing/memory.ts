@@ -29,7 +29,16 @@ export class MemoryEmailSender implements EmailSender {
   private readonly faults: InjectedFault[] = [];
   private counter = 0;
 
-  constructor(readonly mailbox: string = 'noreply@example.test') {}
+  constructor(readonly mailbox: string = 'noreply@example.test') {
+    // It keeps messages in memory and sends none. In production that is every authentication
+    // email silently dropped, with every health check green, so it cannot even be built there.
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new Error(
+        'MemoryEmailSender must not be used when NODE_ENV=production: it sends nothing. ' +
+          'Use MAIL_TRANSPORT=graph.',
+      );
+    }
+  }
 
   /** The next `send()` fails this way (once). Queue several to fail several in a row. */
   failNext(fault: InjectedFault): void {
@@ -99,6 +108,15 @@ export class MemoryMailState implements MailState {
 
   async markSent(key: string, id: string, ttlSeconds: number): Promise<void> {
     this.entries.set(key, { value: `sent:${id}`, expiresAt: this.now() + ttlSeconds * 1000 });
+  }
+
+  async renew(key: string, token: string, leaseSeconds: number): Promise<boolean> {
+    if (this.live(key) !== `claimed:${token}`) return false;
+    this.entries.set(key, {
+      value: `claimed:${token}`,
+      expiresAt: this.now() + leaseSeconds * 1000,
+    });
+    return true;
   }
 
   async release(key: string, token: string): Promise<void> {
