@@ -72,6 +72,7 @@
     "@quynhonsemiconductor/platform-cache": "workspace:^",
     "@quynhonsemiconductor/platform-db": "workspace:^",
     "@quynhonsemiconductor/platform-http": "workspace:^",
+    "@quynhonsemiconductor/platform-jobs": "workspace:*",
     "@quynhonsemiconductor/testing": "workspace:*",
     "@types/pg": "8.23.1",
     "auth": "1.7.7",
