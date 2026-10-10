@@ -323,6 +323,12 @@ export function createMailHandler(options: MailHandlerOptions): JobHandlerFn<Ema
     let reachedProvider = false;
     try {
       await waitForSlot(job.signal);
+      // A drain that ran out of its budget (or a job that lost its claim) aborts the signal. Never
+      // START a send on an aborted attempt, whatever the transport would do with the signal: a
+      // custom sender may ignore it. The claim is released below and the queue retries.
+      if (job.signal.aborted) {
+        throw new MailSendError('timeout', 'The attempt was aborted before the message was sent.');
+      }
       reachedProvider = true;
       const result = await sender.send(message, {
         signal: job.signal,

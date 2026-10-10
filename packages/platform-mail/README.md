@@ -148,7 +148,7 @@ import { createValkeyMailState, registerMailJobs } from '@quynhonsemiconductor/p
 // handler is started by start(); registered after, it is started at once.
 const mail = await registerMailJobs(jobs, {
   sender: createEmailSender(),
-  state: createValkeyMailState(cache.instance), // platform-cache CacheService.instance, or any ioredis
+  state: createValkeyMailState(redis), // any ioredis client, connected before you call this
 });
 
 await withTransaction(db, async (tx) => {
@@ -239,6 +239,25 @@ but a completed `mail.send` job is deleted at once, and with it that guard; the 
 re-enqueue after completion, a redelivery of the same job and two workers racing. It is keyed by the
 sender mailbox and a hash of the idempotency key, and adds no table to the product's database (P6).
 
+### A drain (SIGTERM) and the abort signal
+
+`platform-jobs` aborts the job's `AbortSignal` when a drain runs out of its budget (and when a job
+loses its claim). The handler passes it to the transport, and the Graph request honours it at every
+stage:
+
+- **Before the request is sent** — while waiting for a send slot, for a token, or with the signal
+  already aborted — **nothing is sent**: no HTTP request reaches Graph, and the handler refuses to
+  start a send on an aborted attempt whatever a custom transport does with the signal. The claim is
+  released and the retry, on another worker, sends the message once.
+- **While the request is on the wire**, the abort ends it at once (it does not wait for the 15 s
+  request timeout) and releases the claim, but Graph may already have accepted the message: if the
+  acknowledgement was lost, the retry sends it again. That is the **at-least-once** guarantee, accepted
+  — a duplicate authentication email over a lost one. A drain within its budget does not have this
+  window: the in-flight send finishes and is recorded.
+- The `smtp` transport (non-production) checks the signal only before it starts; nodemailer cannot
+  cancel a message once it is being written. Keep the transport timeout below the drain budget
+  (`SHUTDOWN_TIMEOUT_MS` minus the three seconds `platform-jobs` keeps back).
+
 ### What it cannot do
 
 - **Exactly-once delivery.** Graph has no idempotency key. A message Graph accepted whose
@@ -251,28 +270,47 @@ sender mailbox and a hash of the idempotency key, and adds no table to the produ
 ## NestJS
 
 ```ts
+import { Inject, Injectable, Module } from '@nestjs/common';
+import { CacheModule, CacheService } from '@quynhonsemiconductor/platform-cache';
+import type { DbExecutor } from '@quynhonsemiconductor/platform-db/drizzle';
 import { JobsModule } from '@quynhonsemiconductor/platform-jobs/nest';
+import { createValkeyMailState, type EmailMessage } from '@quynhonsemiconductor/platform-mail';
 import { MailModule, MailService } from '@quynhonsemiconductor/platform-mail/nest';
+
+@Injectable()
+export class SignUp {
+  constructor(@Inject(MailService) private readonly mail: MailService) {}
+
+  async register(message: EmailMessage, tx: DbExecutor) {
+    await this.mail.enqueue(message, { tx }); // rolled back with the transaction: no user, no email
+  }
+}
 
 @Module({
   imports: [
     JobsModule.forRoot(),
+    CacheModule.forRoot({ url: process.env['REDIS_URL'], mode: 'required' }),
     MailModule.forRootAsync({
-      imports: [CacheModule],
       inject: [CacheService],
-      useFactory: (cache: CacheService) => ({ state: createValkeyMailState(cache.instance) }),
+      // CacheService connects in onModuleInit, which Nest runs AFTER it has built every provider,
+      // this factory included: `cache.instance` is still null here. Look it up on first use.
+      useFactory: (cache: CacheService) => ({
+        state: createValkeyMailState({ eval: (...args) => cache.instance.eval(...args) }),
+      }),
     }),
   ],
+  providers: [SignUp],
 })
 export class AppModule {}
-
-@Injectable()
-export class SignUp {
-  constructor(private readonly mail: MailService) {}
-  // …
-  await this.mail.enqueue(message, { tx });
-}
 ```
+
+`CacheService` connects in `onModuleInit`, which Nest runs **after** it has built every provider —
+this `useFactory` included — so `cache.instance` is still `null` there. The factory therefore hands
+`createValkeyMailState` a client that looks it up **on first use** (`eval: (...args) =>
+cache.instance.eval(...args)`); reading `cache.instance` directly fails the boot with
+`CacheService: client is not available`. This block is booted by `readme-example.test.ts` and must equal
+the file it boots, so it cannot drift. (`@Inject(MailService)` is explicit because tooling that does
+not emit decorator metadata would otherwise inject `undefined`.)
 
 `MailModule` registers its handler with **`@JobHandler(MAIL_QUEUE, MAIL_HANDLE_OPTIONS)`**, so
 `JobsModule` finds it, registers it and then starts pg-boss: the order is not yours to get wrong.

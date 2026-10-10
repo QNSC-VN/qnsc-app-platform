@@ -400,6 +400,95 @@ describe('a 429 waited out inside send() backs the whole mailbox off (M-B)', () 
   });
 });
 
+describe('the Graph request honours the abort signal (#195)', () => {
+  it('an attempt aborted before the request is sent puts nothing on the wire: no HTTP request reaches Graph', async () => {
+    const getToken = vi.fn(async (_scope: string, _options?: { abortSignal?: AbortSignal }) => ({
+      token: 't',
+    }));
+    const error = (await sender({ credential: { getToken } })
+      .send(sampleMessage(), { signal: AbortSignal.abort() })
+      .catch((e: unknown) => e)) as MailSendError;
+
+    expect(error.code).toBe('timeout');
+    expect(error.retryable).toBe(true);
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it('a drain that aborts a request still being sent ends it at once, without waiting for the timeout', async () => {
+    server.hang = true; // Graph has the request and has not answered
+    const controller = new AbortController();
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 50);
+
+    const error = (await sender({ requestTimeoutMs: 60_000 })
+      .send(sampleMessage(), { signal: controller.signal })
+      .catch((e: unknown) => e)) as MailSendError;
+
+    expect(error.code).toBe('timeout');
+    expect(error.message).toMatch(/aborted by the caller/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(server.requests).toHaveLength(1); // it was on the wire: at-least-once, documented
+  });
+
+  it('an abort during a Retry-After wait stops the wait and sends no second request', async () => {
+    server.reply({ status: 429, headers: { 'retry-after': '10' } });
+    const controller = new AbortController();
+    const error = (await sender({
+      sleep: (_ms, signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+          setTimeout(() => controller.abort(), 5);
+        }),
+    })
+      .send(sampleMessage(), { signal: controller.signal })
+      .catch((e: unknown) => e)) as MailSendError;
+
+    expect(error.code).toBe('timeout');
+    expect(server.requests).toHaveLength(1);
+  });
+
+  describe('through the mail.send handler', () => {
+    const job = (key: string, signal: AbortSignal) => ({
+      id: 'j',
+      data: sampleMessage({ idempotencyKey: key }),
+      attempt: 1,
+      signal,
+    });
+
+    it('aborted before the request: no HTTP request, the claim is released, the retry sends', async () => {
+      const state = new MemoryMailState();
+      const handler = createMailHandler({ sender: sender(), state });
+
+      await expect(handler(job('drain-before', AbortSignal.abort()))).rejects.toMatchObject({
+        code: 'timeout',
+      });
+      expect(server.requests).toHaveLength(0);
+
+      await handler(job('drain-before', new AbortController().signal)); // the retry, on another worker
+      expect(server.accepted).toHaveLength(1);
+    });
+
+    it('aborted while the request is on the wire: released, and the retry sends again — at-least-once', async () => {
+      const state = new MemoryMailState();
+      const handler = createMailHandler({ sender: sender({ requestTimeoutMs: 60_000 }), state });
+      server.hang = true;
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 50);
+
+      await expect(handler(job('drain-during', controller.signal))).rejects.toMatchObject({
+        code: 'timeout',
+      });
+      expect(server.requests).toHaveLength(1);
+
+      // Graph may or may not have accepted that request (no acknowledgement reached us). The claim is
+      // released, so the retry sends: a duplicate is possible and accepted over a lost mail.
+      server.hang = false;
+      await handler(job('drain-during', new AbortController().signal));
+      expect(server.requests).toHaveLength(2);
+    });
+  });
+});
+
 describe('GraphSender: errors', () => {
   it.each([
     [400, 'invalid_message', false],

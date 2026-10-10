@@ -332,6 +332,9 @@ importers:
       '@quynhonsemiconductor/observability':
         specifier: workspace:^
         version: link:../observability
+      '@quynhonsemiconductor/platform-cache':
+        specifier: workspace:^
+        version: link:../platform-cache
       '@quynhonsemiconductor/platform-db':
         specifier: workspace:^
         version: link:../platform-db
