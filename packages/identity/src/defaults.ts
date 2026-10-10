@@ -1,4 +1,4 @@
-import { AUTH_MAIL_RETENTION } from './ports';
+import { AUTH_MAIL_PRIORITY } from './ports';
 
 /**
  * The secure defaults of identity plan §5.4, in one frozen object. Products cannot change them
@@ -65,7 +65,7 @@ export const DEFAULTS = Object.freeze({
     cron: '0 * * * *',
     tz: 'Asia/Ho_Chi_Minh',
   }),
-  mailRetention: AUTH_MAIL_RETENTION,
+  mailPriority: AUTH_MAIL_PRIORITY,
   /** Client IP is exposed to Better Auth under this one header; the mount overwrites it. */
   clientIpHeader: 'x-qnsc-client-ip',
   encryptionKeyEnv: 'IDENTITY_ENCRYPTION_KEY',

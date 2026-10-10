@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { perEmailLimiter } from './mail-limit';
 import { AuthMail, mailIdempotencyKey } from './mail-port';
-import { AUTH_MAIL_RETENTION, MAIL_QUEUE, type JobSendOptions } from './ports';
+import { AUTH_MAIL_PRIORITY, MAIL_QUEUE, type JobSendOptions } from './ports';
 import { assertTestLoginAllowed, TestLoginRefusedError } from './test-login';
 
 const templates = {
@@ -17,7 +17,7 @@ describe('mail', () => {
     expect(mailIdempotencyKey('verify-email', 'u1', 'secret-token')).not.toBe(key);
   });
 
-  it('enqueues on mail.send with the retention the lead decided, and never awaits a provider', async () => {
+  it('enqueues on mail.send with priority 10 and no retention option, and never awaits a provider', async () => {
     const sent: Array<{ queue: string; options: JobSendOptions | undefined }> = [];
     const mail = new AuthMail(
       { send: async (queue, _data, options) => (sent.push({ queue, options }), 'id') },
@@ -29,7 +29,13 @@ describe('mail', () => {
       token: 't',
     });
     expect(sent[0]!.queue).toBe(MAIL_QUEUE);
-    expect(sent[0]!.options?.retention).toEqual(AUTH_MAIL_RETENTION);
+    // priority, and NO per-send retention: platform-jobs has none, so it would be silently ignored
+    expect(sent[0]!.options?.priority).toBe(AUTH_MAIL_PRIORITY);
+    expect(Object.keys(sent[0]!.options ?? {}).sort()).toEqual([
+      'idempotencyKey',
+      'priority',
+      'tx',
+    ]);
     expect(sent[0]!.options?.idempotencyKey).toBe(mailIdempotencyKey('verify-email', 'u', 't'));
   });
 
