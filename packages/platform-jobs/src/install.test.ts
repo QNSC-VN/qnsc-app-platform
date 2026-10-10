@@ -1,5 +1,6 @@
 import { createMigratorPool, createPool } from '@quynhonsemiconductor/platform-db';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { Pool } from 'pg';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { installJobsSchema, jobsGrantsSql, quoteIdent } from './install';
 import { createJobs } from './engine';
 import { dockerOn, startJobsDb, type JobsDb } from './test-support/harness';
@@ -25,6 +26,46 @@ describe('jobsGrantsSql', () => {
     const [first] = jobsGrantsSql('x"; DROP SCHEMA pgboss; --', 'm');
     expect(first).toBe('GRANT USAGE ON SCHEMA pgboss TO "x""; DROP SCHEMA pgboss; --"');
     expect(quoteIdent('a"b')).toBe('"a""b"');
+  });
+});
+
+describe('installJobsSchema releases its connection correctly', () => {
+  /** A pool whose single session answers the lock, reports a current_user, and fails (or not) to unlock. */
+  function fakePool(unlock: 'ok' | 'fails') {
+    const release = vi.fn();
+    const client = {
+      release,
+      query: vi.fn((text: string) => {
+        if (/pg_advisory_unlock/.test(text)) {
+          return unlock === 'ok'
+            ? Promise.resolve({ rows: [] })
+            : Promise.reject(new Error('connection lost'));
+        }
+        if (/current_user/.test(text)) return Promise.resolve({ rows: [{ me: 'the_app_role' }] });
+        return Promise.resolve({ rows: [] });
+      }),
+    };
+    return { pool: { connect: () => Promise.resolve(client) } as unknown as Pool, release };
+  }
+
+  it('hands the connection back with the error when the unlock FAILS, so the pool destroys it (it may still hold the lock)', async () => {
+    const { pool, release } = fakePool('fails');
+    // current_user is the app role, so install() stops early: the point here is the cleanup.
+    await expect(installJobsSchema(pool, { appRole: 'the_app_role' })).rejects.toThrow(
+      /must run as the migrator role/,
+    );
+    expect(release).toHaveBeenCalledOnce();
+    expect(release.mock.calls[0]![0]).toBeInstanceOf(Error);
+    expect((release.mock.calls[0]![0] as Error).message).toBe('connection lost');
+  });
+
+  it('returns a healthy connection to the pool when the unlock succeeds', async () => {
+    const { pool, release } = fakePool('ok');
+    await expect(installJobsSchema(pool, { appRole: 'the_app_role' })).rejects.toThrow(
+      /must run as the migrator role/,
+    );
+    expect(release).toHaveBeenCalledOnce();
+    expect(release.mock.calls[0]![0]).toBeUndefined();
   });
 });
 

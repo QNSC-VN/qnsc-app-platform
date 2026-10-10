@@ -202,6 +202,29 @@ describe.skipIf(!dockerOn)('drainQueue, against a real database', () => {
     }
   });
 
+  it('THROWS when the queue is not quiet by the timeout, instead of returning as if it had drained', async () => {
+    const hung = createJobs({
+      pool: h.appPool,
+      env: { ...h.appEnv },
+      internal: { drainTimeoutMs: 800 },
+    });
+    const queue = uniqueQueue('hang');
+    await hung.handle(queue, () => new Promise<void>(() => undefined));
+    await hung.start();
+    try {
+      await hung.send(queue, {});
+      const startedAt = Date.now();
+      await expect(drainQueue(hung, queue)).rejects.toThrow(
+        /still had ready or active jobs after 800 ms/,
+      );
+      expect(Date.now() - startedAt, 'it waited for a handler that never returns').toBeLessThan(
+        5_000,
+      );
+    } finally {
+      await hung.stop(300).catch(() => undefined);
+    }
+  });
+
   it('refuses to drain before start() (it needs the database)', async () => {
     const { jobs, close } = h.makeJobs();
     const queue = uniqueQueue('drain');

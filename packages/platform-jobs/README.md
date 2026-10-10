@@ -83,7 +83,10 @@ export class Invoices {
 This example is compiled by the test suite (`readme-example.test.ts`).
 
 Without Nest: `createJobs({ pool: createJobsPool() })`, then `jobs.handle(…)`, `await jobs.start()`,
-and `await jobs.stop(stopBudgetMs())` from your shutdown hook.
+and `await jobs.stop(stopBudgetMs(process.env, false))` from your shutdown hook. The second argument is
+`hasHttpServer`: pass `false` for a worker (no HTTP server, so no endpoint-removal delay was spent; the
+default `true` is for a process that also serves HTTP and has already waited it out). Stop the jobs
+before you end the pool they use.
 
 ## Roles: `ROLE=worker`
 
@@ -132,6 +135,29 @@ await jobs.send(queue, data, { tx, idempotencyKey, startAfter, priority });
 - **Job data is stored in the database in clear.** Do not put secrets in it, and keep personal data
   to what the handler needs. A failing job's error (name and the first 500 characters of its
   message) is stored too.
+
+### Correlation: a job continues the request that caused it
+
+A request has one correlation id from its first byte to its last log line (platform contract section 7).
+Background work **continues it when the sender puts it in the payload**:
+
+```ts
+import { currentCorrelationId } from '@quynhonsemiconductor/platform-jobs';
+
+await jobs.send('invoice.render', { orderId, correlationId: currentCorrelationId() }, { tx });
+```
+
+- It is **explicit, never injected**: `platform-jobs` does not add a key to your data, so a strictly
+  validated payload (an `EmailMessage`, a webhook body) does not grow fields it did not declare. Put
+  `correlationId` in the payload type of any job that should continue a request.
+- `currentCorrelationId()` returns the id of the code that is running now (a request, or a job, so a job
+  that sends a follow-up job continues the chain), or `undefined` outside any context or when the id is not
+  valid.
+- The handler runs under `payload.correlationId` **if it is a string of 1 to 128 characters from
+  `[A-Za-z0-9._:-]`**; otherwise (absent, not a string, a space, a quote, CR/LF, too long) under
+  `queue:jobId` made valid (characters outside the set become `.`, and the queue part is truncated so the
+  whole id fits in 128; the job id is never cut), the job's own id, prefixed with the queue. An invalid id is dropped, never logged: it is
+  untrusted input, and CR/LF in a log line forges records.
 
 ## `handle` and the queue configuration
 
@@ -329,9 +355,10 @@ Not options (ADR 0001):
 ## Metrics
 
 On the platform-contract names, through `observability`'s `QueueMetrics`: **`queue.processed`**,
-**`queue.failures`** (per queue, as each handler returns) and **`queue.lag_seconds`** (the age of the
+**`queue.failures`** (per queue, counted only when the job's fenced settle lands: a handler that finishes
+after its claim was lost counts for neither) and **`queue.lag_seconds`** (the age of the
 oldest job that is ready to run, read at most every 10 s by a worker; `0` when nothing is ready). Handler
-logs carry `queue:jobId` as the correlation id (`withJobContext`).
+logs carry the correlation id of the request that caused the job, or `queue:jobId` (see below).
 
 pg-boss adds, through OpenTelemetry and with no code from us: `pgboss.queue.jobs` (a gauge per queue and
 state), `messaging.client.sent.messages`, `messaging.client.consumed.messages`,
@@ -352,7 +379,8 @@ await drainQueue(jobs, 'invoice.render'); // every READY job, through the real p
 
 `runInline` needs no database and runs the registered handler once with a fresh id, `attempt: 1` and a
 signal. `drainQueue` needs `jobs.start()` and a database, and runs a **real pg-boss worker** on the queue
-until nothing is ready or active: the handler gets a real `AbortSignal`, a failure is stored as a worker
+until nothing is ready or active (it **rejects if the queue is still not quiet after 60 seconds**: a handler
+that never returns, or one that keeps enqueuing work for its own queue): the handler gets a real `AbortSignal`, a failure is stored as a worker
 stores it, a `PermanentJobError` dead-letters at once, and retention and retries behave as in
 production. `ROLE` does not matter for either. Jobs scheduled for later (`startAfter`, a retry's
 backoff) are not ready and are left alone. It rejects with the first handler error, after the batch has

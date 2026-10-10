@@ -200,6 +200,13 @@ export function resolveQueue(name: string, config: QueueConfig = {}): ResolvedQu
   );
 
   const deadLetter = config.deadLetter ?? `${name}.dlq`;
+  if (config.deadLetter === undefined && !QUEUE_NAME.test(deadLetter)) {
+    // Not the queue's own fault in the message: say what the default dead-letter name is and how out.
+    throw new JobsConfigError(
+      `Queue "${name}": its default dead-letter queue "${deadLetter}" would be longer than 100 characters. ` +
+        'Use a queue name of at most 96 characters, or name the dead-letter queue with `deadLetter`.',
+    );
+  }
   assertQueueName(deadLetter);
   if (deadLetter === name) {
     throw new JobsConfigError(`Queue "${name}": its dead-letter queue cannot be itself.`);

@@ -536,7 +536,9 @@ implemented by WP-7, not yet released:
   statistics come from telemetry, not from the queue's own stats table.
 - Telemetry on the contract names ([§5](#5-telemetry)): `queue.processed`, `queue.failures`,
   `queue.lag_seconds` (the age of the oldest ready job); pg-boss's `pgboss.*` instruments and
-  `pgboss.queue.oldest_ready_age` are extras. Handler logs carry `queue:jobId` as the correlation id.
+  `pgboss.queue.oldest_ready_age` are extras. Handler logs carry the correlation id the sender put in the payload as
+  `correlationId` ([§7](#7-errors-and-http-behaviour); valid per the same rule: 1–128 of `[A-Za-z0-9._:-]`), else
+  `queue:jobId`. It is explicit, never injected into the data (`currentCorrelationId()` reads it for senders).
 - One worker replica per product; alert on queue depth and oldest-job age. **No KEDA.**
 - `platform-runtime`'s `ExclusiveJob` is **deprecated** in favour of schedules and is removed in the
   next major, after every product has converged.

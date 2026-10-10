@@ -44,7 +44,9 @@ export async function runInline<T extends object>(
  * and your own polling is not involved: a test that enqueues and then calls this is deterministic.
  *
  * Jobs scheduled for later (`startAfter`, a retry's backoff) are not ready and are left alone.
- * Rejects with the first handler error, after settling every job it had fetched. Requires
+ * Rejects with the first handler error, after settling every job it had fetched. **Also rejects
+ * if the queue is still not quiet after 60 seconds** (a handler that never returns, or one that
+ * keeps enqueuing work for its own queue), rather than returning as if it had drained. Requires
  * `jobs.start()` (the database).
  */
 export async function drainQueue(jobs: Jobs, queue: string): Promise<void> {

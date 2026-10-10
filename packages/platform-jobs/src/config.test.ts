@@ -138,6 +138,15 @@ describe('queue and dead-letter names', () => {
       expect(() => assertQueueName(name)).toThrow(/not valid/);
     },
   );
+  it('a queue whose DEFAULT dead-letter name would exceed 100 characters is refused with the way out', () => {
+    const name = 'q'.repeat(97);
+    expect(() => assertQueueName(name)).not.toThrow();
+    expect(() => resolveQueue(name)).toThrow(
+      /default dead-letter queue .* longer than 100 characters.*at most 96/s,
+    );
+    expect(() => resolveQueue('q'.repeat(96))).not.toThrow();
+    expect(() => resolveQueue(name, { deadLetter: 'short.dlq' })).not.toThrow();
+  });
   it('a queue cannot be its own dead-letter queue', () => {
     expect(() => resolveQueue('q', { deadLetter: 'q' })).toThrow(/itself/);
   });
