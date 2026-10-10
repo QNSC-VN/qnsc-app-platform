@@ -306,6 +306,11 @@ Every error response is one envelope. **Frontends branch on `code`, never on `me
 Reference: `platform-http` `DomainException` and subclasses, `GlobalExceptionFilter`, `HttpErrorCodes`,
 `CATEGORY_HTTP_STATUS`.
 
+**Exception: third-party wire protocols.** A route group that speaks a library's own protocol answers it unchanged and
+adds the envelope next to it, in an `error` field, instead of replacing the body. Today that is `identity`'s
+`/api/auth/*` (Better Auth: `better-auth/client` reads the top-level `code` and `message` and the status, so those keep
+Better Auth's values and statuses). `error` is exactly the envelope above, and a 5xx is `INTERNAL_ERROR` at both levels.
+
 ## 8. Client IP
 
 The client address is, in order:

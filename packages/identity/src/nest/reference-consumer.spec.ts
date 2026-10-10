@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { createAuthClient } from 'better-auth/client';
 import { createServer } from 'node:net';
 import { Controller, Get, Global, Inject, Module, Post } from '@nestjs/common';
 import { APP_FILTER, NestFactory } from '@nestjs/core';
@@ -381,6 +382,47 @@ describe.skipIf(!enabled)('reference consumer: identity inside Nest 11 + Fastify
         `drop trigger ref_boom_commit_t on identity."user"; drop function ref_boom_commit()`,
       );
     }
+  });
+
+  it('an error from the mounted /api/auth routes keeps Better Auth’s body and status and adds the contract envelope (identity#196)', async () => {
+    const res = await http().post('/api/auth/sign-in/email', {
+      email: `nobody-${randomUUID().slice(0, 6)}@users.reference.test`,
+      password: `pw-${randomUUID()}`,
+    });
+    expect(res.status).toBe(401);
+    const id = res.headers.get('x-correlation-id');
+    expect(id).toBeTruthy();
+    expect(res.json()).toEqual({
+      code: 'INVALID_EMAIL_OR_PASSWORD',
+      message: 'Invalid email or password',
+      error: {
+        code: 'INVALID_EMAIL_OR_PASSWORD',
+        message: 'Invalid email or password',
+        details: [],
+        correlationId: id,
+      },
+    });
+    const invalid = await http().request('POST', '/api/auth/sign-up/email', {
+      json: { email: 'not-an-address', password: `pw-${randomUUID()}`, name: 'R' },
+      headers: { 'cf-connecting-ip': '203.0.113.196' },
+    });
+    expect(invalid.status).toBe(400); // Better Auth's status, not 422
+    expect(invalid.json()).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      error: { code: 'VALIDATION_FAILED' },
+    });
+  });
+
+  it('the real better-auth/client, over the real HTTP mount, reads error.code, error.message and status of a wrong password as on 8.0.0', async () => {
+    const client = createAuthClient({ baseURL: origin, fetchOptions: { headers: { origin } } });
+    const { data, error } = await client.signIn.email({
+      email: `nobody-${randomUUID().slice(0, 6)}@users.reference.test`,
+      password: `pw-${randomUUID()}`,
+    });
+    expect(data).toBeNull();
+    expect(error?.status).toBe(401);
+    expect(error?.code).toBe('INVALID_EMAIL_OR_PASSWORD');
+    expect(error?.message).toBe('Invalid email or password');
   });
 
   it('is ready when the schema matches, and says why when it does not', async () => {

@@ -101,6 +101,38 @@ The module mounts `auth.handler` on `/api/auth/*` as an encapsulated Fastify plu
 resolved with `clientIp()` (`cf-connecting-ip` first), into the one header Better Auth reads, discarding any the
 client sent.
 
+**`/api/auth/*` follows Better Auth's wire protocol, plus the platform error envelope next to it.** `better-auth/client`,
+which product frontends use, reads the top-level `code` and `message` of an error body and the HTTP status, so none of
+those change. Every response of 400 or above also carries contract §7's envelope in an additive `error` field:
+
+```json
+{
+  "code": "INVALID_EMAIL_OR_PASSWORD",
+  "message": "Invalid email or password",
+  "error": {
+    "code": "INVALID_EMAIL_OR_PASSWORD",
+    "message": "Invalid email or password",
+    "details": [],
+    "correlationId": "…"
+  }
+}
+```
+
+- **4xx:** Better Auth's status and its own fields are untouched (a missing `code`/`message` is added from the status);
+  `error.code`/`error.message` repeat them, and `correlationId` is the request's (`unknown` if none was seeded). Its
+  request-body validation (400 `VALIDATION_ERROR`) stays 400 and is `error.code: VALIDATION_FAILED` with the issues in
+  `error.details`. A body that already has an `error` key (an OAuth-style `{ error, error_description }`) is left as it is.
+- **5xx:** `code` and `error.code` are `INTERNAL_ERROR` and the message is the fixed "An unexpected error occurred", at the top
+  level too, never an empty body; nothing Better Auth said about the failure is on the wire (it is in the log).
+- Redirects (the OAuth and SSO callbacks) and successes are untouched.
+- **`AuthApiErrorFilter` is a different path on purpose.** It maps an error raised through `auth.api.*` inside your own
+  controller to a `DomainException`, and so answers the platform envelope alone with the platform's statuses (an
+  unrecognised 4xx is 422). The mounted routes keep Better Auth's statuses (that 4xx is 400) because Better Auth's clients
+  expect them. The same condition can therefore be a 400 on `/api/auth/*` and a 422 from your controller.
+
+A 500 from Better Auth is logged with the error's **class and code** (`error: "DrizzleQueryError"`, `cause`, `errorCode`:
+the SQLSTATE) and the request's `correlationId`, never its message, which a database error fills with the statement or the row.
+
 Every route needs a session unless it is `@Public()`. Authorization stays in the product's guard, which reads
 `@CurrentSession()` / `@CurrentUser()`.
 
