@@ -1,0 +1,78 @@
+# The end-to-end async path (plan criterion 9) against the PUBLISHED packages.
+#
+# `reference-consumer/` is its own pnpm root. It installs identity, platform-http, platform-jobs,
+# platform-mail and their peers FROM GITHUB PACKAGES, exactly as a product does, then boots an API and a
+# worker as separate processes against PostgreSQL, Valkey and Mailpit: request -> identity sign-up ->
+# mail.send enqueued in the same transaction -> worker -> SMTP. See reference-consumer/README.md.
+#
+# Not part of the `CI required` gate, on purpose: it needs the registry and several image pulls, and
+# what it checks is a RELEASE, not a pull request. It runs
+#   * on a pull request that changes the consumer or this workflow,
+#   * weekly, so a bad release (or a registry change) is noticed without waiting for a product,
+#   * on demand, e.g. right after a release.
+name: Reference consumer
+
+on:
+  pull_request:
+    paths:
+      - 'reference-consumer/**'
+      - '.github/workflows/reference-consumer.yml'
+  schedule:
+    - cron: '41 3 * * 1' # Mondays 03:41 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: reference-consumer-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  async-path:
+    name: Async path (published packages)
+    # A fork's pull request has no token that can read the registry.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: reference-consumer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.28.5
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      # pnpm 11 ignores `${NODE_AUTH_TOKEN}` in a project .npmrc (the file is committed), so the token
+      # goes into a user-level config outside the workspace.
+      - name: Registry credentials
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '//npm.pkg.github.com/:_authToken=%s\n' "$TOKEN" > "$RUNNER_TEMP/npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/npmrc" >> "$GITHUB_ENV"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Which versions are under test
+        run: |
+          for p in identity platform-http platform-jobs platform-mail observability platform-db; do
+            # By path: a package with an `exports` map does not expose package.json to require().
+            printf '%s@%s\n' "$p" "$(node -p "require('./node_modules/@quynhonsemiconductor/$p/package.json').version")"
+          done
+
+      - run: docker version --format 'docker {{.Server.Version}}'
+
+      - run: pnpm test

@@ -240,6 +240,38 @@ The mock IdP shows how Better Auth handles a conforming IdP. It cannot show what
   conclusions depend on "enqueue through a `DbExecutor`", which the WP-6 prototype shares, but the
   idempotency mechanism there is a deterministic job id rather than this stub's unique index.
 
+## Addendum 2026-10-10: M6 result (criterion 9 against the published packages)
+
+M6 asked for `test/c09` to be re-run against the real `platform-jobs` and `platform-mail`. It was re-run
+as a **reference consumer** in [`reference-consumer/`](../../reference-consumer/README.md): its own pnpm
+root that installs `identity` 8.0.0, `platform-http` 4.2.0, `platform-jobs` 0.1.1 and `platform-mail` 0.1.1
+(and their peers) from the registry, and boots an API and a worker as separate processes against PostgreSQL
+18, Valkey and Mailpit. This records a verification; the decision above is unchanged.
+
+**Held, with the real queue and the real handler instead of stand-ins:**
+
+- One correlation id from the request, through the job, to the delivered message: the response echoes it,
+  the API and the worker log it under the same job id, and the worker's Message-ID is the one in the sink.
+  A generated id travels the same way; a hostile one is replaced and appears in no log line.
+- The verification mail is enqueued **in the sign-up transaction**. A sign-up whose COMMIT fails leaves no
+  user, no job and no mail, and the log shows the job _was_ created inside the failing transaction.
+- A duplicate key produces one job and one mail, including the case the stand-in could not show: re-enqueuing
+  after completion (the completed job and its job-id dedupe are gone) is stopped by `platform-mail`'s ledger.
+- A SIGTERM during an in-flight send finishes it, hands the rest to another worker, and nobody gets two.
+
+**Not as the spike assumed (issues filed):**
+
+- A failed enqueue that fails in **SQL** inside the sign-up transaction poisons it: the response is `200`
+  with a user that was never created ([#191](https://github.com/quynhonsemiconductor/app-platform/issues/191)).
+  The spike's failing enqueue threw in JavaScript, which is the case the "user exists, no mail" text describes.
+- Decision 4's bound on the bearer link covers finished jobs. A job nobody has picked up is kept **14 days**
+  with the link in clear ([#192](https://github.com/quynhonsemiconductor/app-platform/issues/192)).
+- The `platform-mail` README's NestJS example does not boot
+  ([#190](https://github.com/quynhonsemiconductor/app-platform/issues/190)); a drain that runs out of budget
+  with a lost acknowledgement sends twice ([#195](https://github.com/quynhonsemiconductor/app-platform/issues/195)).
+
+Not covered: the `graph` transport, a pod or kubelet drain, Cloudflare Tunnel, CloudNativePG, Entra.
+
 ## Decisions by the platform lead (2026-10-09)
 
 These close the questions this spike left open. WP-10 implements them; the conformance kit asserts
