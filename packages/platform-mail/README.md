@@ -23,6 +23,9 @@ same contract, built only when a product hits a trigger; neither exists here.
 @quynhonsemiconductor:registry=https://npm.pkg.github.com
 ```
 
+The token (`read:packages`) goes in your **user-level** `~/.npmrc`, **not** in this file: pnpm 11 ignores a token
+in a project `.npmrc`. See [Authenticating to GitHub Packages](../../README.md#authenticating-to-github-packages).
+
 ```bash
 pnpm add @quynhonsemiconductor/platform-mail @quynhonsemiconductor/platform-jobs @quynhonsemiconductor/observability
 pnpm add @azure/identity                      # MAIL_TRANSPORT=graph

@@ -36,6 +36,30 @@ auto-merges this major, so each product moves on its own schedule while 7.x keep
    sign-in is a server-side redirect.
 7. **Lint:** forbid `better-auth` imports outside the file that calls `createIdentity` (identity plan I7).
 
+## If the same change moves you to pnpm 11: registry authentication
+
+Independent of identity, but it bites at exactly this kind of upgrade, so it is recorded here. **pnpm 11 ignores
+a token in a project `.npmrc`** and answers `ERR_PNPM_FETCH_401` for `@quynhonsemiconductor/*`. rova, opshub and
+solodesk all authenticate that way today (`//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}` in `.npmrc`),
+and CI runs pnpm 10 (solodesk pins `pnpm@10.23.0`), so nothing is broken yet. The first product to move to pnpm 11
+fails in **three** places, not one:
+
+1. **Developer machines:** put the token in `~/.npmrc` (`( umask 077; printf '//npm.pkg.github.com/:_authToken=%s\n' "$TOKEN" >> ~/.npmrc )`)
+   and delete the token line from the project `.npmrc`, leaving only the registry line.
+2. **GitHub Actions:** `actions/setup-node` with `registry-url: https://npm.pkg.github.com`, `scope: '@quynhonsemiconductor'`
+   and `NODE_AUTH_TOKEN` on the install step. **The shared `setup-node-pnpm` action in `quynhonsemiconductor/ci` does not
+   do this**: it calls `actions/setup-node` without `registry-url` and runs `pnpm install --frozen-lockfile` itself, so it
+   relies on the product's project `.npmrc` and will 401 on pnpm 11. Until that action writes a user-level npmrc (a change
+   in the `ci` repository, not here), write one yourself in a step before it, or run the install outside the action
+   (`install-deps: 'false'`).
+3. **Docker builds:** rova's and opshub's Dockerfiles `COPY .npmrc` and `export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)"`
+   in front of `pnpm install`. On pnpm 11 that 401s. Write `~/.npmrc` from the secret inside the same `RUN` and remove
+   it afterwards: `( umask 077; printf '//npm.pkg.github.com/:_authToken=%s\n' "$(cat /run/secrets/node_auth_token)" > "$HOME/.npmrc" ) && pnpm install --frozen-lockfile && rm -f "$HOME/.npmrc"`.
+
+Every form was run on pnpm 10.33.2 and 11.28.5 from a clean `HOME`, and the Docker form in a BuildKit build on both
+(the current pattern installs on 10 and gets 401 on 11; the fix installs on both). The details and the other forms are in
+the root [README](../../README.md#authenticating-to-github-packages).
+
 ## Tables and data
 
 Generate the Better Auth tables for your instance (README, "Tables"), then migrate in one transaction. Ids are

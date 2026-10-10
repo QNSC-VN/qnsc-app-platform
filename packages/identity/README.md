@@ -21,8 +21,10 @@ tables, Entra settings), the data mapping with a SQL template, and the behaviour
 ```ini
 # .npmrc
 @quynhonsemiconductor:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
 ```
+
+The token (`read:packages`) goes in your **user-level** `~/.npmrc`, **not** in this file: pnpm 11 ignores a token
+in a project `.npmrc`. See [Authenticating to GitHub Packages](../../README.md#authenticating-to-github-packages).
 
 ```bash
 pnpm add @quynhonsemiconductor/identity

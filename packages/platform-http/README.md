@@ -29,6 +29,9 @@ one product that is a 422 in another is a bug, not a style difference
 @quynhonsemiconductor:registry=https://npm.pkg.github.com
 ```
 
+The token (`read:packages`) goes in your **user-level** `~/.npmrc`, **not** in this file: pnpm 11 ignores a token
+in a project `.npmrc`. See [Authenticating to GitHub Packages](../../README.md#authenticating-to-github-packages).
+
 ```bash
 pnpm add @quynhonsemiconductor/platform-http
 ```
