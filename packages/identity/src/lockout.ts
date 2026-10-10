@@ -7,8 +7,10 @@ import {
   bumpDeviceEpoch,
   knownDeviceId,
   rememberDevice,
-  reissueDevice,
+  bumpAndReissue,
+  readEpochInputs,
   validDevice,
+  type EpochInputs,
 } from './known-device';
 
 const digest = (value: string): string =>
@@ -117,7 +119,7 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
   const resetUser = new WeakMap<object, string>();
   const revoked = new WeakMap<
     object,
-    { userId: string; device?: { deviceId: string; iat: number } }
+    { userId: string; device?: { deviceId: string; iat: number }; inputs?: EpochInputs }
   >();
   const callKey = (ctx: {
     request?: Request | undefined;
@@ -173,11 +175,19 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
             const session = key ? await getSessionFromCtx(ctx) : null;
             if (!key || !session) return;
             const userId = session.user.id;
-            const device =
+            // Snapshot the epoch inputs FIRST and judge the cookie against that snapshot, so the
+            // validation and the later re-issue agree on one state (see `bumpAndReissue`).
+            const inputs =
               ctx.path === '/revoke-other-sessions'
-                ? await validDevice(ctx, async () => userId)
+                ? await readEpochInputs(ctx, userId)
                 : undefined;
-            revoked.set(key, { userId, ...(device ? { device } : {}) });
+            const device = inputs
+              ? await validDevice(ctx, async () => userId, undefined, inputs)
+              : undefined;
+            revoked.set(key, {
+              userId,
+              ...(device && inputs ? { device, inputs } : {}),
+            });
           }),
         },
         {
@@ -213,9 +223,13 @@ export function accountLockout(sink: SecurityEventSink): BetterAuthPlugin {
             const key = callKey(ctx);
             const seen = key ? revoked.get(key) : undefined;
             if (!seen) return;
-            await bumpDeviceEpoch(ctx, seen.userId);
-            // "Other sessions" keeps the one asking: its cookie, valid until now, gets the new epoch.
-            if (seen.device) await reissueDevice(ctx, seen.userId, seen.device);
+            // "Other sessions" keeps the one asking: its cookie, valid until now, gets the new epoch,
+            // but only if this call is the one that moved it.
+            if (seen.device && seen.inputs) {
+              await bumpAndReissue(ctx, seen.userId, seen.device, seen.inputs);
+            } else {
+              await bumpDeviceEpoch(ctx, seen.userId);
+            }
           }),
         },
         {
