@@ -2,8 +2,8 @@
 
 8.0.0 is a rewrite on Better Auth. Nothing from 7.x is source-compatible. Browser sessions become database
 sessions behind an `HttpOnly` cookie; there is no access token, refresh token or BFF orchestrator any more.
-Order of adoption (identity plan §13): LMS and solodesk first, then opshub, then rova. Renovate never
-auto-merges this major, so each product moves on its own schedule while 7.x keeps working.
+Order of adoption (identity plan §13): LMS first, then opshub, then rova (solodesk was in this order until it
+was retired on 2026-10-10). Renovate never auto-merges this major, so each product moves on its own schedule while 7.x keeps working.
 
 7.x does not receive new features. A 7.x patch needs a maintenance branch (see the PR description).
 
@@ -39,10 +39,10 @@ auto-merges this major, so each product moves on its own schedule while 7.x keep
 ## If the same change moves you to pnpm 11: registry authentication
 
 Independent of identity, but it bites at exactly this kind of upgrade, so it is recorded here. **pnpm 11 ignores
-a token in a project `.npmrc`** and answers `ERR_PNPM_FETCH_401` for `@quynhonsemiconductor/*`. rova, opshub and
-solodesk all authenticate that way today (`//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}` in `.npmrc`),
-and CI runs pnpm 10 (solodesk pins `pnpm@10.23.0`), so nothing is broken yet. The first product to move to pnpm 11
-fails in **three** places, not one:
+a token in a project `.npmrc`** and answers `ERR_PNPM_FETCH_401` for `@quynhonsemiconductor/*`. rova and opshub
+both authenticate that way today (`//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}` in `.npmrc`), and CI runs
+pnpm 10, so nothing is broken yet (solodesk did the same and pinned `pnpm@10.23.0`; it was retired on 2026-10-10).
+The first product to move to pnpm 11 fails in **three** places, not one:
 
 1. **Developer machines:** put the token in `~/.npmrc` (`( umask 077; printf '//npm.pkg.github.com/:_authToken=%s\n' "$TOKEN" >> ~/.npmrc )`)
    and delete the token line from the project `.npmrc`, leaving only the registry line.
@@ -116,8 +116,8 @@ const sealed = sealSsoClientSecret(plainSecret); // `enc:v1:…`, key from IDENT
 Set `domain_verified` only after the DNS proof, and expect a provider whose domain is not verified to be unusable.
 v7 `sso_connections` stored a secret reference, not the secret; fetch the secret from where that reference points.
 
-solodesk: users and Google identities map the same way. Existing argon2 password hashes (any parameters) verify
-as they are, so password users do **not** have to reset; hashes in another format will fail with a plain 401 and
+solodesk (retired 2026-10-10; kept as the worked example of an argon2 product): users and Google identities map
+the same way. Existing argon2 password hashes (any parameters) verify as they are, so password users do **not** have to reset; hashes in another format will fail with a plain 401 and
 need a reset.
 
 ## Behaviour changes to design for

@@ -40,7 +40,7 @@ and why each current exception is one.
 ## Consuming these packages
 
 Packages are published to **GitHub Packages** under the `@quynhonsemiconductor` scope. In a
-consumer repo (`rova`, `opshub`, `solodesk`), add an `.npmrc` with the registry **only**:
+consumer repo (`rova`, `opshub`), add an `.npmrc` with the registry **only**:
 
 ```ini
 @quynhonsemiconductor:registry=https://npm.pkg.github.com
@@ -120,13 +120,14 @@ A prerelease never satisfies a plain range like `^4.1.0` and `latest` is untouch
 picks a canary up unless it asks. The job that publishes holds `packages: write` and runs no code
 from the PR; it only uploads tarballs built by a separate, credential-free job. Same-repo PRs only.
 
-**Consumer CI** (`Consumer · rova`, `Consumer · opshub`, `Consumer · solodesk` in `ci.yml`). Each
+**Consumer CI** (`Consumer · rova`, `Consumer · opshub` in `ci.yml`). Each
 product is checked out, every `@quynhonsemiconductor/*` dependency is pointed at a tarball packed
 from the PR, and the product's `typecheck` and unit tests run. Tarballs rather than the canary
 registry versions, so a package that has never been published installs the same way and the real
 version numbers keep peer ranges satisfiable. The job fails if the product depends on none of our
-packages, so it cannot pass by testing the registry versions instead. solodesk is typecheck-only:
-its services have only database-backed e2e suites, which need infrastructure the job does not start.
+packages, so it cannot pass by testing the registry versions instead. `solodesk` was a third
+consumer (typecheck-only) until it was retired on 2026-10-10: its repository is archived and its job
+is gone.
 
 Products are read through the read-only org GitHub App `qnsc-repo-reader` (`contents: read`;
 `vars.QNSC_REPO_READER_APP_ID`, `secrets.QNSC_REPO_READER_PRIVATE_KEY`). The write-capable

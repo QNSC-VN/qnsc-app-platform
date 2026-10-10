@@ -1,6 +1,6 @@
 # 0002. Build identity v8 on Better Auth (WP-9 spike result: pass)
 
-- **Status:** **Accepted** (2026-10-09, platform lead) — verdict **PASS**. Conditional: manual checks M1–M4 must pass against the real QNSC tenant before `identity` `8.0.0` is released, and M6 re-runs criterion 9 once WP-7/WP-8 land. WP-10 may start now.
+- **Status:** **Accepted** (2026-10-09, platform lead) — verdict **PASS**. Conditional: manual checks M1–M4 must pass against the real QNSC tenant before `identity` `8.0.0` is released, and M6 re-runs criterion 9 once WP-7/WP-8 land. WP-10 may start now. **Amended 2026-10-10** (see _Amendment 2026-10-10_: solodesk retired; the decision is unchanged).
 - **Date:** 2026-10-09
 - **Work package:** WP-9 (`APP-PLATFORM-PLAN.md` §6.9; spike per `APP-PLATFORM-IDENTITY-V8-PLAN.md` §8.1)
 - **Deciders:** platform lead (`@quynhonsemiconductor/platform-infra`)
@@ -346,3 +346,19 @@ each one.
   4. Correct identity plan §5.2, §5.3, A.1, A.2 (D3, D4, D5), §5.4 (D6, D8) and §7 (secret storage) —
      **the plan lives outside this repository, so this ADR does not edit it.** Owner: platform lead.
   5. Run the Manual checks M1–M6. Owner: platform lead (M1–M4, M5), WP-7/WP-8 authors (M6).
+
+## Amendment 2026-10-10 (solodesk retired; platform lead)
+
+solodesk is retired: its repository is archived and it is no longer a consumer of these packages. This
+amendment changes nothing in the decision; it only records what the references to solodesk above now mean.
+
+- **Criterion 8 still holds, and is still tested.** The result (hashes minted by solodesk's own code path
+  verify through the v8 password override) stays as the record of the spike, and `c08` stays in `spikes/`
+  untouched. The behaviour it proved is not solodesk-specific: PHC strings carry their parameters, so
+  `identity`'s conformance kit keeps a product-neutral case, "verifies an argon2id hash minted with other
+  parameters (existing product hashes)".
+- **D20 and the Consequences line about "existing solodesk hashes" are historical.** There is no solodesk
+  migration to make. Adoption order is now LMS, opshub, rova.
+- **Not done here:** `packages/identity/src/password.ts` still carries a comment that names solodesk's
+  argon2 defaults as the example; the code does not depend on it. Whether to reword the comment is left to
+  the identity owners.

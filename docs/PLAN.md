@@ -5,6 +5,11 @@
 **Repository:** `app-platform/` (GitHub `quynhonsemiconductor/app-platform`), packages published to
 GitHub Packages under `@quynhonsemiconductor`.
 
+> **Update (2026-10-10): solodesk is retired.** Its repository is archived and it is no longer a consumer of
+> these packages, so it is not checked by consumer CI and is not an adoption target. This plan was written
+> on 2026-10-08, when it was one; each place below that lists it as a consumer is marked ~~solodesk~~ rather
+> than rewritten, so the original scope stays readable. The consumers are rova, opshub and the LMS.
+
 ## 0. Precedence and related documents
 
 This file is the **single source of truth for `app-platform`**. Where another document disagrees
@@ -29,7 +34,7 @@ Still binding and **not** repeated here — read them before starting the releva
 
 **Goals**
 
-1. Every TypeScript product (rova, opshub, solodesk, LMS) runs correctly on the on-prem k3s
+1. Every TypeScript product (rova, opshub, ~~solodesk~~, LMS) runs correctly on the on-prem k3s
    server using shared, tested code for the parts where divergence would be a security defect or a
    cross-repo contract break: database connection, health, shutdown, client IP, telemetry, jobs,
    email transport, authentication.
@@ -59,7 +64,7 @@ Still binding and **not** repeated here — read them before starting the releva
 | P5 | **Framework-agnostic core, NestJS adapter at a subpath** for every **new** package: core exports plain functions; `/nest` exports the module. Existing packages are not refactored for this | `platform-db`, `platform-jobs`, `platform-mail` |
 | P6 | **No product schema in packages.** Packages own only their own schemas (pg-boss `pgboss` schema). Product tables are passed by the product or not used | `platform-mail` has no outbox table — pg-boss is the outbox |
 | P7 | **Versioning stays independent per package** (release-please, tag `<package>-v<semver>`), unchanged. Products receive **one grouped Renovate PR** for all `@quynhonsemiconductor/*` updates; peer ranges are tested in CI | No lockstep version (rejected, §9 APD-7) |
-| P8 | **Nothing ships without consumer proof**: every `app-platform` PR publishes a canary and runs rova, opshub and solodesk CI against it | §6.1 |
+| P8 | **Nothing ships without consumer proof**: every `app-platform` PR publishes a canary and runs rova, opshub and ~~solodesk~~ CI against it | §6.1 |
 | P9 | **Cross-language sharing happens through services and the runtime contract**, not libraries | `docs/PLATFORM-CONTRACT.md`, LiteLLM, TEI, clamd, Gotenberg |
 | P10 | **Policy is enforced at the gateway, not in client libraries**, when the gateway exists: LLM budgets, tier routing and the hosted-model data rule are enforced in LiteLLM per virtual key | No `platform-ai` package (§9 APD-5) |
 
@@ -69,14 +74,14 @@ Still binding and **not** repeated here — read them before starting the releva
 
 | Package | Today | Target | Consumers |
 |---|---|---|---|
-| `identity` | 7.1.0 (Passport/JWT, BFF, Entra, oidc broker) | **8.0.0 on Better Auth** (identity v8 plan) | LMS, solodesk, opshub, rova |
+| `identity` | 7.1.0 (Passport/JWT, BFF, Entra, oidc broker) | **8.0.0 on Better Auth** (identity v8 plan) | LMS, ~~solodesk~~, opshub, rova |
 | `observability` | 0.2.0 | + k8s attributes, one probe-path list, AWS SDK instrumentation off, sampling defaults | all TS |
 | `platform-cache` | 3.1.0 | unchanged API; documented `required` mode | all TS |
 | `platform-http` | 4.0.1 | + `clientIp()` (Cloudflare), rate-limit/idempotency refuse to run without cache in production | all TS |
 | `platform-runtime` | 0.1.1 | + `/livez` `/readyz`, graceful shutdown, ECS assumptions removed, `ExclusiveJob` advisory-lock fallback (deprecated after P2) | all TS |
 | **`platform-db`** | — | **new**: CNPG password auth, verified TLS, pool, migrator, readiness ping, advisory lock, transaction runner, replica slot; Drizzle at `/drizzle` and Nest at `/nest` | all TS |
-| **`platform-jobs`** | — | **new**: pg-boss wrapper; transactional enqueue; worker-only handlers; schedules | LMS, solodesk (P1); rova, opshub (P2) |
-| **`platform-mail`** | — | **new**: email **transport** only — `EmailSender` contract + `graph` (all email, one mailbox per product) and `smtp` (non-production only) transports + a `mail.send` job handler rate-limited per mailbox. Cloudflare Email Service and Resend are **future transports** behind the same contract, built only when a product hits a trigger (APD-13) | identity v8, LMS, solodesk (P1); rova, opshub (P2) |
+| **`platform-jobs`** | — | **new**: pg-boss wrapper; transactional enqueue; worker-only handlers; schedules | LMS, ~~solodesk~~ (P1); rova, opshub (P2) |
+| **`platform-mail`** | — | **new**: email **transport** only — `EmailSender` contract + `graph` (all email, one mailbox per product) and `smtp` (non-production only) transports + a `mail.send` job handler rate-limited per mailbox. Cloudflare Email Service and Resend are **future transports** behind the same contract, built only when a product hits a trigger (APD-13) | identity v8, LMS, ~~solodesk~~ (P1); rova, opshub (P2) |
 | `testing` (private) | — | **new, not published**: workspace-internal testcontainers harness (Postgres 18, Valkey) | tests inside this repo |
 
 Dependency graph (arrows = depends on):
@@ -179,7 +184,7 @@ W3      WP-9 Better Auth spike (1 week, identity plan §8.1)
 W3–W4   WP-7 platform-jobs · WP-8 platform-mail
 W4–W6   WP-10 identity 8.0.0
 W5–W8   WP-11 PLATFORM-CONTRACT.md · WP-12 docs · (WP-13 starter template deferred; LMS skeleton is the reference)
-W7–W16  WP-14 identity adoption: solodesk W7–W8 → opshub W9–W10 → rova W11–W12 → retire v7 W13–W16
+W7–W16  WP-14 identity adoption: ~~solodesk W7–W8~~ → opshub W9–W10 → rova W11–W12 → retire v7 W13–W16
 W8+     WP-15 product convergence (P2) · WP-16 realtime evaluation · WP-17 storage evaluation
 ```
 
@@ -201,11 +206,11 @@ Scope:
 - **Canary publishing:** on every PR, publish each changed package as `<version>-pr.<number>.<sha7>`
   under the npm dist-tag `pr-<number>` to GitHub Packages.
 - **Consumer CI:** a workflow that, for each canary, dispatches the test/typecheck/build jobs of
-  `rova`, `opshub` and `solodesk` with the canary version installed (`repository_dispatch` or a
+  `rova`, `opshub` and ~~`solodesk`~~ with the canary version installed (`repository_dispatch` or a
   reusable workflow in the `ci` repo). The `app-platform` PR's required check waits for them.
   Credentials: the **existing org GitHub App** (`vars.QNSC_AUTOMATION_APP_ID`,
   `secrets.QNSC_AUTOMATION_PRIVATE_KEY`, already used by `ci/.github/workflows/platform-conformance.yml`)
-  through `actions/create-github-app-token`, scoped with `repositories: rova,opshub,solodesk`.
+  through `actions/create-github-app-token`, scoped with `repositories: rova,opshub` (solodesk dropped 2026-10-10).
   No personal access token.
 - Governance: keep `@quynhonsemiconductor/platform-infra` as code owner (existing `CODEOWNERS`);
   add the new package paths (`packages/platform-db/`, `platform-jobs/`, `platform-mail/`,
@@ -217,10 +222,10 @@ Out of scope: lockstep versioning; changing release-please's independent tags.
 
 Acceptance:
 - `pnpm build && pnpm typecheck && pnpm test && pnpm lint` green on Node 24 / pnpm 11 / TS 6.
-- A test PR produces canaries and shows three consumer results as required checks.
+- A test PR produces canaries and shows three consumer results as required checks (two since 2026-10-10, with solodesk retired).
 - A deliberately breaking change in a test PR turns at least one consumer check red.
 
-Depends on: the org owner installing the existing automation App on `rova`, `opshub`, `solodesk`
+Depends on: the org owner installing the existing automation App on `rova`, `opshub`, ~~`solodesk`~~
 with **Contents: read** and **Actions: write**, and making its variable/secret available to
 `app-platform`.
 
@@ -410,7 +415,7 @@ Exactly as the identity v8 plan §5 and §8.2, with these bindings to this plan:
 
 Acceptance: identity plan §9.1 security review done; conformance suite green; the reference
 consumer boot test (`reference-consumer.spec.ts` pattern) passes; consumer CI green on LMS and
-solodesk branches.
+~~solodesk~~ branches.
 
 ### 6.11 WP-17 (evaluation, P2) — object storage
 
@@ -492,13 +497,13 @@ Acceptance: reviewed by the platform lead; qnsc-kb has an issue listing its gaps
 
 ### 6.16 WP-14 — `identity` v8 adoption (W7–W16)
 
-Order and windows from `MASTER-ROADMAP.md`: LMS from the start; solodesk W7–W8; opshub W9–W10;
+Order and windows from `MASTER-ROADMAP.md`: LMS from the start; ~~solodesk W7–W8~~ (retired 2026-10-10); opshub W9–W10;
 rova W11–W12; 30-day window; retire v7 W13–W16 (remove 7.x from the release config, archive
 `MIGRATION` notes).
 
 ### 6.17 WP-15 — product convergence (P2, W8+)
 
-Per product (rova, opshub; solodesk is collapsed earlier per its own plan):
+Per product (rova, opshub; ~~solodesk is collapsed earlier per its own plan~~, retired 2026-10-10):
 
 | Step | Detail |
 |---|---|
@@ -591,9 +596,9 @@ After WP-15: remove `ExclusiveJob` in the next `platform-runtime` major.
 | # | Question | Default |
 |---|---|---|
 | Q1 | Reviewers | **Decided:** `@quynhonsemiconductor/platform-infra` team, as today. Open: who in the team owns WP-8 |
-| Q2 | Consumer CI credentials | **Decided:** existing org automation GitHub App (§6.1); owner extends its installation to rova, opshub, solodesk |
+| Q2 | Consumer CI credentials | **Decided:** existing org automation GitHub App (§6.1); owner extends its installation to rova, opshub, ~~solodesk~~ |
 | Q3 | `qnsc-service-starter` | **Decided:** deferred (§6.13) |
-| Q4 | Mail sender addresses | **Decided (2026-10-09):** one shared mailbox and one app per product — `noreply-rova@qnsc.vn` "Rova" (rova's existing Entra app); `noreply-opshub@qnsc.vn` "QNSC OpsHub" (opshub's existing Entra app); `noreply-kb@qnsc.vn` "QNSC Knowledge Base" (kb's existing Entra app); `noreply-solodesk@qnsc.vn` "SoloDesk" (solodesk's existing Entra app); `noreply-academy@qnsc.vn` "QNSC Academy" (the LMS Entra app) |
+| Q4 | Mail sender addresses | **Decided (2026-10-09):** one shared mailbox and one app per product — `noreply-rova@qnsc.vn` "Rova" (rova's existing Entra app); `noreply-opshub@qnsc.vn` "QNSC OpsHub" (opshub's existing Entra app); `noreply-kb@qnsc.vn` "QNSC Knowledge Base" (kb's existing Entra app); ~~`noreply-solodesk@qnsc.vn` "SoloDesk" (solodesk's existing Entra app)~~ (retired 2026-10-10; no longer needed by this plan); `noreply-academy@qnsc.vn` "QNSC Academy" (the LMS Entra app) |
 | Q5 | Cache environment variable | **Decided (2026-10-10):** `REDIS_URL` — rova and opshub already use it and the chart injects it. The earlier `VALKEY_URL` in §6.14 is dropped. No package reads it: the product passes the value to `CacheModule` |
 | Q6 | Correlation id | **Done (2026-10-10, #178):** `enableCorrelationId(app)` in `platform-http` seeds the request context from `X-Correlation-Id` (kept only if 1–128 characters of `[A-Za-z0-9._:-]`, otherwise a generated UUID), echoes it on the response and puts it in the context; `CORRELATION_ID_MODE=disabled` opts out. The products' own middleware can go once their logger and exception filter read `observability`'s store (opshub does not yet) |
 | Q7 | Log trace field names | **Decided (2026-10-10):** keep `trace.id` / `span.id`, as the logger emits them. The earlier `trace_id` / `span_id` in §6.14 is dropped; a non-TypeScript service uses the dotted names |
