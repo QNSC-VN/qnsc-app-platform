@@ -330,8 +330,8 @@ Scope (core + `/nest`):
   — handlers register **only when `ROLE=worker`**; the API process can only enqueue.
 - `jobs.schedule(name, cron, data, { tz: 'Asia/Ho_Chi_Minh' })` — singleton schedules replacing
   `ExclusiveJob`.
-- Retention defaults: completed 7 days, failed 30 days, dead-letter until handled — **overridable per queue** (ADR 0001 decision 3; `mail.send`: completed deleted immediately, failed ≤ 24 h).
-- Metrics through `observability`: queue depth, oldest job age, failures, retries, dead-letter count.
+- Retention defaults: completed 7 days; failed follows completed (pg-boss keeps finished jobs on **one clock** per queue); the **dead-letter copy 30 days** carries the failure retention — **overridable per queue** (ADR 0001 decision 3 and its amendment 2026-10-10; `mail.send`: completed deleted immediately, failed ≤ 24 h).
+- Metrics through `observability`: `queue.processed`, `queue.failures`, `queue.lag_seconds` (oldest ready age) on the contract names, plus pg-boss's `pgboss.*` depth, retry and dead-letter instruments.
   **No KEDA**: workers are one replica; alert on depth and age.
 - Graceful stop on the shared shutdown hook.
 - `/testing` subpath: drain-queue and run-handler-inline helpers for product tests.

@@ -272,6 +272,46 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  packages/platform-jobs:
+    dependencies:
+      pg-boss:
+        specifier: 12.37.0
+        version: 12.37.0(@opentelemetry/api@1.9.1)
+    devDependencies:
+      '@nestjs/common':
+        specifier: ^11.0.0
+        version: 11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
+      '@nestjs/core':
+        specifier: ^11.0.0
+        version: 11.1.27(@nestjs/common@11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@opentelemetry/api':
+        specifier: ^1.9.1
+        version: 1.9.1
+      '@quynhonsemiconductor/observability':
+        specifier: workspace:^
+        version: link:../observability
+      '@quynhonsemiconductor/platform-db':
+        specifier: workspace:^
+        version: link:../platform-db
+      '@quynhonsemiconductor/testing':
+        specifier: workspace:*
+        version: link:../testing
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      drizzle-orm:
+        specifier: 0.45.3
+        version: 0.45.3(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.1)
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.2
+        version: 7.8.2
+
   packages/platform-runtime:
     devDependencies:
       '@nestjs/common':

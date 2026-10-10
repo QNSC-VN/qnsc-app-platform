@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Tests only, never emitted. ESM + bundler resolution is what allows the top-level `await`
+    // the Docker-gated suites use (same as packages/testing and platform-db), and lets
+    // `@quynhonsemiconductor/testing` resolve to its TypeScript source.
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": ["src/**/*"]
+}
