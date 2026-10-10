@@ -284,6 +284,75 @@ the error and commit, so a later delivery runs it again.
 or two features that both use `job.id` skip each other. Markers live in `pgboss.platform_effect` for 30
 days.
 
+## Redriving dead letters
+
+```ts
+const { moved, skipped } = await jobs.redrive('mail.send.dlq', {
+  limit: 50, // default 100, maximum 10000; oldest first
+  filter: { data: { category: 'digest.daily' }, createdBefore: new Date(Date.now() - 3600_000) },
+});
+```
+
+A dead-letter copy holds a job that died for good (a `PermanentJobError`, or the last retry failed).
+Once the cause is fixed, `redrive` puts it back on the queue it came from and resolves to
+`{ moved, skipped }`: how many went back, and how many the origin queue's `canRedrive` policy kept out.
+
+- **Same job id.** The copy records the id of the job that died, and the redriven job takes it. So
+  `idempotencyKey` (a UUIDv5 of queue and key, used as the job id) still deduplicates: a `send` with that
+  key returns `null` while the job is queued or retained, and a redriven job never runs beside a
+  duplicate. pg-boss's own `redrive` gives every job a new random id, which is why this is not a wrapper
+  around it. The dead original is a `failed` row; if retention has not removed it yet, it is removed in the
+  same transaction. **Only a `failed` row is ever replaced**: a row with that id in any other state (live, or
+  completed or cancelled and still retained) belongs to a later job sent with the same key, and the old payload
+  must not overwrite or run beside it.
+- **Fresh retry budget, the origin queue's configuration as it is now.** The job is inserted through
+  `send`: it starts at attempt 1 and takes the queue's current retry limit, backoff, expiry, heartbeat and
+  **retention** (so a `mail.send` job that succeeds after a redrive is deleted at once, like any other).
+  Priority and payload (including a `correlationId`) are kept. **It also restarts the origin queue's waiting
+  window**: the job gets a new deadline of the queue's `retentionSeconds` (14 days unless the queue sets
+  one), not what was left of the copy's; a payload that is redriven has, in effect, been re-enqueued.
+- **Atomic per job, safe to run twice at once.** Each job moves in its own transaction (lock the copy with
+  `FOR UPDATE SKIP LOCKED`, free the id, insert, delete the copy, commit). A crash leaves the copy where it
+  was; two redrives running together move every copy exactly once. A database error rolls that job back and
+  rejects, after earlier jobs have moved; call it again.
+- **An expired copy is not revived.** Dead-letter queues are not swept, and pg-boss deletes a copy past its own
+  deadline (`retention.deadLetter`) only on its next maintenance pass, up to 15 minutes later. In that gap
+  `redrive` ignores it (it is neither moved nor counted as skipped), so a payload that was meant to be gone
+  cannot be brought back with a fresh window.
+- **Never loses a payload.** A copy that cannot move stays in the dead-letter queue, untouched, and is
+  logged as a warning: a job with that id exists in the origin queue (live, or retained after it finished), the
+  origin queue is gone, or the copy records no origin. A copy a worker is handling (`active`) is not a
+  candidate.
+- **Refuses a queue that is not a dead-letter queue** (no queue names it as its dead letter), so a typo
+  cannot move the wrong thing. Before `start()` it rejects too.
+- **Filters** (all must hold): `ids` (copy ids in the dead-letter queue), `createdBefore`, `origin` (when a
+  custom dead-letter queue collects from several), and `data` (the payload **contains** this object,
+  Postgres `@>`: exact values, no prefixes).
+
+### `canRedrive`: payloads that must never come back
+
+```ts
+await jobs.defineQueue('mail.send', { canRedrive: (data) => !isAuthMail(data) });
+```
+
+An origin queue can veto some of its dead letters. `redrive` asks the rule of the copy's **origin** queue,
+as defined **in the calling process** (like a handler, it is not stored in the database), and leaves a copy it
+rejects, or that makes it throw, where it is. Those are counted in `skipped`; the log gets a **count per origin
+queue, never a payload**. A rule must return exactly `true` to allow. Consequences:
+
+- The origin queue must be defined in the process that calls `redrive` (`handle()` or `defineQueue()`). A copy
+  whose origin queue is not defined there cannot be checked, so it stays and counts as skipped.
+- Whether a queue has a rule is part of its definition: defining it with the rule in one place and without it
+  in another throws, as any other disagreement does.
+- The rule beats the filter: asking for a forbidden copy by `ids` does not get it past.
+
+`platform-mail` defines `mail.send` this way: **authentication mail is never redriven**, so an unfiltered
+`redrive('mail.send.dlq')` is safe.
+
+It is a maintenance call, not a hot path, and there is no automatic redrive: a person or a script decides
+once the cause is gone, or a redriven batch dead-letters again. The copy lives as long as the queue's
+`retention.deadLetter` (30 days by default; 24 h for `mail.send`).
+
 ## Schedules
 
 ```ts
@@ -385,7 +454,9 @@ signal. `drainQueue` needs `jobs.start()` and a database, and runs a **real pg-b
 until nothing is ready or active (it **rejects if the queue is still not quiet after 60 seconds**: a handler
 that never returns, or one that keeps enqueuing work for its own queue): the handler gets a real `AbortSignal`, a failure is stored as a worker
 stores it, a `PermanentJobError` dead-letters at once, and retention and retries behave as in
-production. `ROLE` does not matter for either. Jobs scheduled for later (`startAfter`, a retry's
+production. `ROLE` does not matter for either. **Implementing `Jobs` yourself is unsupported**: use `/testing` (or the real
+thing on a test database) rather than a hand-written fake, which would silently lack every method added since.
+`ROLE` does not matter for either. Jobs scheduled for later (`startAfter`, a retry's
 backoff) are not ready and are left alone. It rejects with the first handler error, after the batch has
 settled.
 

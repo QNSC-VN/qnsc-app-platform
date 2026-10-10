@@ -522,6 +522,10 @@ implemented by WP-7, not yet released:
   effect (savepoint, one transaction). It is **never** for an external call: that needs its own claim
   ledger, as `platform-mail` does ([§14](#14-email)).
 - `PermanentJobError` from a handler dead-letters the job at once, with no retries.
+- `jobs.redrive(dlq, { limit, filter })` moves dead-letter copies back to their origin queue with a fresh retry
+  budget and the **same job id** (so `idempotencyKey` still deduplicates), atomically per job, and returns
+  `{ moved, skipped }`; it refuses a queue that is not a dead-letter queue. Only a `failed` original is replaced.
+  The origin queue's `canRedrive` rule is enforced in code: authentication mail is never redriven.
 - Schedules default to `Asia/Ho_Chi_Minh`. One execution per tick across any number of workers.
 - Per-queue **retention** defaults: completed 7 days; failed follows completed (pg-boss keeps finished
   jobs on one clock); the dead-letter copy 30 days. `mail.send`: completed deleted immediately, failed
@@ -595,7 +599,8 @@ subject, html, text, headers?, category, idempotencyKey, correlationId?`. Addres
   else 0, and bulk mail stays at 0. A failure retrying cannot fix (HTTP 400, 403, 404, 413, an invalid
   message) is a `PermanentJobError`: dead-lettered at once, no retries. Alert on the dead-letter
   queue's depth (`pgboss.queue.jobs{queue="mail.send.dlq",state="ready"} > 0`); authentication mail
-  is never redriven (its link expires and the user asks again).
+  is never redriven (its link expires and the user asks again), and `platform-mail` enforces it in the queue
+  definition.
 - **Pacing.** About **20 messages a minute per sender mailbox** (a bucket of 20 a minute with a burst
   of 5, so at most 25 in any minute, under Exchange's ~30), shared by every worker. A `429` starts a
   **mailbox-wide cooldown** for its `Retry-After` (60 s if none, at most 10 min) that every worker
