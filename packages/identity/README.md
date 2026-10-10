@@ -151,6 +151,12 @@ Identity depends on two ports, never on the packages behind them:
   `platform-mail` in EVERY process that enqueues to it** (the API as well as the worker). An unregistered queue makes
   `send` throw: it fails closed and never falls back to the library's defaults, which would keep the links for days.
   Better Auth swallows a throwing email callback, so the sign-up still answers and the user can use "resend".
+- **Correlation id.** The `mail.send` payload carries `correlationId` when the enqueue happens inside a request that has one:
+  the id in `observability`'s request context, the store `platform-http`'s `enableCorrelationId` seeds, so one id follows
+  the action from the API request into the worker's log lines (platform contract §7). It is included only if it is 1 to 128
+  characters from `[A-Za-z0-9._:-]`, otherwise the key is omitted (an invalid value is never echoed); it is not part of the
+  idempotency key. The field mirrors `platform-mail`'s `EmailMessage.correlationId`, so the two types are assignable both ways.
+  `observability` is an optional peer: without it there is simply no id.
 - **`AuthEmailTemplates`** — the product renders `verifyEmail` and `resetPassword`.
 
 `EmailSender` and `EmailMessage` are exported as the **contract `platform-mail` implements** (`send(message) -> { id }`).

@@ -6,6 +6,7 @@ import {
   type EmailMessage,
   type JobEnqueue,
 } from './ports';
+import { requestCorrelationId, validCorrelationId } from './correlation';
 import { consoleLogger, MAIL_ENQUEUE_FAILED, type IdentityLogger } from './events';
 import { currentAuthTransaction } from './tx-context';
 
@@ -44,6 +45,8 @@ export class AuthMail {
     private readonly allow: (purpose: MailPurpose, email: string) => Promise<boolean> = async () =>
       true,
     private readonly logger: IdentityLogger = consoleLogger,
+    /** The id to carry into the job. Default: the request context's (see `correlation.ts`). */
+    private readonly correlationId: () => string | undefined = requestCorrelationId,
   ) {}
 
   sendVerification(input: AuthMailInput): Promise<void> {
@@ -72,7 +75,15 @@ export class AuthMail {
   ): Promise<void> {
     if (!(await this.allow(purpose, user.email))) return;
     const idempotencyKey = mailIdempotencyKey(purpose, user.id, token);
-    const message: EmailMessage = { to: user.email, ...rendered, category, idempotencyKey };
+    // Checked again here whatever the source: only a contract-§7 id is ever put in a payload.
+    const correlationId = validCorrelationId(this.correlationId());
+    const message: EmailMessage = {
+      to: user.email,
+      ...rendered,
+      category,
+      idempotencyKey,
+      ...(correlationId ? { correlationId } : {}),
+    };
     try {
       await this.jobs.send(MAIL_QUEUE, message, {
         tx: currentAuthTransaction(),
