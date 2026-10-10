@@ -10,6 +10,7 @@ export {
   AUTH_BASE_PATH,
   createIdentity,
   purgeUnverifiedAccounts,
+  revokeAllSessions,
   type Identity,
   type IdentityOptions,
 } from './create-identity';

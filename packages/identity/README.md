@@ -122,6 +122,26 @@ with a Microsoft account or an email on `staff.domains`. A staff session at its 
 ask for a refresh on every read, and the clamp would write the same expiry back): reading it costs no database write, no
 Valkey write and no `Set-Cookie`. The cookie cache is off whenever `staff` is present.
 
+The cap is also enforced **when a session is read**, not only when one is refreshed: a staff session older than 12 h is
+dead on its next read (`get-session`, `list-sessions`, the guard) whatever expiry it stores. That matters for a session that
+was issued on the public lifetime and whose owner is staff _now_. A user **becomes staff** when a Microsoft account is
+linked or when their email moves onto `staff.domains`; at that moment the sessions they hold that are not staff-shaped
+(a stored expiry beyond `createdAt + 12 h`) are revoked, so they sign in again as staff, and their capped sessions are
+left alone. The staff test costs nothing in a session's first 12 h or for a staff-domain email; for anyone else it is one
+`account` lookup, remembered per process for 30 s.
+
+**Changing the presets of a running system** (adding `staff`, or moving from `public + staff` to `staff` only) does not
+end the sessions issued under the old policy by itself. Staff ones end within 12 h of their creation; to end every session
+now, call `revokeAllSessions(auth)` once at deploy. It deletes them in Postgres and in Valkey, returns how many it ended,
+and everyone signs in again:
+
+```ts
+import { createIdentity, revokeAllSessions } from '@quynhonsemiconductor/identity';
+
+const auth = createIdentity({ ...options, presets: ['public', 'staff'] });
+console.log(`revoked ${await revokeAllSessions(auth)} sessions`);
+```
+
 Organization creation is closed (`allowOrganizationCreation`, default `false`): organizations are created by the product,
 because an organization owner can register an SSO provider. `trustedOrigins` is exactly the list you pass; provider
 origins are never added to it.
