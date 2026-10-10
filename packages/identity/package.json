@@ -1,6 +1,6 @@
 {
   "name": "@quynhonsemiconductor/identity",
-  "version": "7.1.0",
+  "version": "8.0.0",
   "description": "Authentication for QNSC product backends on Better Auth: secure defaults, presets (staff/public/organizations), SSO with encrypted secrets, session guard and a conformance kit. Authorization stays in the product.",
   "license": "UNLICENSED",
   "main": "dist/index.js",

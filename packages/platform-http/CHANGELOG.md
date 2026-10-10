@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.2.0](https://github.com/quynhonsemiconductor/app-platform/compare/platform-http-v4.1.0...platform-http-v4.2.0) (2026-10-10)
+
+
+### ✨ Features
+
+* **platform-http:** seed the correlation id from X-Correlation-Id, or generate one ([#178](https://github.com/quynhonsemiconductor/app-platform/issues/178)) ([487c923](https://github.com/quynhonsemiconductor/app-platform/commit/487c9239f1bcb3533a136134a39de0961ba578ba))
+
+
+### 🐛 Bug Fixes
+
+* **observability,platform-http:** security/auth metrics never throw; say when DISABLE_RATE_LIMIT is ignored ([#158](https://github.com/quynhonsemiconductor/app-platform/issues/158)) ([7cecb0f](https://github.com/quynhonsemiconductor/app-platform/commit/7cecb0f680e808b2ac98efcfe2da1f3c560856ce))
+
 ## [4.1.0](https://github.com/quynhonsemiconductor/app-platform/compare/platform-http-v4.0.2...platform-http-v4.1.0) (2026-10-09)
 
 ### ✨ Features

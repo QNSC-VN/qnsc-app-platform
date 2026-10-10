@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/quynhonsemiconductor/app-platform/compare/observability-v0.2.1...observability-v0.2.2) (2026-10-10)
+
+
+### 🐛 Bug Fixes
+
+* **observability,platform-http:** security/auth metrics never throw; say when DISABLE_RATE_LIMIT is ignored ([#158](https://github.com/quynhonsemiconductor/app-platform/issues/158)) ([7cecb0f](https://github.com/quynhonsemiconductor/app-platform/commit/7cecb0f680e808b2ac98efcfe2da1f3c560856ce))
+
 ## [0.2.1](https://github.com/quynhonsemiconductor/app-platform/compare/observability-v0.2.0...observability-v0.2.1) (2026-10-09)
 
 ### ✨ Features
