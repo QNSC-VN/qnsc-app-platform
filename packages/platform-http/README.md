@@ -5,17 +5,17 @@ taxonomy and its status mapping**, the **global exception filter** that renders 
 **pagination**, the **client address**, the **rate-limit guard** and **idempotency interceptor**, the
 HTTP **access-log interceptor**, the request-context accessor, and input sanitising.
 
-| in this package                                                                                       | in your product                                        |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `DomainException` + subclasses, `ErrorCategory` → status table, transport-level codes                 | your domain error **codes** (an append-only catalogue) |
-| `GlobalExceptionFilter`: the one wire envelope `{ error: { code, message, details, correlationId } }` | which exceptions your code throws                      |
-| cursor and offset pagination (`PageQuerySchema`, `buildPageResult`, `encodeCursor` …)                 | which endpoints paginate, and their sort keys          |
-| `clientIp(req)`: `cf-connecting-ip` → `x-forwarded-for` → socket                                      | nothing: stop reading `req.ip` / `x-real-ip`           |
-| `RateLimitGuard`, `@RateLimit(tier)`, tiers (`DEFAULT`, `STRICT`, `AUTH_LOGIN`, `AUTH_REFRESH`)       | **which route gets which tier**                        |
-| `IdempotencyInterceptor` (`Idempotency-Key` on `POST`/`PUT`)                                          | which routes opt in                                    |
-| `enableCorrelationId(app)`: the request's correlation id, validated, echoed, in the request context   | nothing: delete your own middleware, at your pace      |
-| `HttpLoggingInterceptor` (one summary line per request; skips probe paths)                            | your log field names for anything else                 |
-| `sanitizeString` / `sanitizeObject` (XSS stripping ahead of validation)                               | where it is applied                                    |
+| in this package                                                                                       | in your product                                                                                                                |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `DomainException` + subclasses, `ErrorCategory` → status table, transport-level codes                 | your domain error **codes** (an append-only catalogue)                                                                         |
+| `GlobalExceptionFilter`: the one wire envelope `{ error: { code, message, details, correlationId } }` | which exceptions your code throws                                                                                              |
+| cursor and offset pagination (`PageQuerySchema`, `buildPageResult`, `encodeCursor` …)                 | which endpoints paginate, and their sort keys                                                                                  |
+| `clientIp(req)`: `cf-connecting-ip` → `x-forwarded-for` → socket                                      | nothing: stop reading `req.ip` / `x-real-ip`                                                                                   |
+| `RateLimitGuard`, `@RateLimit(tier)`, tiers (`DEFAULT`, `STRICT`, `AUTH_LOGIN`, `AUTH_REFRESH`)       | **which route gets which tier**                                                                                                |
+| `IdempotencyInterceptor` (`Idempotency-Key` on `POST`/`PUT`)                                          | which routes opt in                                                                                                            |
+| `enableCorrelationId(app)`: the request's correlation id, validated, echoed, in the request context   | your own middleware, once its logger and exception filter read `observability`'s store (see [Rolling it out](#rolling-it-out)) |
+| `HttpLoggingInterceptor` (one summary line per request; skips probe paths)                            | your log field names for anything else                                                                                         |
+| `sanitizeString` / `sanitizeObject` (XSS stripping ahead of validation)                               | where it is applied                                                                                                            |
 
 Divergence here is a **cross-repo contract break**: both frontends branch on the error `code`, so a 409 in
 one product that is a 422 in another is a bug, not a style difference
@@ -96,7 +96,8 @@ enableCorrelationId(app);
 On every request, before any module middleware, guard or filter:
 
 1. `X-Correlation-Id` is kept **only if** it is one value of **1 to 128 characters from `[A-Za-z0-9._:-]`**.
-   Anything else (empty, longer, a space, a quote, a control character, CR/LF, a repeated header) is
+   Anything else (empty, longer, a space, a quote, a control character, CR/LF, a repeated header, which Node joins
+   into one comma-separated value) is
    replaced by `crypto.randomUUID()`. A replacement is logged at DEBUG with the **reason and the length**,
    never the value. An absent header is simply generated.
 2. The id is **echoed** on the response as `X-Correlation-Id`, including on 404s and error responses.
@@ -110,6 +111,22 @@ has to be excluded is anything that can inject: CR, LF, control characters, whit
 
 The browser can only read the response header if the product's CORS config lists it in
 `exposedHeaders`.
+
+### One fresh context per request
+
+A new context is made for **every** request and nothing is copied from whatever context is active when
+the middleware runs. That matters when the server was started inside a context (a bootstrap wrapped in
+`withJobContext`, for instance): every request handled afterwards inherits it, and reusing it would hand
+one mutable object to all of them, so they would share an id and a guard's `setAuthContext()` would write
+one user into everybody's context. Register `enableCorrelationId` before any other middleware that enters
+a context; it does not merge into one that is already there.
+
+### Upgrading
+
+`requestContextStorage` and `RequestContextService` exported by this package are now **`observability`'s
+instance** (before, this package carried a second, private copy). The names, shapes and class are
+unchanged, so nothing needs editing; a product that seeded this package's copy now seeds the one its
+logger reads. `observability` (`>=0.2.1`) was already a peer dependency.
 
 ### Rolling it out
 
@@ -129,9 +146,14 @@ The browser can only read the response header if the product's CORS config lists
    | solodesk | this package's `RequestContextService`, which is now `observability`'s           | yes                                                         |
    | opshub   | **its own** `AsyncLocalStorage` (`libs/platform/src/context/request-context.ts`) | **not yet**: first re-export `observability`'s, as rova did |
 
-   Checked by booting rova's and opshub's real middleware classes next to `enableCorrelationId`: with the
-   middleware kept there is one id in the response and in the product's own context in every case; with
-   opshub's removed, its logs and error bodies would see no id.
+   What is tested, and what is not. The tests in this repository use **copies shaped like** the products'
+   middleware, not the products' own classes: one with rova's pattern and header handling, one that trusts
+   the raw header as solodesk's does, and one shaped like opshub's that enters **its own private store**.
+   They pin: with the middleware kept there is one id in the response and in the product's own context for
+   every kind of input; with it removed, opshub's private store sees nothing (the prerequisite above).
+   Separately, rova's and opshub's actual middleware classes were booted once by hand, in throwaway specs
+   inside clones of those repositories, against a tarball of this package. That run is not committed and is
+   not in CI, so treat it as a one-off check and not as a guarantee.
 
 3. A deployment that must not change yet sets **`CORRELATION_ID_MODE=disabled`**: nothing is registered.
    An unknown value fails the boot.

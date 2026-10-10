@@ -282,9 +282,11 @@ Every error response is one envelope. **Frontends branch on `code`, never on `me
     splits headers. The character class is deliberate: a UUID-only rule would discard the ULIDs, hex
     trace ids and `service:request` composites that real callers send and break correlation across a
     call chain.
-  - **Absent:** a service SHOULD generate one.
+  - **Absent:** an HTTP service MUST generate one. (Row 17 of the checklist tests exactly this.)
   - A replacement is logged at DEBUG with the **reason and the length** of the rejected value, never
     the value.
+  - **The context is per request.** Every request gets its own; one request's context (its id, its user)
+    MUST NOT be reachable from another's, including when the server itself was started inside a context.
   - **The id is in the request context**, so it is on every log line as `correlationId` ([§4](#4-logs)),
     in every error body ([above](#7-errors-and-http-behaviour)), and available to code through the
     request-context accessor.

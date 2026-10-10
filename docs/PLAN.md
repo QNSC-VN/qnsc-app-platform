@@ -299,8 +299,9 @@ Acceptance:
 - Startup refuses in production without cache; starts with `edge-only`.
 - No `aws` instrumentation in the default instrumentations list.
 
-Follow-up (later, not part of WP-4's acceptance): `platform-http` seeds the request context from
-`X-Correlation-Id` and generates an id when it is absent, so the products' own middleware can go (Q6).
+Follow-up, **done (2026-10-10, #178)**: `platform-http` seeds the request context from
+`X-Correlation-Id` and generates an id when it is absent (`enableCorrelationId`), so the products' own
+middleware can go (Q6). opshub first has to point its context at `observability`'s store.
 
 Depends on: none.
 
@@ -594,6 +595,6 @@ After WP-15: remove `ExclusiveJob` in the next `platform-runtime` major.
 | Q3 | `qnsc-service-starter` | **Decided:** deferred (§6.13) |
 | Q4 | Mail sender addresses | **Decided (2026-10-09):** one shared mailbox and one app per product — `noreply-rova@qnsc.vn` "Rova" (rova's existing Entra app); `noreply-opshub@qnsc.vn` "QNSC OpsHub" (opshub's existing Entra app); `noreply-kb@qnsc.vn` "QNSC Knowledge Base" (kb's existing Entra app); `noreply-solodesk@qnsc.vn` "SoloDesk" (solodesk's existing Entra app); `noreply-academy@qnsc.vn` "QNSC Academy" (the LMS Entra app) |
 | Q5 | Cache environment variable | **Decided (2026-10-10):** `REDIS_URL` — rova and opshub already use it and the chart injects it. The earlier `VALKEY_URL` in §6.14 is dropped. No package reads it: the product passes the value to `CacheModule` |
-| Q6 | Correlation id | **Decided (2026-10-10):** `platform-http` follow-up (Agent C, later): seed the request context from `X-Correlation-Id`, generate an id when absent. Until then each product's middleware does it |
+| Q6 | Correlation id | **Done (2026-10-10, #178):** `enableCorrelationId(app)` in `platform-http` seeds the request context from `X-Correlation-Id` (kept only if 1–128 characters of `[A-Za-z0-9._:-]`, otherwise a generated UUID), echoes it on the response and puts it in the context; `CORRELATION_ID_MODE=disabled` opts out. The products' own middleware can go once their logger and exception filter read `observability`'s store (opshub does not yet) |
 | Q7 | Log trace field names | **Decided (2026-10-10):** keep `trace.id` / `span.id`, as the logger emits them. The earlier `trace_id` / `span_id` in §6.14 is dropped; a non-TypeScript service uses the dotted names |
 | Q8 | `S3_*` in the contract | **Decided (2026-10-10):** waits for WP-17. Storage stays product-owned, and its variable names per product, until it is measured |
