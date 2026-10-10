@@ -1,4 +1,5 @@
 export * from './client-ip';
+export * from './correlation-id';
 export * from './request-context';
 export * from './request-context.service';
 export * from './global-exception.filter';

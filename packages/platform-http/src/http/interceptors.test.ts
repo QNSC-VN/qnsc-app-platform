@@ -116,6 +116,50 @@ describe('HttpLoggingInterceptor', () => {
     expect(logSpy).toHaveBeenCalledTimes(1);
   });
 
+  describe('the correlation id it logs', () => {
+    const ctxOf = (correlationId: string): RequestContext => ({
+      workspaceId: undefined,
+      userId: undefined,
+      sessionId: undefined,
+      correlationId,
+      traceparent: undefined,
+    });
+
+    async function logged(headers: Record<string, string>, store?: RequestContext) {
+      const interceptor = new HttpLoggingInterceptor();
+      const logSpy = vi.spyOn(
+        (interceptor as unknown as { logger: { log: (o: unknown) => void } }).logger,
+        'log',
+      );
+      const ctx = makeHttpContext({ method: 'GET', url: '/v1/things', headers }, 200);
+      const run = () => lastValueFrom(interceptor.intercept(ctx, makeHandler('ok')));
+      await (store ? requestContextStorage.run(store, run) : run());
+      return logSpy.mock.calls[0][0] as Record<string, unknown>;
+    }
+
+    it('comes from the request context, not from the raw header', async () => {
+      const line = await logged(
+        { 'x-correlation-id': 'raw-caller-value' },
+        ctxOf('validated-id-1'),
+      );
+      expect(line['correlationId']).toBe('validated-id-1');
+    });
+
+    it('never logs an unvalidated header when there is no context (CORRELATION_ID_MODE=disabled)', async () => {
+      const forged = 'abc","level":60,"msg":"forged';
+      const line = await logged({ 'x-correlation-id': forged });
+      expect(line).not.toHaveProperty('correlationId');
+      expect(JSON.stringify(line)).not.toContain('forged');
+    });
+
+    it("leaves the key out rather than setting it to undefined, so the logger's own value survives", async () => {
+      // pino merges the log object OVER the mixin: an explicit `correlationId: undefined` would erase
+      // the id the mixin adds from the context.
+      const line = await logged({});
+      expect(Object.keys(line)).not.toContain('correlationId');
+    });
+  });
+
   it('logs the client address from cf-connecting-ip, ignoring a forged x-forwarded-for', async () => {
     const interceptor = new HttpLoggingInterceptor();
     const logSpy = vi.spyOn(
