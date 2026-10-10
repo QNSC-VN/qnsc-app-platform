@@ -14,6 +14,7 @@ import {
   type ResolvedHandler,
   type ResolvedQueue,
 } from './config';
+import { HELD_CLAIMS_SQL } from './claims';
 import { correlationIdFor } from './correlation';
 import { isPermanent } from './errors';
 import { idempotencyId } from './idempotency';
@@ -294,12 +295,11 @@ export class JobsImpl implements Jobs {
     if (failed.length === 0) return;
     let held: Set<string> | undefined;
     try {
-      const { rows } = await this.pool.query<{ id: string }>(
-        `SELECT id FROM pgboss.job
-          WHERE name = $1 AND state = 'active'
-            AND (id::text || ':' || retry_count::text) = ANY($2::text[])`,
-        [queue, failed.map((o) => `${o.id}:${o.attempt}`)],
-      );
+      const { rows } = await this.pool.query<{ id: string }>(HELD_CLAIMS_SQL, [
+        queue,
+        failed.map((o) => o.id),
+        failed.map((o) => o.attempt),
+      ]);
       held = new Set(rows.map((r) => r.id));
     } catch (error) {
       // Cannot tell: count them (the usual case) rather than lose the signal.
@@ -383,7 +383,10 @@ export class JobsImpl implements Jobs {
         this.queueMetrics.recordProcessed(queue);
       }
     } catch (error) {
-      // Not fatal: the batch-level settle completes it, and retention removes the row.
+      // Not fatal: the batch-level settle completes it (it is fenced, so it cannot complete
+      // anything that is no longer ours), and retention removes the row. The handler SUCCEEDED and
+      // that settle will land, so it is a processed job: count it here, where we know.
+      this.queueMetrics.recordProcessed(queue);
       this.logger.warn(`Could not settle job ${queue}/${job.id} early: ${describe(error).message}`);
     }
     return { id: job.id, status: 'completed' };

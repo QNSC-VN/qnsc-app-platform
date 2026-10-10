@@ -37,31 +37,41 @@ describe.skipIf(!dockerOn)('platform-jobs schedules, as a non-owner application 
       await w.jobs.schedule(queue, '* * * * *', { tick: true });
       await w.jobs.start();
     }
-    const registeredAt = Date.now();
     try {
       await waitFor(
         async () =>
           (await jobRows(h.adminPool, queue)).filter((r) => r.state === 'completed').length >= 3,
         { timeoutMs: 230_000, intervalMs: 1_000, message: 'three ticks' },
       );
-      const elapsedMinutes = (Date.now() - registeredAt) / 60_000;
-      const rows = await jobRows(h.adminPool, queue);
 
-      // pg-boss does not record which tick a job belongs to, and creates a tick's job when a cron
-      // pass (every 30 s) finds it due, so a job's creation time is only approximately its tick.
-      // What a second replica would break is visible without that:
-      //  - a tick created twice would show as two jobs created in the SAME pass (seconds apart),
-      //  - or as more jobs than there were minutes.
-      const created = rows.map((r) => r.created_on.getTime()).sort((a, b) => a - b);
-      const gaps = created.slice(1).map((t, i) => (t - created[i]!) / 1000);
+      // A TICK has an identity, and it is not the minute a job happened to be created in (pg-boss
+      // creates it when a 30 s cron pass finds it due). pg-boss files each occurrence as a job on
+      // its internal send-it queue, whose payload carries the `slot` it belongs to; the send-it
+      // handler then creates exactly one job for it on our queue.
+      const { rows: occurrences } = await h.adminPool.query<{ slot: string; state: string }>(
+        `SELECT data->>'slot' AS slot, state FROM pgboss.job
+          WHERE name = '__pgboss__send-it' AND data->>'name' = $1 ORDER BY data->>'slot'`,
+        [queue],
+      );
+      const slots = occurrences.map((o) => o.slot);
+      const minutes = slots.map((slot) => Date.parse(`${slot.replace(' ', 'T')}Z`) / 60_000);
+      expect(new Set(slots).size, `a tick was filed twice: ${slots.join(', ')}`).toBe(slots.length);
       expect(
-        Math.min(...gaps),
-        `two jobs were created in one cron pass: gaps ${gaps.join(', ')} s`,
-      ).toBeGreaterThanOrEqual(20);
+        minutes.every((m, i) => i === 0 || m - minutes[i - 1]! === 1),
+        `ticks were skipped: ${slots.join(', ')}`,
+      ).toBe(true);
+
+      // ONE job per tick: however many replicas registered the schedule, and in whichever pass.
+      // (Counting jobs by creation minute missed a tick re-sent by a LATER pass.)
+      const rows = await jobRows(h.adminPool, queue);
+      const completedOccurrences = occurrences.filter((o) => o.state === 'completed').length;
       expect(
         rows.length,
-        `${rows.length} jobs in ${elapsedMinutes.toFixed(1)} minutes for a per-minute schedule on two workers`,
-      ).toBeLessThanOrEqual(Math.ceil(elapsedMinutes) + 1);
+        `${rows.length} jobs for ${slots.length} ticks: a tick produced more than one job`,
+      ).toBeLessThanOrEqual(slots.length);
+      expect(rows.length, 'a completed tick produced no job').toBeGreaterThanOrEqual(
+        completedOccurrences,
+      );
 
       // One execution per job: no job ran twice, and every completed job ran.
       const ranIds = ran.map((r) => r.jobId);
@@ -69,8 +79,6 @@ describe.skipIf(!dockerOn)('platform-jobs schedules, as a non-owner application 
       for (const row of rows.filter((r) => r.state === 'completed')) {
         expect(ranIds, `completed job ${row.id} never ran`).toContain(row.id);
       }
-      // The work was done by the workers collectively, whichever fetched each job.
-      expect(new Set(ran.map((r) => r.by)).size).toBeGreaterThanOrEqual(1);
 
       const { rows: sched } = await h.adminPool.query<{ timezone: string; cron: string }>(
         'SELECT timezone, cron FROM pgboss.schedule WHERE name = $1',

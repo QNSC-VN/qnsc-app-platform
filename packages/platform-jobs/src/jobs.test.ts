@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { QueueMetrics, requestContextStorage } from '@quynhonsemiconductor/observability';
 import { currentCorrelationId } from './correlation';
 import { withTransaction } from '@quynhonsemiconductor/platform-db/drizzle';
@@ -622,6 +623,71 @@ describe.skipIf(!dockerOn)(
           await waitFor(() => seen.length === 1, { message: 'the second job' });
           expect(seen).toEqual(['req-chain']);
         } finally {
+          await worker.close();
+        }
+      });
+    });
+
+    describe('a long queue name cannot break the correlation chain', () => {
+      it('a 96-character queue name with a slash: the handler and its follow-up job carry the same VALID id', async () => {
+        const worker = h.makeJobs({ worker: true });
+        // Near the longest a queue name can be (96, so that `<name>.dlq` still fits in 100), with a slash:
+        // the plain `queue:jobId` would be 133 characters.
+        const first = `lms/${randomUUID().slice(0, 8)}${'a'.repeat(84)}`;
+        const second = `lms/${randomUUID().slice(0, 8)}${'b'.repeat(84)}`;
+        expect(first).toHaveLength(96);
+        const seen: { first?: string; second?: string; sent?: string | undefined } = {};
+        await worker.jobs.handle(first, async () => {
+          seen.first = requestContextStorage.getStore()!.correlationId;
+          seen.sent = currentCorrelationId();
+          await worker.jobs.send(second, { correlationId: currentCorrelationId() });
+        });
+        await worker.jobs.handle(second, () => {
+          seen.second = requestContextStorage.getStore()!.correlationId;
+          return Promise.resolve();
+        });
+        await worker.jobs.start();
+        try {
+          await worker.jobs.send(first, {});
+          await waitFor(() => seen.second !== undefined, { message: 'the follow-up job' });
+          expect(seen.first).toMatch(/^[A-Za-z0-9._:-]{1,128}$/);
+          expect(seen.sent, 'currentCorrelationId() refused the job id: the chain broke').toBe(
+            seen.first,
+          );
+          expect(seen.second, 'the follow-up job started a new id').toBe(seen.first);
+        } finally {
+          await worker.close();
+        }
+      });
+    });
+
+    describe('a succeeded job is counted even when its early settle throws', () => {
+      it('the batch-level settle still completes it, so it is a processed job', async () => {
+        const processed = vi.spyOn(QueueMetrics.prototype, 'recordProcessed');
+        const worker = h.makeJobs({ worker: true });
+        const queue = uniqueQueue('early');
+        // Break ONLY our early, fenced settle (a database hiccup); pg-boss's own batch settle is a
+        // different code path and still works.
+        const boss = (worker.jobs as unknown as { boss: { complete: () => Promise<never> } }).boss;
+        boss.complete = () => Promise.reject(new Error('connection reset'));
+        let ran = 0;
+        await worker.jobs.handle(queue, () => Promise.resolve(void ran++));
+        await worker.jobs.start();
+        try {
+          await worker.jobs.send(queue, {});
+          await waitFor(async () => (await jobRows(h.adminPool, queue))[0]?.state === 'completed', {
+            message: 'the batch settle to complete the job',
+          });
+          expect(ran).toBe(1);
+          expect(
+            h.logs.warn.some((m) => /Could not settle job .* early: connection reset/.test(m)),
+          ).toBe(true);
+          expect(
+            processed.mock.calls.filter(([q]) => q === queue),
+            'a job that succeeded and was completed was not counted',
+          ).toHaveLength(1);
+        } finally {
+          processed.mockRestore();
           await worker.close();
         }
       });

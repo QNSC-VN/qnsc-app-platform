@@ -1,6 +1,6 @@
 import { requestContextStorage } from '@quynhonsemiconductor/observability';
 import { describe, expect, it } from 'vitest';
-import { correlationIdFor, currentCorrelationId } from './correlation';
+import { correlationIdFor, currentCorrelationId, fallbackCorrelationId } from './correlation';
 
 const inRequest = <T>(correlationId: unknown, fn: () => T): T =>
   requestContextStorage.run({ correlationId } as never, fn);
@@ -65,4 +65,44 @@ describe('currentCorrelationId: for the sender', () => {
       expect(inRequest(id, currentCorrelationId)).toBeUndefined();
     },
   );
+});
+
+describe('the fallback id is itself a VALID correlation id (contract section 7)', () => {
+  const VALID = /^[A-Za-z0-9._:-]{1,128}$/;
+  const jobId = '0511712b-4d19-4a0d-94af-2889cf900c74';
+  const longQueue = `billing/${'x'.repeat(92)}`; // 100 characters, with a slash: the worst a queue name may be
+
+  it('is just queue:jobId for an ordinary queue name', () => {
+    expect(fallbackCorrelationId('mail.send', jobId)).toBe(`mail.send:${jobId}`);
+  });
+
+  it('a queue name with a slash and 100 characters still yields a valid id of at most 128 characters', () => {
+    expect(longQueue).toHaveLength(100);
+    const id = fallbackCorrelationId(longQueue, jobId);
+    expect(id).toMatch(VALID);
+    expect(id.length).toBeLessThanOrEqual(128);
+    // The part that makes it unique is never cut; the queue part gives way.
+    expect(id.endsWith(`:${jobId}`)).toBe(true);
+    expect(id.startsWith('billing.xxx')).toBe(true);
+  });
+
+  it('is what correlationIdFor returns for such a queue, and currentCorrelationId() accepts it (the chain does not break)', () => {
+    const id = correlationIdFor(longQueue, jobId, { orderId: 1 });
+    expect(id).toMatch(VALID);
+    expect(inRequest(id, currentCorrelationId)).toBe(id);
+  });
+
+  it.each(['a/b', 'a b', 'a"b', 'a\r\nb', 'héllo', 'a#b'])(
+    'replaces %j so the result is valid',
+    (queue) => {
+      expect(fallbackCorrelationId(queue, jobId)).toMatch(VALID);
+    },
+  );
+
+  it('two jobs on the same long queue still get different ids', () => {
+    const other = '9f2c1b00-0000-4000-8000-000000000001';
+    expect(fallbackCorrelationId(longQueue, jobId)).not.toBe(
+      fallbackCorrelationId(longQueue, other),
+    );
+  });
 });

@@ -155,7 +155,8 @@ await jobs.send('invoice.render', { orderId, correlationId: currentCorrelationId
   valid.
 - The handler runs under `payload.correlationId` **if it is a string of 1 to 128 characters from
   `[A-Za-z0-9._:-]`**; otherwise (absent, not a string, a space, a quote, CR/LF, too long) under
-  `queue:jobId`, the job's own id, prefixed with the queue. An invalid id is dropped, never logged: it is
+  `queue:jobId` made valid (characters outside the set become `.`, and the queue part is truncated so the
+  whole id fits in 128; the job id is never cut), the job's own id, prefixed with the queue. An invalid id is dropped, never logged: it is
   untrusted input, and CR/LF in a log line forges records.
 
 ## `handle` and the queue configuration
@@ -354,7 +355,8 @@ Not options (ADR 0001):
 ## Metrics
 
 On the platform-contract names, through `observability`'s `QueueMetrics`: **`queue.processed`**,
-**`queue.failures`** (per queue, as each handler returns) and **`queue.lag_seconds`** (the age of the
+**`queue.failures`** (per queue, counted only when the job's fenced settle lands: a handler that finishes
+after its claim was lost counts for neither) and **`queue.lag_seconds`** (the age of the
 oldest job that is ready to run, read at most every 10 s by a worker; `0` when nothing is ready). Handler
 logs carry the correlation id of the request that caused the job, or `queue:jobId` (see below).
 
@@ -377,7 +379,8 @@ await drainQueue(jobs, 'invoice.render'); // every READY job, through the real p
 
 `runInline` needs no database and runs the registered handler once with a fresh id, `attempt: 1` and a
 signal. `drainQueue` needs `jobs.start()` and a database, and runs a **real pg-boss worker** on the queue
-until nothing is ready or active: the handler gets a real `AbortSignal`, a failure is stored as a worker
+until nothing is ready or active (it **rejects if the queue is still not quiet after 60 seconds**: a handler
+that never returns, or one that keeps enqueuing work for its own queue): the handler gets a real `AbortSignal`, a failure is stored as a worker
 stores it, a `PermanentJobError` dead-letters at once, and retention and retries behave as in
 production. `ROLE` does not matter for either. Jobs scheduled for later (`startAfter`, a retry's
 backoff) are not ready and are left alone. It rejects with the first handler error, after the batch has
