@@ -20,6 +20,7 @@ export const MAIL_QUEUE = 'mail.send';
  * other process (an API pod that only enqueues, identity's auth mail) defines the queue with it,
  * so they cannot disagree — `platform-jobs` throws when one queue is defined twice differently.
  *
+ * - **Redrive.** `canRedrive` forbids redriving `auth.*` dead letters ({@link mailCanRedrive}).
  * - **Retention.** Auth emails carry bearer links (verification, password reset) in clear in the
  *   job payload, so a completed job is deleted at once, and a failed or dead-lettered one is kept
  *   at most 24 h (ADR 0001 decision 3; identity ADR 0002 decision 4).
@@ -39,6 +40,10 @@ export const MAIL_QUEUE_CONFIG = Object.freeze({
   retryDelaySeconds: 10,
   retryDelayMaxSeconds: 900,
   retention: Object.freeze({ completed: 'immediate', failed: 86_400, deadLetter: 86_400 }),
+  // Authentication mail is never redriven (see {@link mailCanRedrive}). Not stored in the database:
+  // every process that may redrive defines the queue from this object, as the enqueue-only
+  // `createMailQueue` does, and `platform-jobs` refuses two definitions that disagree on having one.
+  canRedrive: mailCanRedrive,
 } satisfies QueueConfig);
 
 /**
@@ -102,6 +107,23 @@ export const MAIL_PRIORITY = Object.freeze({ auth: 10, default: 0 });
 
 export function priorityFor(category: string): number {
   return category.startsWith('auth.') ? MAIL_PRIORITY.auth : MAIL_PRIORITY.default;
+}
+
+/**
+ * The rule `platform-jobs`' `redrive` applies to `mail.send` dead letters: **authentication mail is
+ * NEVER redriven.** Its link has expired by the time anyone looks, the user asks for a new one, and
+ * redriving a stale reset or verification link only emails someone a dead link (and, for a reset,
+ * leaves a bearer token in a mailbox for nothing). Enforced here, in the queue's one definition,
+ * rather than left to an operator who remembers the README.
+ *
+ * Anything that is not recognisably a non-auth message is NOT redrived either: a payload without a
+ * string `category` is not mail this package could have enqueued. The check is on the lower-cased
+ * category, so a differently-cased `Auth.Reset` is still auth.
+ */
+export function mailCanRedrive(data: unknown): boolean {
+  const category = (data as { category?: unknown } | null | undefined)?.category;
+  if (typeof category !== 'string' || category.length === 0) return false;
+  return !category.toLowerCase().startsWith('auth.');
 }
 
 /** Counters for what the queue did. All labels are bounded: a category and a closed error code. */

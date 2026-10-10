@@ -15,6 +15,7 @@ import {
   MAIL_PRIORITY,
   MAIL_QUEUE,
   MAIL_QUEUE_CONFIG,
+  mailCanRedrive,
   MAIL_SENT_TTL_SECONDS,
   createMailHandler,
   createMailQueue,
@@ -78,6 +79,55 @@ const rejection = async (promise: Promise<unknown>): Promise<unknown> => {
   }
   return undefined;
 };
+
+describe('mailCanRedrive: authentication mail is never redriven', () => {
+  it.each([
+    'auth.reset-password',
+    'auth.verify-email',
+    'auth.otp',
+    'auth.',
+    'AUTH.reset',
+    'Auth.Verify',
+  ])('forbids %s', (category) => {
+    expect(mailCanRedrive({ category, to: ['a@example.test'] })).toBe(false);
+  });
+
+  it.each([
+    'digest.daily',
+    'notification.assigned',
+    'invoice.sent',
+    'authz.changed',
+    'author.posted',
+    'x',
+  ])('allows %s (only the auth. namespace is forbidden, not a prefix of letters)', (category) => {
+    expect(mailCanRedrive({ category })).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    null,
+    'text',
+    7,
+    [],
+    {},
+    { category: '' },
+    { category: 7 },
+    { category: null },
+  ])('does not redrive what is not recognisably non-auth mail: %j', (data) => {
+    expect(mailCanRedrive(data)).toBe(false);
+  });
+
+  it('is part of the queue definition, so the worker and every enqueue-only process share it', () => {
+    expect(MAIL_QUEUE_CONFIG.canRedrive).toBe(mailCanRedrive);
+    expect(MAIL_HANDLE_OPTIONS.canRedrive).toBe(mailCanRedrive);
+  });
+
+  it('agrees with the priority rule on what counts as auth (lower-case categories)', () => {
+    for (const category of ['auth.reset', 'digest.daily', 'authz.x']) {
+      expect(mailCanRedrive({ category })).toBe(priorityFor(category) === MAIL_PRIORITY.default);
+    }
+  });
+});
 
 describe('the mail.send queue configuration', () => {
   it('is ONE definition: the handler options are it, plus only the worker-side settings', () => {

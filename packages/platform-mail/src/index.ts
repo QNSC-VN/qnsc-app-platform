@@ -50,6 +50,7 @@ export {
   createMailHandler,
   createMailQueue,
   minRetryWindowSeconds,
+  mailCanRedrive,
   priorityFor,
   registerMailJobs,
   type MailHandlerOptions,

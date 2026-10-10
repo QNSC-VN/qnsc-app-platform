@@ -155,6 +155,61 @@ describe.skipIf(!dockerOn)('platform-mail on platform-jobs and PostgreSQL', () =
   });
 
   describe('failures', () => {
+    it('redrive: an unfiltered redrive of mail.send.dlq moves the digest and LEAVES the auth.reset copy', async () => {
+      const worker = await startWorker();
+      worker.sender.failNext({ kind: 'forbidden' });
+      worker.sender.failNext({ kind: 'forbidden' });
+      await worker.queue.enqueue(
+        sampleMessage({ category: 'auth.reset-password', idempotencyKey: 'reset:u1' }),
+      );
+      await worker.queue.enqueue(
+        sampleMessage({ category: 'digest.daily', idempotencyKey: 'digest:u1' }),
+      );
+      await drain(worker.jobs).catch(() => undefined);
+      expect(await jobRows(env.adminPool, DLQ)).toHaveLength(2);
+      expect(worker.sender.sent).toHaveLength(0);
+
+      // The mailbox permission is fixed; an operator redrives the whole dead-letter queue.
+      expect(await worker.jobs.redrive(DLQ)).toEqual({ moved: 1, skipped: 1 });
+
+      // Only the digest came back; the reset link stays dead (and expires with its copy in 24 h).
+      const dead = await jobRows(env.adminPool, DLQ);
+      expect(dead).toHaveLength(1);
+      expect((dead[0]!.data as { category: string }).category).toBe('auth.reset-password');
+      await drain(worker.jobs);
+      expect(worker.sender.sent.map((m) => m.category)).toEqual(['digest.daily']);
+
+      // Asking for the auth copy by id does not get past the rule either.
+      expect(await worker.jobs.redrive(DLQ, { filter: { ids: [dead[0]!.id] } })).toEqual({
+        moved: 0,
+        skipped: 1,
+      });
+      expect(await jobRows(env.adminPool, DLQ)).toHaveLength(1);
+      expect(worker.sender.sent).toHaveLength(1);
+    });
+
+    it('redrive: an enqueue-only process, defined with createMailQueue, applies the same rule', async () => {
+      const worker = await startWorker();
+      worker.sender.failNext({ kind: 'forbidden' });
+      worker.sender.failNext({ kind: 'forbidden' });
+      await worker.queue.enqueue(
+        sampleMessage({ category: 'auth.verify-email', idempotencyKey: 'verify:u2' }),
+      );
+      await worker.queue.enqueue(
+        sampleMessage({ category: 'notification.assigned', idempotencyKey: 'note:u2' }),
+      );
+      await drain(worker.jobs).catch(() => undefined);
+
+      const operator = env.makeJobs(); // ROLE unset: not a worker, only defines the queue
+      open.push(operator);
+      await createMailQueue(operator.jobs);
+      await operator.jobs.start();
+      expect(await operator.jobs.redrive(DLQ)).toEqual({ moved: 1, skipped: 1 });
+      expect(
+        (await jobRows(env.adminPool, DLQ)).map((r) => (r.data as { category: string }).category),
+      ).toEqual(['auth.verify-email']);
+    });
+
     it('a permanent error ⇒ dead-lettered ONCE, with no retry', async () => {
       const worker = await startWorker();
       worker.sender.failNext({ kind: 'forbidden' });
@@ -271,6 +326,7 @@ describe.skipIf(!dockerOn)('platform-mail on platform-jobs and PostgreSQL', () =
       await drain(worker.jobs);
 
       expect(seen).toBe('req-01HZX:abc.1');
-    });
+      // 15 s, not vitest's 5: it starts a real worker, and took 5.4 s when the suites ran in parallel.
+    }, 15_000);
   });
 });
